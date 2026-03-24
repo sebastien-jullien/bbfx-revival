@@ -1,0 +1,32 @@
+# Build artefacts
+build/
+*.o
+*.obj
+*.lib
+*.a
+*.so
+*.dll
+*.exe
+
+# vcpkg installed packages (can be rebuilt from vcpkg.json)
+vcpkg_installed/
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# IDE
+.vs/
+.vscode/settings.json
+*.user
+*.suo
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
