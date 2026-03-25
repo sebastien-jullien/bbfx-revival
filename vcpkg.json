@@ -1,6 +1,7 @@
 {
   "name": "bbfx",
   "version": "2.0.0",
+  "builtin-baseline": "ff8f729804f07747ee5dae7d40a4a885066f9204",
   "dependencies": [
     {
       "name": "ogre",
@@ -8,7 +9,7 @@
       "features": ["overlay"]
     },
     { "name": "sol2",         "version>=": "3.3.0" },
-    { "name": "lua",          "version>=": "5.4.0" },
+    { "name": "lua",          "version>=": "5.4.7" },
     { "name": "sdl3"                               },
     { "name": "boost-graph"                        },
     { "name": "boost-utility"                      }
