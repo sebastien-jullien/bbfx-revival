@@ -1,21 +1,26 @@
 #pragma once
 
 #include "SoftwareVertexShader.h"
-#include <OgreController.h>
 
 namespace bbfx {
 
+using namespace Ogre;
+
 class PerlinVertexShader : public SoftwareVertexShader {
 public:
-    explicit PerlinVertexShader(const string& meshName);
+    PerlinVertexShader(const String& meshName, const String& cloneName);
     virtual ~PerlinVertexShader();
-    void renderOneFrame(float dt) override;
+    void renderOneFrame(Real dt) override;
 
 protected:
-    float mTime = 0.0f;
-    float mDisplacement = 0.1f;
-    float mDensity = 4.0f;
-    float mTimeDensity = 2.0f;
+    float time = 0.0f;
+    float displacement = 0.1f;
+    float density = 50.0f;
+    float timeDensity = 5.0f;
+
+    float* _clearNormals(VertexData* data);
+    void _normalizeNormals(VertexData* data, float* normals);
+    void _applyNoise(VertexData* data, const CpuMeshData& cpuData, float* normals);
 };
 
 } // namespace bbfx

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 2.0.0 LANGUAGES CXX)
+project(BBFx VERSION 2.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,8 +10,14 @@ if(MSVC)
     add_compile_options(/bigobj)
 endif()
 
-# ── ogre-lua (sibling directory) ──────────────────────────────────────────────
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ogre-lua ${CMAKE_CURRENT_BINARY_DIR}/ogre-lua EXCLUDE_FROM_ALL)
+# ── ogre-lua dependency (fetched from GitHub) ────────────────────────────────
+# Override with: cmake -DFETCHCONTENT_SOURCE_DIR_OGRE-LUA=/path/to/local/ogre-lua
+include(FetchContent)
+FetchContent_Declare(ogre-lua
+    GIT_REPOSITORY https://github.com/sebastien-jullien/ogre-lua.git
+    GIT_TAG        v0.1.0-alpha
+)
+FetchContent_MakeAvailable(ogre-lua)
 
 # ── Dépendances via vcpkg ──────────────────────────────────────────────────────
 find_package(OGRE  REQUIRED COMPONENTS Overlay)
@@ -45,6 +51,7 @@ target_include_directories(bbfx-core PUBLIC
 target_link_libraries(bbfx-core PUBLIC
     OgreMain
     OgreOverlay
+    OgreRTShaderSystem
     SDL3::SDL3
     sol2::sol2
     ${LUA_LIBRARIES}
@@ -82,15 +89,40 @@ if(WIN32)
     endif()
 endif()
 
+# ── Copy scripts and resources next to executable ────────────────────────────
+add_custom_command(TARGET bbfx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/lua"
+        "$<TARGET_FILE_DIR:bbfx>/lua"
+    COMMENT "Copying Lua scripts"
+)
+add_custom_command(TARGET bbfx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "$<TARGET_FILE_DIR:bbfx>/tests"
+    COMMENT "Copying test scripts"
+)
+add_custom_command(TARGET bbfx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources.cfg"
+        "$<TARGET_FILE_DIR:bbfx>/resources.cfg"
+    COMMENT "Copying resources.cfg"
+)
+add_custom_command(TARGET bbfx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        "$<TARGET_FILE_DIR:bbfx>/resources"
+    COMMENT "Copying OGRE resources (models, materials, textures)"
+)
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 enable_testing()
 
-# Headless regression test (uses ogre-lua test_runner)
 add_test(
     NAME test_regression
     COMMAND $<TARGET_FILE:test_runner> --headless
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/lua/test_regression.lua
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        tests/lua/test_regression.lua
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:test_runner>"
 )
 
 # ── Informations de build ──────────────────────────────────────────────────────

@@ -3,6 +3,8 @@
 #include "../bbfx.h"
 #include <OgreTexture.h>
 #include <OgreTextureManager.h>
+#include <OgreHardwarePixelBuffer.h>
+#include <OgrePixelFormat.h>
 
 namespace bbfx {
 
