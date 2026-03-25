@@ -27,6 +27,7 @@ public:
 
 protected:
     void loadOgrePlugins();
+    void loadResources();
     void fillWindowParams(Ogre::NameValuePairList& params);
 
     volatile bool mStopQueued = false;

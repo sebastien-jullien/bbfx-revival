@@ -2,7 +2,41 @@
 #include <OgreOverlaySystem.h>
 #include <OgreViewport.h>
 #include <OgreCamera.h>
+#include <OgreConfigFile.h>
+#include <OgreResourceGroupManager.h>
+#include <OgreRTShaderSystem.h>
+#include <OgreMaterialManager.h>
+#include <OgreTechnique.h>
 #include <vector>
+
+namespace {
+// RTSS material listener: auto-generates shaders for fixed-function materials
+class ShaderGeneratorResolver : public Ogre::MaterialManager::Listener {
+public:
+    explicit ShaderGeneratorResolver(Ogre::RTShader::ShaderGenerator* sg) : mShaderGen(sg) {}
+
+    Ogre::Technique* handleSchemeNotFound(unsigned short, const Ogre::String& schemeName,
+        Ogre::Material* mat, unsigned short, const Ogre::Renderable*) override
+    {
+        if (schemeName != Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME)
+            return nullptr;
+        // Generate RTSS shaders for this material
+        bool success = mShaderGen->createShaderBasedTechnique(
+            *mat, Ogre::MaterialManager::DEFAULT_SCHEME_NAME, schemeName);
+        if (success) {
+            mShaderGen->validateMaterial(schemeName, mat->getName(), mat->getGroup());
+            if (mat->getTechnique(0)->getPass(0)->hasVertexProgram()) {
+                return mat->getTechnique(0);
+            }
+        }
+        return nullptr;
+    }
+private:
+    Ogre::RTShader::ShaderGenerator* mShaderGen;
+};
+
+static std::unique_ptr<ShaderGeneratorResolver> sShaderResolver;
+} // anon namespace
 
 namespace bbfx {
 
@@ -47,11 +81,24 @@ Engine::Engine(sol::state& lua)
     auto* overlaySystem = new Ogre::OverlaySystem();
     mSceneManager->addRenderQueueListener(overlaySystem);
 
+    // Initialize RTSS (auto-generates shaders for fixed-function materials)
+    if (Ogre::RTShader::ShaderGenerator::initialize()) {
+        auto* shaderGen = Ogre::RTShader::ShaderGenerator::getSingletonPtr();
+        shaderGen->addSceneManager(mSceneManager);
+        // Install listener: when OGRE encounters a material without shaders,
+        // the RTSS generates vertex+fragment shaders automatically
+        sShaderResolver = std::make_unique<ShaderGeneratorResolver>(shaderGen);
+        Ogre::MaterialManager::getSingleton().addListener(sShaderResolver.get());
+    }
+
     Ogre::Camera* cam = mSceneManager->createCamera("MainCamera");
     cam->setNearClipDistance(0.1f);
     cam->setAutoAspectRatio(true);
     auto* vp = mRenderWindow->addViewport(cam);
     vp->setBackgroundColour(Ogre::ColourValue(0.2f, 0.2f, 0.4f));
+
+    // Load resources (meshes, materials, textures)
+    loadResources();
 
     // Input manager
     mInputManager = new InputManager();
@@ -82,6 +129,20 @@ void Engine::loadOgrePlugins() {
     for (const auto& plugin : std::vector<std::string>(BBFX_OGRE_PLUGINS)) {
         mRoot->loadPlugin(plugin);
     }
+}
+
+void Engine::loadResources() {
+    Ogre::ConfigFile cf;
+    cf.load("resources.cfg");
+
+    for (const auto& sec : cf.getSettingsBySection()) {
+        for (const auto& setting : sec.second) {
+            Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
+                setting.second, setting.first, sec.first);
+        }
+    }
+
+    Ogre::ResourceGroupManager::getSingleton().initialiseAllResourceGroups();
 }
 
 void Engine::fillWindowParams(Ogre::NameValuePairList& params) {

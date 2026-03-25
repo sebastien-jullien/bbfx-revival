@@ -1,0 +1,31 @@
+material bbfx/test
+{
+	technique
+	{
+		pass
+		{
+			ambient 1 1 1
+			diffuse vertexcolour
+			emissive vertexcolour
+
+			texture_unit
+			{
+				texture test.png
+			}
+		}
+	}
+}
+
+material bbfx/blitter
+{
+	technique
+	{
+		pass
+		{
+			texture_unit
+			{
+				texture TextureBlitter
+			}
+		}
+	}
+}
