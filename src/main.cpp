@@ -6,9 +6,15 @@
 
 #include <sol/sol.hpp>
 #include <iostream>
+#include <filesystem>
 
 int main(int argc, char* argv[]) {
     try {
+        // Set working directory to executable location (so resources.cfg is found)
+        auto exePath = std::filesystem::path(argv[0]).parent_path();
+        if (!exePath.empty()) {
+            std::filesystem::current_path(exePath);
+        }
         sol::state lua;
         lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
                            sol::lib::table, sol::lib::io, sol::lib::os,
@@ -24,6 +30,13 @@ int main(int argc, char* argv[]) {
         bbfx::Animator animator;
         bbfx::RootTimeNode timeNode;
         bbfx::Engine engine(lua);
+
+        // Pass command-line arguments to Lua (standard arg table)
+        sol::table luaArg = lua.create_table();
+        for (int i = 0; i < argc; i++) {
+            luaArg[i] = std::string(argv[i]);
+        }
+        lua["arg"] = luaArg;
 
         // Run Lua script if provided
         if (argc > 1) {

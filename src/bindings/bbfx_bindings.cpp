@@ -3,6 +3,8 @@
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
 #include "../input/InputManager.h"
+#include "../fx/PerlinVertexShader.h"
+#include "../fx/TextureBlitter.h"
 
 namespace bbfx {
 
@@ -62,13 +64,43 @@ void register_bbfx_bindings(sol::state& lua) {
     );
     bbfx["Animator"] = lua["bbfx_Animator"];
 
+    // ── I-055: AnimationPort bindings (must be before derived node types) ─
+    lua.new_usertype<AnimationPort>("bbfx_AnimationPort",
+        sol::no_constructor,
+        "getName", &AnimationPort::getName,
+        "getFullName", &AnimationPort::getFullName,
+        "getValue", &AnimationPort::getValue,
+        "setValue", &AnimationPort::setValue,
+        "getNode", &AnimationPort::getNode
+    );
+    bbfx["AnimationPort"] = lua["bbfx_AnimationPort"];
+
+    // AnimationNode base (must be registered before derived types for sol::bases)
+    lua.new_usertype<AnimationNode>("bbfx_AnimationNode",
+        sol::no_constructor,
+        "getName", &AnimationNode::getName,
+        "update", &AnimationNode::update,
+        "getOutput", [](AnimationNode& self, const std::string& name) -> AnimationPort* {
+            auto& outputs = self.getOutputs();
+            auto it = outputs.find(name);
+            return (it != outputs.end()) ? it->second : nullptr;
+        },
+        "getInput", [](AnimationNode& self, const std::string& name) -> AnimationPort* {
+            auto& inputs = self.getInputs();
+            auto it = inputs.find(name);
+            return (it != inputs.end()) ? it->second : nullptr;
+        }
+    );
+    bbfx["AnimationNode"] = lua["bbfx_AnimationNode"];
+
     // ── I-030: Animation node bindings ──────────────────────────────────
     lua.new_usertype<RootTimeNode>("bbfx_RootTimeNode",
         sol::call_constructor, sol::constructors<RootTimeNode()>(),
         "instance", []() -> RootTimeNode* { return RootTimeNode::instance(); },
         "reset", &RootTimeNode::reset,
         "getTotalTime", &RootTimeNode::getTotalTime,
-        "update", &RootTimeNode::update
+        "update", &RootTimeNode::update,
+        sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["RootTimeNode"] = lua["bbfx_RootTimeNode"];
 
@@ -98,14 +130,6 @@ void register_bbfx_bindings(sol::state& lua) {
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["AnimationStateNode"] = lua["bbfx_AnimationStateNode"];
-
-    // AnimationNode base (for receiving in Animator::addNode)
-    lua.new_usertype<AnimationNode>("bbfx_AnimationNode",
-        sol::no_constructor,
-        "getName", &AnimationNode::getName,
-        "update", &AnimationNode::update
-    );
-    bbfx["AnimationNode"] = lua["bbfx_AnimationNode"];
 
     // ── I-033 to I-036: Input bindings ──────────────────────────────────
     lua.new_usertype<KeyboardManager>("bbfx_KeyboardManager",
@@ -142,6 +166,27 @@ void register_bbfx_bindings(sol::state& lua) {
     bbfx["KeyboardManager"] = lua["bbfx_KeyboardManager"];
     bbfx["MouseManager"] = lua["bbfx_MouseManager"];
     bbfx["JoystickManager"] = lua["bbfx_JoystickManager"];
+
+    // ── I-065: FX Lua bindings ──────────────────────────────────────────
+    lua.new_usertype<PerlinVertexShader>("bbfx_PerlinVertexShader",
+        sol::call_constructor, sol::factories(
+            [](const std::string& meshName, const std::string& cloneName) {
+                return new PerlinVertexShader(meshName, cloneName);
+            }
+        ),
+        "enable", &PerlinVertexShader::enable,
+        "disable", &PerlinVertexShader::disable,
+        "renderOneFrame", &PerlinVertexShader::renderOneFrame
+    );
+    bbfx["PerlinVertexShader"] = lua["bbfx_PerlinVertexShader"];
+
+    lua.new_usertype<TextureBlitter>("bbfx_TextureBlitter",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name) { return new TextureBlitter(name); }
+        ),
+        "blit", &TextureBlitter::blit
+    );
+    bbfx["TextureBlitter"] = lua["bbfx_TextureBlitter"];
 }
 
 } // namespace bbfx

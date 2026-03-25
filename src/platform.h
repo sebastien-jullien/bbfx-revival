@@ -19,17 +19,21 @@
 
 #if defined(_WIN32)
   #define BBFX_WIN32
-  #define BBFX_OGRE_RENDERER "Direct3D11 Rendering Subsystem"
-  #define BBFX_OGRE_PLUGINS  {"RenderSystem_Direct3D11", \
+  #define BBFX_OGRE_RENDERER "OpenGL Rendering Subsystem"
+  #define BBFX_OGRE_PLUGINS  {"RenderSystem_GL", \
+                               "RenderSystem_Direct3D11", \
+                               "RenderSystem_GL3Plus", \
                                "Plugin_OctreeSceneManager", \
-                               "Plugin_ParticleFX"}
+                               "Plugin_ParticleFX", \
+                               "Codec_STBI"}
 #else
   #define BBFX_LINUX
   #define BBFX_OGRE_RENDERER "Vulkan Rendering Subsystem"
   #define BBFX_OGRE_PLUGINS  {"RenderSystem_Vulkan", \
                                "RenderSystem_GL3Plus", \
                                "Plugin_OctreeSceneManager", \
-                               "Plugin_ParticleFX"}
+                               "Plugin_ParticleFX", \
+                               "Codec_STBI"}
 #endif
 
 // ── Native window handle retrieval ──────────────────────────────────────────
