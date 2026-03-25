@@ -1,0 +1,158 @@
+#include "Animator.h"
+#include <boost/graph/breadth_first_search.hpp>
+
+namespace bbfx {
+
+// ── AnimationGraph ──────────────────────────────────────────────────────────
+
+AnimationGraph::AnimationGraph() = default;
+AnimationGraph::~AnimationGraph() = default;
+
+// ── Animator ────────────────────────────────────────────────────────────────
+
+Animator* Animator::sInstance = nullptr;
+
+Animator::Animator() {
+    assert(!sInstance);
+    sInstance = this;
+}
+
+Animator::~Animator() {
+    sInstance = nullptr;
+}
+
+Animator* Animator::instance() {
+    return sInstance;
+}
+
+void Animator::notifyUpdate(AnimationNode* node) {
+    Lock guard(mMutex);
+    enqueueOutputs(node, mPortQueue);
+}
+
+void Animator::add(AnimationPort* port) {
+    Lock guard(mMutex);
+    if (mVertexMap.find(port) == mVertexMap.end()) {
+        Vertex v = boost::add_vertex(mGraph);
+        mVertexMap[port] = v;
+        mPortMap[v] = port;
+    }
+}
+
+void Animator::remove(AnimationPort* port) {
+    Lock guard(mMutex);
+    auto it = mVertexMap.find(port);
+    if (it != mVertexMap.end()) {
+        boost::clear_vertex(it->second, mGraph);
+        boost::remove_vertex(it->second, mGraph);
+        mPortMap.erase(it->second);
+        mVertexMap.erase(it);
+    }
+}
+
+bool Animator::contains(AnimationPort* port) const {
+    return mVertexMap.find(port) != mVertexMap.end();
+}
+
+void Animator::link(AnimationPort* s, AnimationPort* t) {
+    Lock guard(mMutex);
+    add(s);
+    add(t);
+    boost::add_edge(mVertexMap[s], mVertexMap[t], mGraph);
+}
+
+void Animator::unlink(AnimationPort* s, AnimationPort* t) {
+    Lock guard(mMutex);
+    auto si = mVertexMap.find(s);
+    auto ti = mVertexMap.find(t);
+    if (si != mVertexMap.end() && ti != mVertexMap.end()) {
+        boost::remove_edge(si->second, ti->second, mGraph);
+    }
+}
+
+void Animator::schedule(const Operation& op, TimeStamp time) {
+    Lock guard(mMutex);
+    mPreOpQueue.push(OperationEvent(op, time));
+}
+
+void Animator::renderOneFrame() {
+    Lock guard(mMutex);
+    ++mFrame;
+
+    RootTimeNode* time = RootTimeNode::instance();
+    if (time) {
+        mTime = time->getTotalTime();
+    }
+
+    executePendingPreOps();
+    propagateFreshValues();
+    executePendingPostOps();
+}
+
+void Animator::executePendingPreOps() {
+    while (!mPreOpQueue.empty() && mPreOpQueue.top().time <= mTime) {
+        auto event = mPreOpQueue.top();
+        mPreOpQueue.pop();
+        executePreOp(event.action, mTime - event.time);
+    }
+}
+
+void Animator::executePreOp(const Operation& op, TimeStamp /*delay*/) {
+    if (op.link) {
+        link(op.from, op.to);
+    } else {
+        unlink(op.from, op.to);
+    }
+}
+
+void Animator::enqueueOutputs(AnimationNode* node, PortQueue& queue) {
+    for (auto& [name, port] : node->getOutputs()) {
+        queue.push_back(port);
+    }
+}
+
+void Animator::propagateFreshValues() {
+    while (!mPortQueue.empty()) {
+        AnimationPort* port = mPortQueue.front();
+        mPortQueue.pop_front();
+
+        auto vi = mVertexMap.find(port);
+        if (vi == mVertexMap.end()) continue;
+
+        // BFS: propagate to adjacent ports
+        AdjacencyIterator ai, ai_end;
+        for (boost::tie(ai, ai_end) = boost::adjacent_vertices(vi->second, mGraph);
+             ai != ai_end; ++ai) {
+            auto pi = mPortMap.find(*ai);
+            if (pi != mPortMap.end()) {
+                AnimationPort* target = pi->second;
+                target->setValue(port->getValue());
+
+                // If target port's node has all inputs fresh, call update
+                AnimationNode* targetNode = target->getNode();
+                if (targetNode) {
+                    targetNode->update();
+                    enqueueOutputs(targetNode, mPortQueue);
+                }
+            }
+        }
+    }
+}
+
+void Animator::executePendingPostOps() {
+    while (!mPostOpQueue.empty()) {
+        Operation op = mPostOpQueue.front();
+        mPostOpQueue.pop_front();
+        executePostOp(op);
+    }
+}
+
+void Animator::executePostOp(const Operation& op) {
+    if (op.link) {
+        link(op.from, op.to);
+    } else {
+        unlink(op.from, op.to);
+    }
+}
+
+} // namespace bbfx

@@ -19,6 +19,10 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
+# Bundled tools (too large for git)
+extern/cmake/
+extern/vcpkg/
+
 # IDE
 .vs/
 .vscode/settings.json
