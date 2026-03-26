@@ -81,9 +81,27 @@ function help()
     print("  watch('script.lua')        — add to hot reload watch list")
     print("  unwatch('script.lua')      — remove from watch list")
     print("  watchlist()                — show watched files")
+    print("  audio()                    — show audio capture status")
+    print("  hud()                      — toggle HUD overlay")
     print("  help()                     — show this help")
     print("  quit()                     — stop the engine")
     print("  <any Lua expression>       — evaluate and print result")
+end
+
+function audio()
+    if not _G._bbfx_audio then
+        print("[audio] No audio instance active. Use Audio:start() first.")
+        return
+    end
+    local a = _G._bbfx_audio
+    print("=== Audio Status ===")
+    print("  Running: " .. tostring(a:isRunning()))
+    print("  RMS:     " .. string.format("%.4f", a:getRMS()))
+    print("  Peak:    " .. string.format("%.4f", a:getPeak()))
+    print("  BPM:     " .. string.format("%.1f", a:getBPM()))
+    print("  Low:     " .. string.format("%.4f", a:getBand("low")))
+    print("  Mid:     " .. string.format("%.4f", a:getBand("mid")))
+    print("  High:    " .. string.format("%.4f", a:getBand("high")))
 end
 
 function quit()

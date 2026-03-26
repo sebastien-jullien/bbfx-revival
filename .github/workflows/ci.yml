@@ -28,7 +28,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "c82f74667287d3dc386bce81e44964370c91a289"
+          vcpkgGitCommitId: "ff8f729804f07747ee5dae7d40a4a885066f9204"
 
       - name: Export GitHub Actions cache env
         uses: actions/github-script@v7
@@ -40,7 +40,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+          sudo apt-get install -y ninja-build autoconf autoconf-archive automake libtool libgl-dev libglu1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev
 
       - name: Configure
         run: cmake --preset linux-release
@@ -72,7 +72,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "c82f74667287d3dc386bce81e44964370c91a289"
+          vcpkgGitCommitId: "ff8f729804f07747ee5dae7d40a4a885066f9204"
 
       - name: Export GitHub Actions cache env
         uses: actions/github-script@v7

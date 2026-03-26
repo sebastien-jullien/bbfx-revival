@@ -2,6 +2,27 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.7.0] - 2026-03-26
+
+### Added
+- **Audio capture** (`src/audio/AudioCapture.h/.cpp`): SDL3_audio microphone capture, mono 44100Hz float32, ring buffer thread-safe, graceful fallback if no mic
+- **AudioCaptureNode**: AnimationNode wrapping AudioCapture, `samples_ready` output port, polls ring buffer each frame
+- **FFT analysis** (`src/audio/AudioAnalyzer.h/.cpp`): Radix-2 Cooley-Tukey FFT (header-only `kiss_fft.h`), Hann window, 8 frequency bands + RMS + peak as output ports
+- **Beat detection** (`src/audio/BeatDetector.h/.cpp`): onset detection (energy > moving average × threshold), BPM estimation via beat interval averaging, `beat` trigger + `bpm` output ports, `sensitivity` input, 200ms anti-bounce
+- **BandSplitNode** (`lua/audio.lua`): LuaAnimationNode aggregating band_0..2 → low, band_3..5 → mid, band_6..7 → high with exponential smoothing
+- **Audio Lua wrapper** (`lua/audio.lua`): `Audio:start()` one-liner creates full chain (Capture → Analyzer → BeatDetector + BandSplit), `getRMS/getPeak/getBPM/getBand` accessors
+- **OGRE Overlay bindings**: OverlayManager, Overlay, OverlayContainer, TextAreaOverlayElement exposed via sol2 for in-engine HUD
+- **Audio HUD** (`lua/hud.lua`): real-time overlay showing BPM, RMS, low/mid/high levels, toggle via `hud()` REPL command
+- **Sync auto-mode** (`lua/sync.lua`): `Sync:setAutoMode(audio)` — sequencer follows auto-detected BPM
+- **REPL `audio()` command**: displays capture status, BPM, RMS, band levels
+- **Demo audio** (`lua/demos/demo_audio.lua`): Perlin geosphere reactive to audio — RMS modulates LFO amplitude, beat triggers camera shake, HUD active
+
+### Technical
+- FFT: minimal Radix-2 Cooley-Tukey implementation in `kiss_fft.h` (~60 lines, header-only, public domain)
+- SDL3_audio callback runs in separate thread, communicates via `std::mutex` + ring buffer — no Lua in callback
+- Beat detection: energy-based onset with moving average (43 frames), BPM via rolling interval median, clamped 40-300 BPM
+- vcpkg baseline updated for SDL3 compatibility
+
 ## [2.6.0] - 2026-03-26
 
 ### Added
