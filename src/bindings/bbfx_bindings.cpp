@@ -1,9 +1,12 @@
 #include "bbfx_bindings.h"
+#include <filesystem>
+#include <chrono>
 #include "../core/Engine.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
 #include "../core/StatsOverlay.h"
 #include "../input/InputManager.h"
+#include "../input/StdinReader.h"
 #include "../fx/PerlinVertexShader.h"
 #include "../fx/PerlinFxNode.h"
 #include "../fx/TextureBlitter.h"
@@ -14,6 +17,7 @@
 #include "../video/ReversableClip.h"
 #include "../video/TextureCrossfader.h"
 #include "../video/TheoraClipNode.h"
+#include "../network/TcpServer.h"
 
 namespace bbfx {
 
@@ -57,6 +61,7 @@ void register_bbfx_bindings(sol::state& lua) {
                 self.add(port);
             }
             node->setListener(&self);
+            self.registerNode(node);
         },
         "addPort", [](Animator& self, AnimationNode* nodeA, const std::string& outputName,
                        AnimationNode* nodeB, const std::string& inputName) {
@@ -69,6 +74,18 @@ void register_bbfx_bindings(sol::state& lua) {
             }
         },
         "removeNode", &Animator::removeNode,
+        "getNodeNames", [](Animator& self) -> std::vector<std::string> {
+            // Collect unique node names from all registered ports
+            std::set<std::string> names;
+            // Iterate through the vertex/port maps via the graph
+            // Since we can't access protected members, we collect from known nodes
+            // This uses the port map: each port belongs to a node
+            // We'll expose a helper that tracks registered nodes
+            return self.getRegisteredNodeNames();
+        },
+        "getNodeByName", [](Animator& self, const std::string& name) -> AnimationNode* {
+            return self.getRegisteredNode(name);
+        },
         "exportDOT", &Animator::exportDOT,
         "renderOneFrame", &Animator::renderOneFrame,
         "setPreOp", [](Animator& self, bool isLink, AnimationPort* from, AnimationPort* to, float time) {
@@ -105,6 +122,16 @@ void register_bbfx_bindings(sol::state& lua) {
             auto& inputs = self.getInputs();
             auto it = inputs.find(name);
             return (it != inputs.end()) ? it->second : nullptr;
+        },
+        "getInputNames", [](AnimationNode& self) -> std::vector<std::string> {
+            std::vector<std::string> names;
+            for (auto& [name, _] : self.getInputs()) names.push_back(name);
+            return names;
+        },
+        "getOutputNames", [](AnimationNode& self) -> std::vector<std::string> {
+            std::vector<std::string> names;
+            for (auto& [name, _] : self.getOutputs()) names.push_back(name);
+            return names;
         }
     );
     bbfx["AnimationNode"] = lua["bbfx_AnimationNode"];
@@ -313,6 +340,62 @@ void register_bbfx_bindings(sol::state& lua) {
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["TheoraClipNode"] = lua["bbfx_TheoraClipNode"];
+
+    // ── v2.6: StdinReader bindings ───────────────────────────────────────
+    lua.new_usertype<StdinReader>("bbfx_StdinReader",
+        sol::call_constructor, sol::factories(
+            []() { return new StdinReader(); }
+        ),
+        "poll", [&lua](StdinReader& self) -> sol::object {
+            auto line = self.poll();
+            if (line.has_value()) {
+                return sol::make_object(lua, line.value());
+            }
+            return sol::lua_nil;
+        }
+    );
+    bbfx["StdinReader"] = lua["bbfx_StdinReader"];
+
+    // ── v2.6: TcpServer bindings ────────────────────────────────────────
+    lua.new_usertype<TcpServer>("bbfx_TcpServer",
+        sol::call_constructor, sol::factories(
+            [](int port, int maxClients) { return new TcpServer(port, maxClients); },
+            [](int port) { return new TcpServer(port); }
+        ),
+        "start", &TcpServer::start,
+        "stop", &TcpServer::stop,
+        "isRunning", &TcpServer::isRunning,
+        "poll", [](TcpServer& self) -> sol::as_table_t<std::vector<sol::table>> {
+            // Not directly convertible — use wrapper in Lua
+            return sol::as_table(std::vector<sol::table>{});
+        },
+        "pollRaw", [&lua](TcpServer& self) -> sol::table {
+            auto messages = self.poll();
+            sol::table result = lua.create_table();
+            for (size_t i = 0; i < messages.size(); ++i) {
+                sol::table msg = lua.create_table();
+                msg["id"] = messages[i].clientId;
+                msg["text"] = messages[i].text;
+                result[i + 1] = msg;
+            }
+            return result;
+        },
+        "send", &TcpServer::send
+    );
+    bbfx["TcpServer"] = lua["bbfx_TcpServer"];
+
+    // ── v2.6: fileModTime binding ───────────────────────────────────────
+    bbfx["fileModTime"] = [](const std::string& path) -> double {
+        try {
+            auto ftime = std::filesystem::last_write_time(path);
+            auto sctp = std::chrono::time_point_cast<std::chrono::seconds>(
+                std::chrono::clock_cast<std::chrono::system_clock>(ftime)
+            );
+            return static_cast<double>(sctp.time_since_epoch().count());
+        } catch (...) {
+            return 0.0;
+        }
+    };
 }
 
 } // namespace bbfx

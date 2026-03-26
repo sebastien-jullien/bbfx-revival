@@ -2,6 +2,30 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.6.0] - 2026-03-26
+
+### Added
+- **REPL Lua console** (`lua/console.lua`): LuaConsoleNode in the DAG reads stdin non-blocking via StdinReader C++, evaluates Lua expressions in real-time during rendering
+- **Introspection commands**: `graph()`, `ports(name)`, `set(name, port, val)`, `reload(script)`, `help()`, `quit()` — all global Lua functions usable from REPL and TCP
+- **StdinReader C++** (`src/input/StdinReader.h/.cpp`): non-blocking stdin reader using `_kbhit()`/`_getch()` on Windows, with line buffer and backspace support
+- **TcpServer C++** (`src/network/TcpServer.h/.cpp`): WinSock2 TCP server with `std::thread` listener, `std::mutex` + queue thread safety, max 2 clients, non-blocking I/O
+- **ShellServer Lua** (`lua/shell/server.lua`): port of 2006 TCP shell — LuaAnimationNode polls TcpServer each frame, evaluates expressions via ErrorHandler, sends results back
+- **Shell client** (`lua/shell/client.py`): Python TCP REPL client for connecting to the BBFx shell from any terminal
+- **Hot reload** (`lua/hotreload.lua`): watches Lua files for modification, auto-reloads via `dofile()` with pcall protection; commands `watch()`, `unwatch()`, `watchlist()`
+- **Logger** (`lua/logger.lua`): structured logging with info/warn/error levels, stdout + optional file output, timestamped format
+- **ErrorHandler** (`lua/errorhandler.lua`): pcall wrapper for eval/dofile with `debug.traceback` stack traces, automatic `Logger.error()` on failure
+- **Animator introspection**: `getNodeNames()`, `getNodeByName(name)`, `registerNode()` on Animator; `getInputNames()`, `getOutputNames()` on AnimationNode
+- **Demo shell** (`lua/demos/demo_shell.lua`): complete v2.6 demo with REPL + TCP server + hot reload + Perlin scene
+
+### Dependencies
+- Added `ws2_32` (WinSock2) link on Windows for TCP networking
+
+### Technical
+- `StdinReader` uses `_kbhit()`/`_getch()` (Windows) or `select()` (POSIX) for non-blocking stdin
+- `TcpServer` thread never touches `lua_State` — all Lua evaluation happens on the main thread via message queue
+- `fileModTime` binding uses `std::filesystem::last_write_time` for portable file timestamp
+- Hot reload checks timestamps once per second (not every frame) for performance
+
 ## [2.5.0] - 2026-03-26
 
 ### Added

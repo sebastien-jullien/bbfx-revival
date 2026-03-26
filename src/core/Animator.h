@@ -3,8 +3,10 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <map>
+#include <set>
 #include <queue>
 #include <deque>
+#include <vector>
 
 #include "../bbfx.h"
 #include "AnimationNode.h"
@@ -65,6 +67,9 @@ public:
     void schedule(const Operation& op, TimeStamp time);
 
     void removeNode(AnimationNode* node);
+    void registerNode(AnimationNode* node);
+    std::vector<std::string> getRegisteredNodeNames() const;
+    AnimationNode* getRegisteredNode(const std::string& name) const;
     void exportDOT(const string& filename) const;
 
     void renderOneFrame();
@@ -90,6 +95,8 @@ protected:
     PostOpQueue mPostOpQueue;
     void executePendingPostOps();
     void executePostOp(const Operation& op);
+
+    std::map<std::string, AnimationNode*> mRegisteredNodes;
 
 private:
     static Animator* sInstance;
