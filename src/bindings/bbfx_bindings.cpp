@@ -2,9 +2,14 @@
 #include "../core/Engine.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
+#include "../core/StatsOverlay.h"
 #include "../input/InputManager.h"
 #include "../fx/PerlinVertexShader.h"
+#include "../fx/PerlinFxNode.h"
 #include "../fx/TextureBlitter.h"
+#include "../fx/TextureBlitterNode.h"
+#include "../fx/WaveVertexShader.h"
+#include "../fx/ColorShiftNode.h"
 
 namespace bbfx {
 
@@ -18,9 +23,22 @@ void register_bbfx_bindings(sol::state& lua) {
         "startRendering", &Engine::startRendering,
         "stopRendering", &Engine::stopRendering,
         "getSceneManager", &Engine::getSceneManager,
-        "getRenderWindow", &Engine::getRenderWindow
+        "getRenderWindow", &Engine::getRenderWindow,
+        "screenshot", &Engine::screenshot,
+        "toggleFullscreen", &Engine::toggleFullscreen
     );
     bbfx["Engine"] = lua["bbfx_Engine"];
+
+    // ── StatsOverlay bindings ────────────────────────────────────────────
+    lua.new_usertype<StatsOverlay>("bbfx_StatsOverlay",
+        sol::no_constructor,
+        "instance", []() -> StatsOverlay* { return StatsOverlay::instance(); },
+        "toggle", &StatsOverlay::toggle,
+        "show", &StatsOverlay::show,
+        "hide", &StatsOverlay::hide,
+        "isVisible", &StatsOverlay::isVisible
+    );
+    bbfx["StatsOverlay"] = lua["bbfx_StatsOverlay"];
 
     // ── I-029: Animator bindings ────────────────────────────────────────
     lua.new_usertype<Animator>("bbfx_Animator",
@@ -46,14 +64,8 @@ void register_bbfx_bindings(sol::state& lua) {
                 self.link(oi->second, ii->second);
             }
         },
-        "removeNode", [](Animator& self, AnimationNode* node) {
-            for (auto& [name, port] : node->getInputs()) {
-                self.remove(port);
-            }
-            for (auto& [name, port] : node->getOutputs()) {
-                self.remove(port);
-            }
-        },
+        "removeNode", &Animator::removeNode,
+        "exportDOT", &Animator::exportDOT,
         "renderOneFrame", &Animator::renderOneFrame,
         "setPreOp", [](Animator& self, bool isLink, AnimationPort* from, AnimationPort* to, float time) {
             self.schedule(Operation(isLink, from, to), time);
@@ -187,6 +199,63 @@ void register_bbfx_bindings(sol::state& lua) {
         "blit", &TextureBlitter::blit
     );
     bbfx["TextureBlitter"] = lua["bbfx_TextureBlitter"];
+
+    // ── PerlinFxNode (AnimationNode wrapper) ─────────────────────────────
+    lua.new_usertype<PerlinFxNode>("bbfx_PerlinFxNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& meshName, const std::string& cloneName) {
+                return new PerlinFxNode(meshName, cloneName);
+            }
+        ),
+        "enable", &PerlinFxNode::enable,
+        "disable", &PerlinFxNode::disable,
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["PerlinFxNode"] = lua["bbfx_PerlinFxNode"];
+
+    // ── TextureBlitterNode (AnimationNode wrapper) ───────────────────────
+    lua.new_usertype<TextureBlitterNode>("bbfx_TextureBlitterNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name) { return new TextureBlitterNode(name); }
+        ),
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["TextureBlitterNode"] = lua["bbfx_TextureBlitterNode"];
+
+    // ── WaveVertexShader (AnimationNode + SoftwareVertexShader) ──────────
+    lua.new_usertype<WaveVertexShader>("bbfx_WaveVertexShader",
+        sol::call_constructor, sol::factories(
+            [](const std::string& meshName, const std::string& cloneName) {
+                return new WaveVertexShader(meshName, cloneName);
+            }
+        ),
+        "enable", &WaveVertexShader::enable,
+        "disable", &WaveVertexShader::disable,
+        "renderOneFrame", &WaveVertexShader::renderOneFrame,
+        "getName", &AnimationNode::getName,
+        "getOutput", [](WaveVertexShader& self, const std::string& name) -> AnimationPort* {
+            auto& outputs = self.AnimationNode::getOutputs();
+            auto it = outputs.find(name);
+            return (it != outputs.end()) ? it->second : nullptr;
+        },
+        "getInput", [](WaveVertexShader& self, const std::string& name) -> AnimationPort* {
+            auto& inputs = self.AnimationNode::getInputs();
+            auto it = inputs.find(name);
+            return (it != inputs.end()) ? it->second : nullptr;
+        }
+    );
+    bbfx["WaveVertexShader"] = lua["bbfx_WaveVertexShader"];
+
+    // ── ColorShiftNode ──────────────────────────────────────────────────
+    lua.new_usertype<ColorShiftNode>("bbfx_ColorShiftNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& materialName) {
+                return new ColorShiftNode(materialName);
+            }
+        ),
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["ColorShiftNode"] = lua["bbfx_ColorShiftNode"];
 }
 
 } // namespace bbfx

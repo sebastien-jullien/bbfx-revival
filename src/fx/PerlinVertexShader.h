@@ -12,15 +12,24 @@ public:
     virtual ~PerlinVertexShader();
     void renderOneFrame(Real dt) override;
 
+    float getDisplacement() const { return displacement; }
+    void setDisplacement(float v) { displacement = v; }
+    float getDensity() const { return density; }
+    void setDensity(float v) { density = v; }
+    float getTimeDensity() const { return timeDensity; }
+    void setTimeDensity(float v) { timeDensity = v; }
+
 protected:
     float time = 0.0f;
     float displacement = 0.1f;
     float density = 50.0f;
     float timeDensity = 5.0f;
 
-    float* _clearNormals(VertexData* data);
-    void _normalizeNormals(VertexData* data, float* normals);
-    void _applyNoise(VertexData* data, const CpuMeshData& cpuData, float* normals);
+    // Pre-allocated buffers to avoid per-frame heap allocations
+    std::vector<float> mDstPos;
+    std::vector<float> mNormals;
+
+    void _applyNoise(VertexData* data, const CpuMeshData& cpuData);
 };
 
 } // namespace bbfx
