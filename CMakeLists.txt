@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 2.2.0 LANGUAGES CXX)
+project(BBFx VERSION 2.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,6 +25,12 @@ find_package(SDL3  REQUIRED CONFIG)
 find_package(sol2  REQUIRED CONFIG)
 find_package(Lua   REQUIRED)
 find_package(Boost REQUIRED COMPONENTS graph)
+find_package(Ogg REQUIRED)
+find_package(PkgConfig QUIET)
+# libtheora doesn't have a CMake config — use manual find
+find_path(THEORA_INCLUDE_DIR theora/theoradec.h)
+find_library(THEORA_LIBRARY NAMES theora)
+find_library(THEORADEC_LIBRARY NAMES theoradec)
 
 # ── Core library ─────────────────────────────────────────────────────────────
 add_library(bbfx-core
@@ -46,6 +52,14 @@ add_library(bbfx-core
     src/input/MouseManager.cpp
     src/input/JoystickManager.cpp
     src/input/InputManager.cpp
+    src/video/OggReader.cpp
+    src/video/TheoraSeekMap.cpp
+    src/video/TheoraReader.cpp
+    src/video/TheoraBlitter.cpp
+    src/video/TheoraClip.cpp
+    src/video/ReversableClip.cpp
+    src/video/TextureCrossfader.cpp
+    src/video/TheoraClipNode.cpp
 )
 
 target_include_directories(bbfx-core PUBLIC
@@ -62,7 +76,12 @@ target_link_libraries(bbfx-core PUBLIC
     ${LUA_LIBRARIES}
     Boost::graph
     ogre-lua
+    Ogg::ogg
 )
+if(THEORA_LIBRARY AND THEORADEC_LIBRARY)
+    target_link_libraries(bbfx-core PUBLIC ${THEORA_LIBRARY} ${THEORADEC_LIBRARY})
+    target_include_directories(bbfx-core PRIVATE ${THEORA_INCLUDE_DIR})
+endif()
 
 # ── Exécutable principal ───────────────────────────────────────────────────────
 add_executable(bbfx src/main.cpp)
@@ -106,6 +125,12 @@ add_custom_command(TARGET bbfx POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/tests"
         "$<TARGET_FILE_DIR:bbfx>/tests"
     COMMENT "Copying test scripts"
+)
+add_custom_command(TARGET bbfx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/particles"
+        "$<TARGET_FILE_DIR:bbfx>/resources/particles"
+    COMMENT "Copying particle scripts"
 )
 add_custom_command(TARGET bbfx POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

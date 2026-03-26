@@ -2,6 +2,65 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.4.0] - 2026-03-26
+
+### Added
+- **Theora video system**: complete port of 2006 C++ code (10 files) to C++20/OGRE 14.5
+  - `OggReader`: Ogg container format reader via libogg
+  - `TheoraReader`: Theora video decoder using libtheora 1.2 (th_* API)
+  - `TheoraBlitter`: YUV→RGBA conversion with static lookup tables, OGRE texture upload
+  - `TheoraClip`: Threaded video playback via `std::jthread` with `std::atomic`/`std::condition_variable`
+  - `ReversableClip`: Forward/reverse playback with reader swapping
+  - `TextureCrossfader`: Manual blend between two texture layers
+  - `TheoraSeekMap`: Frame-level seek index with JSON serialization (replaces Lua C API)
+- **TheoraClipNode**: AnimationNode wrapper for video clips (ports: dt, time_control → playing, frame_ready)
+- **sol2 bindings**: TheoraClip, ReversableClip, TextureCrossfader, TheoraClipNode
+- **video.lua**: Lua video management module (createClip, overlay, crossfade)
+- **textureset.lua**: Texture control system (TextureControl, SweepControl, TextureCycle, TextureSet)
+- **demo_video.lua**: Video playback demo with keyboard controls (P play/pause, S stop)
+- **Media**: bombe.ogg video file in resources/video/
+
+### Dependencies
+- Added `libtheora` 1.2.0 and `libogg` 1.3.6 via vcpkg
+
+### Technical
+- Thread-safe video decoding: `std::jthread` with `stop_token`, `std::atomic<bool>` flags
+- Seek map cache in system temp directory (`std::filesystem::temp_directory_path()`)
+- No pthreads, no volatile, no SWIG — fully C++20/sol2
+
+## [2.3.0] - 2026-03-26
+
+### Added
+- **ogre-lua bindings**: ParticleSystem (emitters, affectors via StringInterface), CompositorManager (add/remove/toggle), Viewport, RenderWindow extensions, MeshManager, Plane
+- **Scene Builder** (`object.lua`): Factory pattern ported from 2006 production code — fromMesh, fromBillboard, fromLight, fromPsys, fromCamera, fromFloorPlane + transform helpers
+- **Scene Effects** (`effect.lua`): skybox, sky dome, fog, background color, shadows, ambient light, clearScene
+- **Camera** (`camera.lua`): Camera setup + SphereTrack orbital camera controlled by azimuth/elevation/distance
+- **Compositors** (`compositors.lua`): Wrapper for OGRE CompositorManager — add/remove/toggle Bloom, B&W, OldTV, DOF, Glass, Embossed
+- **Joystick Mapping** (`joystick_mapping.lua`): SDL3 joystick enumeration, lookup by name, axis/button binding to AnimationNode ports
+- **Controller** (`controller.lua`): Value mapping as AnimationNodes — linear, smooth (exponential), slide (ramp)
+- **Waveforms** (`ogre_controller.lua`): Pure Lua waveform generators — sin, triangle, square, sawtooth
+- **Keymap** (`keymap.lua`): SDL3 keyboard hotkey binding system with chord state shortcuts
+- **Note system** (`note.lua`): Polymorphic note dispatch — Animation, Object, Effect, Action subtypes with on/off
+- **Chord system** (`chord.lua`): State machine for compositions — named states containing timed note events
+- **Sequencer** (`sequencer.lua`): Beat-based scheduler in pure Lua — schedules note on/off at BPM-driven beats
+- **Sync** (`sync.lua`): Time synchronization — BPM to beat/bar/cycle mapping with event scheduling
+- **Threads** (`threads.lua`): Coroutine scheduler integrated with frame loop via LuaAnimationNode
+- **Helpers** (`helpers.lua`): UID generator, curry function, global accessors
+- **Demo Geosphere**: Perlin noise on mesh + SphereTrack camera + joystick control
+- **Demo Particles**: Particle system toggle (Aureola, PurpleFountain, Rain) + compositor toggle
+- **Demo Set Jouable** (`sets/demo_set.lua`): First playable VJ set — geosphere + particles + compositors + chord states (F4-F7) + camera orbit
+- **Media assets**: Compositor scripts (Bloom, DOF, Glass, OldTV, B&W, Embossed), particle scripts (Aureola, PurpleFountain, Rain, Snow, Smoke)
+- Architecture documentation: section 15 "Composition Engine & Live Pipeline (v2.3)"
+
+### Changed
+- ogre-lua `scene_bindings.cpp` extended with 8 new OGRE types
+- `resources.cfg` includes particles/ directory
+
+### Recovery
+- All 6 "lost" Lua modules from 2006 production code successfully recovered and ported
+- 87 original production Lua files analyzed for architecture insights
+- Global roadmap updated with recovered modules and corrected architecture descriptions
+
 ## [2.2.0] - 2026-03-26
 
 ### Added

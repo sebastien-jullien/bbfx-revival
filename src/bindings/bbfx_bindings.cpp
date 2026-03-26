@@ -10,6 +10,10 @@
 #include "../fx/TextureBlitterNode.h"
 #include "../fx/WaveVertexShader.h"
 #include "../fx/ColorShiftNode.h"
+#include "../video/TheoraClip.h"
+#include "../video/ReversableClip.h"
+#include "../video/TextureCrossfader.h"
+#include "../video/TheoraClipNode.h"
 
 namespace bbfx {
 
@@ -256,6 +260,59 @@ void register_bbfx_bindings(sol::state& lua) {
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["ColorShiftNode"] = lua["bbfx_ColorShiftNode"];
+
+    // ── v2.4 Theora Video bindings ──────────────────────────────────────
+    lua.new_usertype<TheoraClip>("bbfx_TheoraClip",
+        sol::call_constructor, sol::factories(
+            [](const std::string& filename) { return new TheoraClip(filename); }
+        ),
+        "play", &TheoraClip::play,
+        "pause", &TheoraClip::pause,
+        "stop", &TheoraClip::stop,
+        "frameUpdate", &TheoraClip::frameUpdate,
+        "setTime", &TheoraClip::setTime,
+        "getTime", &TheoraClip::getTime,
+        "isPlaying", &TheoraClip::isPlaying,
+        "getMaterialName", &TheoraClip::getMaterialName,
+        "getWidth", &TheoraClip::getWidth,
+        "getHeight", &TheoraClip::getHeight
+    );
+    bbfx["TheoraClip"] = lua["bbfx_TheoraClip"];
+
+    lua.new_usertype<ReversableClip>("bbfx_ReversableClip",
+        sol::call_constructor, sol::factories(
+            [](const std::string& fwd, const std::string& rev) {
+                return new ReversableClip(fwd, rev);
+            }
+        ),
+        "doReverse", &ReversableClip::doReverse,
+        "isReversed", &ReversableClip::isReversed,
+        sol::base_classes, sol::bases<TheoraClip>()
+    );
+    bbfx["ReversableClip"] = lua["bbfx_ReversableClip"];
+
+    lua.new_usertype<TextureCrossfader>("bbfx_TextureCrossfader",
+        sol::call_constructor, sol::factories(
+            [](const std::string& mat, const std::string& t1, const std::string& t2) {
+                return new TextureCrossfader(mat, t1, t2);
+            }
+        ),
+        "crossfade", &TextureCrossfader::crossfade,
+        "getBeta", &TextureCrossfader::getBeta
+    );
+    bbfx["TextureCrossfader"] = lua["bbfx_TextureCrossfader"];
+
+    lua.new_usertype<TheoraClipNode>("bbfx_TheoraClipNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& filename) { return new TheoraClipNode(filename); }
+        ),
+        "play", &TheoraClipNode::play,
+        "pause", &TheoraClipNode::pause,
+        "stop", &TheoraClipNode::stop,
+        "getClip", &TheoraClipNode::getClip,
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["TheoraClipNode"] = lua["bbfx_TheoraClipNode"];
 }
 
 } // namespace bbfx
