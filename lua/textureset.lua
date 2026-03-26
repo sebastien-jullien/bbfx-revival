@@ -107,12 +107,36 @@ end
 TextureSet = {}
 TextureSet.__index = TextureSet
 
-function TextureSet:new()
+-- TextureSet:new(settings, cycle)
+-- settings: optional table {joystick, uscroll, vscroll, scrollbutton, rspeed, sweep, vsweep, sweepbutton, sweepstate}
+-- cycle: optional TextureCycle to bind on creation
+function TextureSet:new(settings, cycle)
     local o = {}
     setmetatable(o, self)
     o.controls = {}
     o.cycles = {}
+    o.settings = settings or {}
+    o.active = false
+    o._swap = nil
+    if cycle then
+        o.cycles["default"] = cycle
+    end
     return o
+end
+
+function TextureSet:on()
+    self.active = true
+end
+
+function TextureSet:off()
+    self.active = false
+end
+
+-- setSwap: link another TextureSet as swap partner
+-- A joystick button press (settings.scrollbutton) swaps active state between self and partner
+function TextureSet:setSwap(other)
+    self._swap = other
+    other._swap = self
 end
 
 function TextureSet:addControl(name, material, layer)

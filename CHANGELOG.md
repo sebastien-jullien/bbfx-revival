@@ -2,6 +2,26 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.5.0] - 2026-03-26
+
+### Added
+- **Temporal nodes** (`lua/temporal_nodes.lua`): LFONode (sin/tri/square/saw), RampNode, DelayNode, EnvelopeFollowerNode — all implemented as LuaAnimationNode wrappers in the DAG
+- **Animation spline** (`lua/animation.lua`): Animation:new/addFrames/create/bind/play/stop/setTime — Catmull-Rom spline interpolation in pure Lua, IM_SPLINE and IM_LINEAR modes, looping support
+- **SubgraphNode** (`lua/subgraph.lua`): encapsulates a sub-DAG with named internal nodes, exposeInput/exposeOutput for external interface
+- **Preset system** (`lua/subgraph.lua`, `lua/presets/`): Preset:define/instantiate/list/save/load with key=value file serialization; built-in preset "PerlinPulse"
+- **Declarative graph builder** (`lua/declarative.lua`): `build({nodes, links})` — constructs animation DAG from a table description; types: LFO, Ramp, Delay, Envelope, existing, preset
+- **Compo port** (`lua/compo.lua`): port of 2006 production compo.lua — Compo.starwars() with 10 particle systems, 13 spline animations, safe_psys/safe_bind guards, Dictionary:proxy stub
+- **Fanions demo** (`lua/sets/demo_fanions.lua`): port of 2006 setFanions.textures.lua with two TextureCycle + two TextureSet, preset {gray, color, factor, rotate} format, swap
+- **TextureSet API extended** (`lua/textureset.lua`): TextureSet:new(settings, cycle), on(), off(), setSwap()
+- **Complete v2.5 demo** (`lua/demos/demo_v25.lua`): geosphere PerlinFxNode + spline animation + TextureSet + LFO→Ramp→displacement + PerlinPulse preset + declarative wiring + keyboard controls
+- **Declarative demo** (`lua/demos/demo_declarative.lua`): LFO→Ramp→PerlinFxNode built in < 15 declarative lines
+
+### Technical
+- Catmull-Rom spline: pure Lua implementation (Ogre::SimpleSpline not in ogre-lua bindings)
+- Animation:bind() targets Ogre SceneNode directly via LuaAnimationNode internal update
+- Temporal node wrappers expose `_node` field for raw bbfx node access
+- All particle system creation wrapped in pcall for graceful degradation
+
 ## [2.4.0] - 2026-03-26
 
 ### Added
