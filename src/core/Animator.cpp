@@ -115,6 +115,25 @@ void Animator::removeNode(AnimationNode* node) {
         }
     }
     node->setListener(nullptr);
+    mRegisteredNodes.erase(node->getName());
+}
+
+void Animator::registerNode(AnimationNode* node) {
+    mRegisteredNodes[node->getName()] = node;
+}
+
+std::vector<std::string> Animator::getRegisteredNodeNames() const {
+    std::vector<std::string> names;
+    names.reserve(mRegisteredNodes.size());
+    for (auto& [name, _] : mRegisteredNodes) {
+        names.push_back(name);
+    }
+    return names;
+}
+
+AnimationNode* Animator::getRegisteredNode(const std::string& name) const {
+    auto it = mRegisteredNodes.find(name);
+    return (it != mRegisteredNodes.end()) ? it->second : nullptr;
 }
 
 void Animator::exportDOT(const string& filename) const {
