@@ -64,6 +64,9 @@ public:
     using TimeStamp = float;
     void schedule(const Operation& op, TimeStamp time);
 
+    void removeNode(AnimationNode* node);
+    void exportDOT(const string& filename) const;
+
     void renderOneFrame();
 
 protected:

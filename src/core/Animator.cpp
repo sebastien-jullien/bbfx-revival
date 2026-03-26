@@ -1,5 +1,7 @@
 #include "Animator.h"
 #include <boost/graph/breadth_first_search.hpp>
+#include <fstream>
+#include <set>
 
 namespace bbfx {
 
@@ -73,6 +75,82 @@ void Animator::unlink(AnimationPort* s, AnimationPort* t) {
 void Animator::schedule(const Operation& op, TimeStamp time) {
     Lock guard(mMutex);
     mPreOpQueue.push(OperationEvent(op, time));
+}
+
+void Animator::removeNode(AnimationNode* node) {
+    Lock guard(mMutex);
+    // Collect all ports belonging to this node
+    std::vector<AnimationPort*> ports;
+    for (auto& [name, port] : node->getInputs()) {
+        if (mVertexMap.find(port) != mVertexMap.end()) {
+            ports.push_back(port);
+        }
+    }
+    for (auto& [name, port] : node->getOutputs()) {
+        if (mVertexMap.find(port) != mVertexMap.end()) {
+            ports.push_back(port);
+        }
+    }
+    // Remove in reverse order to minimize vertex index invalidation issues
+    // Since boost::vecS invalidates descriptors on remove, we re-lookup each time
+    for (auto* port : ports) {
+        auto it = mVertexMap.find(port);
+        if (it != mVertexMap.end()) {
+            boost::clear_vertex(it->second, mGraph);
+            // After remove_vertex, all vertex descriptors > removed are invalidated
+            // We need to rebuild mappings for vecS
+            Vertex removed = it->second;
+            boost::remove_vertex(removed, mGraph);
+            // Rebuild mPortMap and mVertexMap after removal
+            mPortMap.clear();
+            VertexMap newVertexMap;
+            for (auto& [p, v] : mVertexMap) {
+                if (p == port) continue; // skip removed
+                Vertex newV = v;
+                if (v > removed) newV = v - 1;
+                newVertexMap[p] = newV;
+                mPortMap[newV] = p;
+            }
+            mVertexMap = std::move(newVertexMap);
+        }
+    }
+    node->setListener(nullptr);
+}
+
+void Animator::exportDOT(const string& filename) const {
+    std::ofstream out(filename);
+    if (!out.is_open()) return;
+
+    out << "digraph animator {\n  rankdir=LR;\n";
+
+    // Collect unique nodes and their shapes
+    std::set<std::string> writtenNodes;
+    for (auto& [port, vertex] : mVertexMap) {
+        AnimationNode* node = port->getNode();
+        if (node && writtenNodes.find(node->getName()) == writtenNodes.end()) {
+            writtenNodes.insert(node->getName());
+            out << "  \"" << node->getName() << "\" [shape=box];\n";
+        }
+    }
+
+    // Write edges
+    auto edges = boost::edges(mGraph);
+    for (auto ei = edges.first; ei != edges.second; ++ei) {
+        auto srcV = boost::source(*ei, mGraph);
+        auto tgtV = boost::target(*ei, mGraph);
+        auto srcIt = mPortMap.find(srcV);
+        auto tgtIt = mPortMap.find(tgtV);
+        if (srcIt != mPortMap.end() && tgtIt != mPortMap.end()) {
+            AnimationPort* srcPort = srcIt->second;
+            AnimationPort* tgtPort = tgtIt->second;
+            std::string srcNode = srcPort->getNode() ? srcPort->getNode()->getName() : "?";
+            std::string tgtNode = tgtPort->getNode() ? tgtPort->getNode()->getName() : "?";
+            out << "  \"" << srcNode << "\":\"" << srcPort->getName()
+                << "\" -> \"" << tgtNode << "\":\"" << tgtPort->getName() << "\";\n";
+        }
+    }
+
+    out << "}\n";
 }
 
 void Animator::renderOneFrame() {

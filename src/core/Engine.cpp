@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "StatsOverlay.h"
 #include <OgreOverlaySystem.h>
 #include <OgreViewport.h>
 #include <OgreCamera.h>
@@ -100,6 +101,9 @@ Engine::Engine(sol::state& lua)
     // Load resources (meshes, materials, textures)
     loadResources();
 
+    // Stats overlay (must be after OverlaySystem)
+    new StatsOverlay();
+
     // Input manager
     mInputManager = new InputManager();
 
@@ -108,6 +112,7 @@ Engine::Engine(sol::state& lua)
 }
 
 Engine::~Engine() {
+    delete StatsOverlay::instance();
     delete mInputManager;
     mInputManager = nullptr;
     delete mRoot;
@@ -186,6 +191,15 @@ void Engine::startRendering() {
             if (evt.type == SDL_EVENT_KEY_DOWN && evt.key.key == SDLK_ESCAPE) {
                 mStopQueued = true;
             }
+            if (evt.type == SDL_EVENT_KEY_DOWN && evt.key.key == SDLK_F3) {
+                if (auto* stats = StatsOverlay::instance()) stats->toggle();
+            }
+            if (evt.type == SDL_EVENT_KEY_DOWN && evt.key.key == SDLK_F11) {
+                toggleFullscreen();
+            }
+            if (evt.type == SDL_EVENT_KEY_DOWN && evt.key.key == SDLK_F12) {
+                screenshot();
+            }
             if (evt.type == SDL_EVENT_WINDOW_RESIZED) {
                 int w = evt.window.data1;
                 int h = evt.window.data2;
@@ -204,12 +218,40 @@ void Engine::startRendering() {
             animator->renderOneFrame();
         }
 
+        // Update stats overlay (use frame time from time node output port)
+        if (auto* stats = StatsOverlay::instance()) {
+            float dt = 0.016f;
+            if (time) {
+                auto& outputs = time->getOutputs();
+                auto it = outputs.find("dt");
+                if (it != outputs.end()) dt = it->second->getValue();
+            }
+            stats->update(dt);
+        }
+
         mRoot->renderOneFrame();
     }
 }
 
 void Engine::stopRendering() {
     mStopQueued = true;
+}
+
+void Engine::screenshot() {
+    if (mRenderWindow) {
+        Ogre::String filename = mRenderWindow->writeContentsToTimestampedFile("screenshot_", ".png");
+        cout << "[screenshot] Saved: " << filename << endl;
+    }
+}
+
+void Engine::toggleFullscreen() {
+    mFullscreen = !mFullscreen;
+    if (mWindow) {
+        SDL_SetWindowFullscreen(mWindow, mFullscreen ? true : false);
+        if (mRenderWindow) {
+            mRenderWindow->windowMovedOrResized();
+        }
+    }
 }
 
 } // namespace bbfx

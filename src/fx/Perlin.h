@@ -35,44 +35,44 @@ inline constexpr std::array<int, 512> perlin_p = {{
     138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
 }};
 
-inline constexpr double perlin_fade(double t) {
-    return t * t * t * t * (t * (t * 6 - 15) + 10);
+inline constexpr float perlin_fade(float t) {
+    return t * t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 }
 
-inline constexpr double perlin_lerp(double t, double a, double b) {
+inline constexpr float perlin_lerp(float t, float a, float b) {
     return a + t * (b - a);
 }
 
-inline double perlin_grad(int hash, double x, double y, double z) {
+inline float perlin_grad(int hash, float x, float y, float z) {
     int h = hash & 15;
-    double u = h < 8 || h == 12 || h == 13 ? x : y;
-    double v = h < 4 || h == 12 || h == 13 ? y : z;
+    float u = h < 8 || h == 12 || h == 13 ? x : y;
+    float v = h < 4 || h == 12 || h == 13 ? y : z;
     return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
 }
 
-inline double noise3(double x, double y, double z) {
+inline float noise3(float x, float y, float z) {
     int X = static_cast<int>(std::floor(x)) & 255;
     int Y = static_cast<int>(std::floor(y)) & 255;
     int Z = static_cast<int>(std::floor(z)) & 255;
     x -= std::floor(x);
     y -= std::floor(y);
     z -= std::floor(z);
-    double u = perlin_fade(x);
-    double v = perlin_fade(y);
-    double w = perlin_fade(z);
+    float u = perlin_fade(x);
+    float v = perlin_fade(y);
+    float w = perlin_fade(z);
     int A  = perlin_p[X]   + Y, AA = perlin_p[A] + Z, AB = perlin_p[A+1] + Z;
     int B  = perlin_p[X+1] + Y, BA = perlin_p[B] + Z, BB = perlin_p[B+1] + Z;
     return perlin_lerp(w,
         perlin_lerp(v,
-            perlin_lerp(u, perlin_grad(perlin_p[AA],   x,   y,   z),
-                           perlin_grad(perlin_p[BA],   x-1, y,   z)),
-            perlin_lerp(u, perlin_grad(perlin_p[AB],   x,   y-1, z),
-                           perlin_grad(perlin_p[BB],   x-1, y-1, z))),
+            perlin_lerp(u, perlin_grad(perlin_p[AA],   x,     y,     z),
+                           perlin_grad(perlin_p[BA],   x-1.f, y,     z)),
+            perlin_lerp(u, perlin_grad(perlin_p[AB],   x,     y-1.f, z),
+                           perlin_grad(perlin_p[BB],   x-1.f, y-1.f, z))),
         perlin_lerp(v,
-            perlin_lerp(u, perlin_grad(perlin_p[AA+1], x,   y,   z-1),
-                           perlin_grad(perlin_p[BA+1], x-1, y,   z-1)),
-            perlin_lerp(u, perlin_grad(perlin_p[AB+1], x,   y-1, z-1),
-                           perlin_grad(perlin_p[BB+1], x-1, y-1, z-1))));
+            perlin_lerp(u, perlin_grad(perlin_p[AA+1], x,     y,     z-1.f),
+                           perlin_grad(perlin_p[BA+1], x-1.f, y,     z-1.f)),
+            perlin_lerp(u, perlin_grad(perlin_p[AB+1], x,     y-1.f, z-1.f),
+                           perlin_grad(perlin_p[BB+1], x-1.f, y-1.f, z-1.f))));
 }
 
 } // namespace bbfx
