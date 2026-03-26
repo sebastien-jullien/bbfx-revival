@@ -12,6 +12,8 @@
     { "name": "lua",          "version>=": "5.4.7" },
     { "name": "sdl3"                               },
     { "name": "boost-graph"                        },
-    { "name": "boost-utility"                      }
+    { "name": "boost-utility"                      },
+    { "name": "libogg"                             },
+    { "name": "libtheora"                          }
   ]
 }
