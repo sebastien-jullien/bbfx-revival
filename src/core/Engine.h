@@ -21,6 +21,8 @@ public:
 
     void startRendering();
     void stopRendering();
+    void screenshot();
+    void toggleFullscreen();
 
     Ogre::SceneManager* getSceneManager() const;
     Ogre::RenderWindow* getRenderWindow() const;
@@ -31,6 +33,7 @@ protected:
     void fillWindowParams(Ogre::NameValuePairList& params);
 
     volatile bool mStopQueued = false;
+    bool mFullscreen = false;
     sol::state& mLua;
     SDL_Window* mWindow = nullptr;
     Ogre::Root* mRoot = nullptr;

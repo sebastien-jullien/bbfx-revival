@@ -1,4 +1,5 @@
 #include "AnimationNode.h"
+#include "Animator.h"
 
 namespace bbfx {
 
@@ -7,6 +8,10 @@ AnimationNode::AnimationNode() = default;
 AnimationNode::AnimationNode(const string& name) : mName(name) {}
 
 AnimationNode::~AnimationNode() {
+    // Auto-remove from Animator if registered
+    if (auto* animator = Animator::instance()) {
+        animator->removeNode(this);
+    }
     destroyPorts(mInputs);
     destroyPorts(mOutputs);
 }

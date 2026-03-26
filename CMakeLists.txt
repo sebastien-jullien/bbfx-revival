@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 2.1.0 LANGUAGES CXX)
+project(BBFx VERSION 2.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,9 +33,14 @@ add_library(bbfx-core
     src/core/Animator.cpp
     src/core/PrimitiveNodes.cpp
     src/core/Engine.cpp
+    src/core/StatsOverlay.cpp
     src/fx/SoftwareVertexShader.cpp
     src/fx/PerlinVertexShader.cpp
+    src/fx/PerlinFxNode.cpp
     src/fx/TextureBlitter.cpp
+    src/fx/TextureBlitterNode.cpp
+    src/fx/WaveVertexShader.cpp
+    src/fx/ColorShiftNode.cpp
     src/bindings/bbfx_bindings.cpp
     src/input/KeyboardManager.cpp
     src/input/MouseManager.cpp

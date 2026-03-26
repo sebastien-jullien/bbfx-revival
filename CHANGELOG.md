@@ -2,6 +2,43 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.2.0] - 2026-03-26
+
+### Added
+- **Perlin optimization**: all noise functions use `float` instead of `double`, zero heap allocations in render loop
+- **Stats overlay**: FPS counter with `Ogre::OverlayManager`, toggle with F3
+- **Screenshot**: capture PNG with F12 via `RenderWindow::writeContentsToTimestampedFile`
+- **Fullscreen toggle**: F11 via `SDL_SetWindowFullscreen`
+- **PerlinFxNode**: AnimationNode wrapper for PerlinVertexShader (composition pattern), with ports: displacement, density, timeDensity, enable → mesh_dirty
+- **TextureBlitterNode**: AnimationNode wrapper for TextureBlitter, with ports: r, g, b, a → texture_dirty
+- **WaveVertexShader**: sinusoidal vertex deformation effect (AnimationNode + SoftwareVertexShader), with ports: amplitude, frequency, speed, axis → mesh_dirty
+- **ColorShiftNode**: dynamic HSV→RGB material color shift (AnimationNode), with ports: hue_shift, saturation, brightness
+- **Export DOT**: `Animator::exportDOT(filename)` serializes the animation DAG to Graphviz DOT format
+- **Safe node cleanup**: `Animator::removeNode(node)` removes all connected edges before vertex deletion; `~AnimationNode()` auto-calls removeNode
+- **Interactive demo**: `demo.lua` with 5 modes (minimal, perlin, wave, colorshift, combined), keyboard control (1-5 modes, ↑↓ params)
+- Architecture documentation: FX-as-AnimationNode pattern documented in `docs/architecture.md` section 14
+
+### Changed
+- `PerlinVertexShader` pre-allocates position and normal buffers as members (no per-frame allocation)
+- `Perlin.h` uses `float` throughout (was `double`)
+- `Engine` handles F3/F11/F12 key events in the render loop
+- `demo.lua` rewritten as multi-mode interactive demo (was minimal + perlin only)
+
+## [2.1.0] - 2026-03-25
+
+### Added
+- OGRE resource loading via `resources.cfg` (19 models, 5 materials, 86 textures)
+- AnimationPort Lua bindings (getName, getValue, setValue, getNode)
+- SoftwareVertexShader with CPU mesh cloning and dynamic vertex buffers
+- PerlinVertexShader with 3D Perlin noise deformation (C++20 constexpr)
+- TextureBlitter for manual texture creation and pixel blitting
+- FX Lua bindings (PerlinVertexShader, TextureBlitter)
+- Unified demo.lua with minimal and perlin modes
+- Command-line argument passing to Lua via `arg` table
+
+### Changed
+- Windows renderer switched to OpenGL 3+ (D3D11 debug abort workaround)
+
 ## [2.0.0] - 2026-03-25
 
 ### Added
