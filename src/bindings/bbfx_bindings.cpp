@@ -18,6 +18,15 @@
 #include "../video/TextureCrossfader.h"
 #include "../video/TheoraClipNode.h"
 #include "../network/TcpServer.h"
+#include "../audio/AudioCapture.h"
+#include "../audio/AudioAnalyzer.h"
+#include "../audio/BeatDetector.h"
+#include <OgreOverlayManager.h>
+#include <OgreOverlay.h>
+#include <OgreOverlayContainer.h>
+#include <OgreOverlayElement.h>
+#include <OgreTextAreaOverlayElement.h>
+#include <OgreFontManager.h>
 
 namespace bbfx {
 
@@ -383,6 +392,120 @@ void register_bbfx_bindings(sol::state& lua) {
         "send", &TcpServer::send
     );
     bbfx["TcpServer"] = lua["bbfx_TcpServer"];
+
+    // ── v2.7: Audio bindings ───────────────────────────────────────────
+    lua.new_usertype<AudioCapture>("bbfx_AudioCapture",
+        sol::call_constructor, sol::factories(
+            [](int sampleRate, int bufferSize) { return new AudioCapture(sampleRate, bufferSize); },
+            [](int sampleRate) { return new AudioCapture(sampleRate); },
+            []() { return new AudioCapture(); }
+        ),
+        "start", &AudioCapture::start,
+        "stop", &AudioCapture::stop,
+        "isRunning", &AudioCapture::isRunning,
+        "getSampleRate", &AudioCapture::getSampleRate,
+        "getBufferSize", &AudioCapture::getBufferSize
+    );
+    bbfx["AudioCapture"] = lua["bbfx_AudioCapture"];
+
+    lua.new_usertype<AudioCaptureNode>("bbfx_AudioCaptureNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name, AudioCapture* capture) {
+                return new AudioCaptureNode(name, capture);
+            }
+        ),
+        "hasFreshData", &AudioCaptureNode::hasFreshData,
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["AudioCaptureNode"] = lua["bbfx_AudioCaptureNode"];
+
+    lua.new_usertype<AudioAnalyzerNode>("bbfx_AudioAnalyzerNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name, AudioCaptureNode* captureNode) {
+                return new AudioAnalyzerNode(name, captureNode);
+            }
+        ),
+        "getRMS", &AudioAnalyzerNode::getRMS,
+        "getPeak", &AudioAnalyzerNode::getPeak,
+        "getBand", &AudioAnalyzerNode::getBand,
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["AudioAnalyzerNode"] = lua["bbfx_AudioAnalyzerNode"];
+
+    lua.new_usertype<BeatDetectorNode>("bbfx_BeatDetectorNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name, AudioAnalyzerNode* analyzer) {
+                return new BeatDetectorNode(name, analyzer);
+            }
+        ),
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["BeatDetectorNode"] = lua["bbfx_BeatDetectorNode"];
+
+    // ── v2.7: Overlay bindings ────────────────────────────────────────
+    auto ogre = lua["Ogre"].get_or_create<sol::table>();
+
+    ogre.set_function("OverlayManager_getSingleton", []() -> Ogre::OverlayManager& {
+        return Ogre::OverlayManager::getSingleton();
+    });
+    ogre.set_function("OverlayManager_create", [](const std::string& name) -> Ogre::Overlay* {
+        return Ogre::OverlayManager::getSingleton().create(name);
+    });
+    ogre.set_function("OverlayManager_getByName", [](const std::string& name) -> Ogre::Overlay* {
+        return Ogre::OverlayManager::getSingleton().getByName(name);
+    });
+    ogre.set_function("OverlayManager_createPanel", [](const std::string& name) -> Ogre::OverlayContainer* {
+        return static_cast<Ogre::OverlayContainer*>(
+            Ogre::OverlayManager::getSingleton().createOverlayElement("Panel", name));
+    });
+    ogre.set_function("OverlayManager_createTextArea", [](const std::string& name) -> Ogre::TextAreaOverlayElement* {
+        return static_cast<Ogre::TextAreaOverlayElement*>(
+            Ogre::OverlayManager::getSingleton().createOverlayElement("TextArea", name));
+    });
+
+    lua.new_usertype<Ogre::Overlay>("Ogre_Overlay",
+        sol::no_constructor,
+        "show", &Ogre::Overlay::show,
+        "hide", &Ogre::Overlay::hide,
+        "isVisible", &Ogre::Overlay::isVisible,
+        "add2D", &Ogre::Overlay::add2D,
+        "setZOrder", &Ogre::Overlay::setZOrder
+    );
+
+    lua.new_usertype<Ogre::OverlayElement>("Ogre_OverlayElement",
+        sol::no_constructor,
+        "setPosition", &Ogre::OverlayElement::setPosition,
+        "setDimensions", &Ogre::OverlayElement::setDimensions,
+        "show", &Ogre::OverlayElement::show,
+        "hide", &Ogre::OverlayElement::hide
+    );
+
+    lua.new_usertype<Ogre::OverlayContainer>("Ogre_OverlayContainer",
+        sol::no_constructor,
+        "setPosition", &Ogre::OverlayContainer::setPosition,
+        "setDimensions", &Ogre::OverlayContainer::setDimensions,
+        "addChild", &Ogre::OverlayContainer::addChild,
+        "show", &Ogre::OverlayContainer::show,
+        "hide", &Ogre::OverlayContainer::hide,
+        sol::base_classes, sol::bases<Ogre::OverlayElement>()
+    );
+
+    lua.new_usertype<Ogre::TextAreaOverlayElement>("Ogre_TextAreaOverlayElement",
+        sol::no_constructor,
+        "setCaption", [](Ogre::TextAreaOverlayElement& self, const std::string& text) {
+            self.setCaption(text);
+        },
+        "setCharHeight", &Ogre::TextAreaOverlayElement::setCharHeight,
+        "setFontName", [](Ogre::TextAreaOverlayElement& self, const std::string& name) {
+            self.setFontName(name);
+        },
+        "setColour", &Ogre::TextAreaOverlayElement::setColour,
+        "setPosition", &Ogre::TextAreaOverlayElement::setPosition,
+        "setDimensions", &Ogre::TextAreaOverlayElement::setDimensions,
+        "show", &Ogre::TextAreaOverlayElement::show,
+        "hide", &Ogre::TextAreaOverlayElement::hide,
+        sol::base_classes, sol::bases<Ogre::OverlayElement>()
+    );
 
     // ── v2.6: fileModTime binding ───────────────────────────────────────
     bbfx["fileModTime"] = [](const std::string& path) -> double {

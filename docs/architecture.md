@@ -225,3 +225,89 @@ local ok, result = ErrorHandler.eval("return 1+1")  -- true, 2
 local ok, err = ErrorHandler.dofile("missing.lua")   -- false, "load error: ..."
 -- Sur erreur : debug.traceback inclus, Logger.error() appelé automatiquement
 ```
+
+---
+
+## Section 19 — Audio Réactif (v2.7)
+
+### 19.1 — Architecture audio
+
+```
+Micro → SDL3_audio (callback thread) → Ring buffer (std::mutex)
+  ↓
+AudioCaptureNode (AnimationNode, poll chaque frame)
+  ↓
+AudioAnalyzerNode (FFT Hann → spectrum → rms/peak/band_0..7)
+  ↓
+┌─ BeatDetectorNode (onset detection → beat trigger, BPM auto)
+└─ BandSplitNode (Lua: band_0..2 → low, band_3..5 → mid, band_6..7 → high)
+  ↓
+DAG → effets réactifs (Perlin, particules, caméra, compositors)
+```
+
+**Thread safety :** Le callback SDL3_audio écrit dans un ring buffer via `std::mutex`. Le thread principal poll le buffer chaque frame. Aucune opération Lua dans le callback.
+
+### 19.2 — AudioCapture
+
+```cpp
+// src/audio/AudioCapture.h
+auto capture = new AudioCapture(44100, 2048);  // sampleRate, bufferSize
+capture->start();   // ouvre le micro SDL3, retourne false si absent
+capture->stop();
+capture->poll(buffer);  // copie les N derniers samples
+```
+
+**Graceful fallback :** Si aucun micro n'est disponible, `start()` retourne false et le moteur continue sans audio.
+
+### 19.3 — AudioAnalyzerNode
+
+```cpp
+// src/audio/AudioAnalyzer.h
+auto analyzer = new AudioAnalyzerNode("analyzer", captureNode);
+// Ports de sortie : rms (0..1), peak (0..1), band_0..band_7 (0..1)
+```
+
+**FFT :** Radix-2 Cooley-Tukey (header-only `kiss_fft.h`), fenêtre de Hann, 8 bandes fréquentielles.
+
+### 19.4 — BeatDetectorNode
+
+```cpp
+// src/audio/BeatDetector.h
+auto beat = new BeatDetectorNode("beat", analyzer);
+// Port entrée : sensitivity (0..1), Port sortie : beat (trigger 0/1), bpm (float)
+```
+
+**Algorithme :** énergie courante > moyenne mobile × (1 + sensitivity × 2). Anti-bounce 200ms (max 300 BPM). BPM = 60 / moyenne des 16 derniers intervalles entre beats.
+
+### 19.5 — Audio Lua wrapper
+
+```lua
+require "audio"
+local audio = Audio:start()  -- crée toute la chaîne
+audio:getRMS()               -- 0.0..1.0
+audio:getPeak()              -- 0.0..1.0
+audio:getBPM()               -- float (ex: 128.0)
+audio:getBand("low")         -- basses 0..1
+audio:getBand("mid")         -- médiums 0..1
+audio:getBand("high")        -- aigus 0..1
+-- Câblage DAG :
+animator:addPort(audio.analyzer, "rms", perlinNode, "displacement")
+```
+
+### 19.6 — HUD Overlay
+
+```lua
+require "hud"
+local h = HUD:new()
+h:show()      -- affiche BPM + low/mid/high en overlay
+h:toggle()    -- ou via REPL: hud()
+h:update(audio)  -- appelé chaque frame pour mettre à jour les valeurs
+```
+
+### 19.7 — Sync auto-mode
+
+```lua
+local sync = Sync:new(song)
+sync:setAutoMode(audio)  -- BPM auto-détecté pilote le séquenceur
+sync:setAutoMode(nil)    -- retour au BPM fixe
+```

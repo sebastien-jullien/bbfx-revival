@@ -89,3 +89,21 @@ function Sync:step()
         end
     end
 end
+
+-- v2.7: Auto-mode — use BPM from audio analysis
+function Sync:setAutoMode(audio)
+    self._audioSource = audio
+    if audio then
+        Logger.info("[Sync] Auto BPM mode enabled")
+    else
+        Logger.info("[Sync] Auto BPM mode disabled — using fixed BPM")
+    end
+end
+
+function Sync:getEffectiveBPM()
+    if self._audioSource and self._audioSource:isRunning() then
+        local bpm = self._audioSource:getBPM()
+        if bpm > 0 then return bpm end
+    end
+    return self.song.bpm
+end

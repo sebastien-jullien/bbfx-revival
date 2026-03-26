@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 2.6.0 LANGUAGES CXX)
+project(BBFx VERSION 2.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,9 @@ add_library(bbfx-core
     src/input/InputManager.cpp
     src/input/StdinReader.cpp
     src/network/TcpServer.cpp
+    src/audio/AudioCapture.cpp
+    src/audio/AudioAnalyzer.cpp
+    src/audio/BeatDetector.cpp
     src/video/OggReader.cpp
     src/video/TheoraSeekMap.cpp
     src/video/TheoraReader.cpp
