@@ -39,9 +39,10 @@ camNode:attachObject(cam)
 camNode:setPosition(Ogre.Vector3(0, 0, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
--- Geosphere with Perlin
-local head = Object:fromMesh("ogrehead.mesh")
+-- Geosphere with Perlin (clone mesh, then load the clone as visible object)
 local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "audio_perlin")
+perlinFx:enable()
+local head = Object:fromMesh("audio_perlin")
 
 -- Audio chain
 local audioInst = Audio:start()
@@ -80,6 +81,9 @@ local updateNode = bbfx.LuaAnimationNode(UID("audioDemo/"), function(self)
 
     -- Rotate mesh
     head.node:yaw(Ogre.Radian(dt * 0.3))
+
+    -- Drive audio pipeline (not port-connected, must be ticked manually)
+    audioInst:tick()
 
     -- Audio-reactive: RMS modulates LFO amplitude
     local rms = audioInst:getRMS()

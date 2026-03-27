@@ -13,6 +13,8 @@
 
 namespace bbfx {
 
+class VideoExporter;
+
 class Engine {
 public:
     explicit Engine(sol::state& lua);
@@ -27,6 +29,13 @@ public:
     Ogre::SceneManager* getSceneManager() const;
     Ogre::RenderWindow* getRenderWindow() const;
 
+    void setOfflineMode(int fps);
+    void setOnlineMode();
+    bool isOfflineMode() const { return mOfflineMode; }
+    float getOfflineDt() const { return mOfflineDt; }
+    void setVideoExporter(VideoExporter* exporter);
+    void clearVideoExporter(VideoExporter* exporter = nullptr);
+
 protected:
     void loadOgrePlugins();
     void loadResources();
@@ -40,6 +49,10 @@ protected:
     Ogre::RenderWindow* mRenderWindow = nullptr;
     Ogre::SceneManager* mSceneManager = nullptr;
     InputManager* mInputManager = nullptr;
+
+    bool mOfflineMode = false;
+    float mOfflineDt = 1.0f / 60.0f;
+    VideoExporter* mVideoExporter = nullptr;
 
 private:
     static Engine* sInstance;

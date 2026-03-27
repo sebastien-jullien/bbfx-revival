@@ -369,3 +369,77 @@ Uniforms custom : `time` (auto-accumulé), `displacement`, `frequency`, `speed`.
 require "profiler"
 perf()  -- toggle on/off, shows: Frame: 16.2ms (60 fps)
 ```
+
+---
+
+## Section 21 — Production (v2.9)
+
+### 21.1 — Pipeline end-to-end
+
+```
+Live session → InputRecorder (.bbfx-session)
+  ↓
+InputPlayer (replay déterministe)
+  ↓
+Engine offline mode (dt fixe, pas de vsync)
+  ↓
+VideoExporter (PNG séquence frame-by-frame)
+  ↓
+FFmpeg (externe) → .mp4 / .webm
+```
+
+### 21.2 — InputRecorder
+
+```lua
+require "recorder"
+record("session.bbfx-session")   -- démarre l'enregistrement
+-- ... perform live ...
+stoprecord()                      -- arrête et ferme le fichier
+```
+
+Format `.bbfx-session` : JSON Lines (un objet JSON par ligne)
+```json
+{"t":0.0000,"type":"key","code":27,"state":"press"}
+{"t":1.2340,"type":"axis","axis":0,"value":0.7500}
+{"t":2.5000,"type":"beat"}
+```
+
+### 21.3 — InputPlayer
+
+```lua
+require "player"
+replay("session.bbfx-session")   -- charge et rejoue
+-- events injectés aux bons timestamps dans le frame loop
+stopreplay()                      -- arrête
+```
+
+### 21.4 — Mode offline
+
+```lua
+bbfx.Engine.instance():setOfflineMode(60)  -- dt fixe = 1/60
+-- le rendu avance à vitesse max, pas d'attente vsync
+bbfx.Engine.instance():setOnlineMode()     -- retour temps réel
+```
+
+### 21.5 — VideoExporter
+
+```lua
+require "exporter"
+export_start("output/frames")    -- crée le répertoire, démarre la capture
+-- chaque frame : frame_000001.png, frame_000002.png, ...
+stopexport()                      -- affiche le nombre de frames
+
+-- Puis en ligne de commande :
+-- ffmpeg -framerate 60 -i output/frames/frame_%06d.png -c:v libx264 output.mp4
+```
+
+### 21.6 — Functional utilities
+
+```lua
+require "functional"
+map({1,2,3}, function(x) return x*2 end)       -- {2,4,6}
+filter({1,2,3,4}, function(x) return x > 2 end) -- {3,4}
+reduce({1,2,3}, function(a,b) return a+b end, 0) -- 6
+keys({a=1, b=2})   -- {"a","b"}
+values({a=1, b=2}) -- {1,2}
+```

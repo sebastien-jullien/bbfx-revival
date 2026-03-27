@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 2.8.0 LANGUAGES CXX)
+project(BBFx VERSION 2.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,6 +66,9 @@ add_library(bbfx-core
     src/video/ReversableClip.cpp
     src/video/TextureCrossfader.cpp
     src/video/TheoraClipNode.cpp
+    src/record/InputRecorder.cpp
+    src/record/InputPlayer.cpp
+    src/record/VideoExporter.cpp
 )
 
 target_include_directories(bbfx-core PUBLIC
