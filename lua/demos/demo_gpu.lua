@@ -40,14 +40,23 @@ camNode:attachObject(cam)
 camNode:setPosition(Ogre.Vector3(0, 0, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
--- Geosphere with GPU Perlin shader
-local head = Object:fromMesh("ogrehead.mesh")
-local gpuFx = Shader:load("shaders/perlin_deform.glsl", {
-    mesh = head.movable,
-    displacement = 15.0,
-    frequency = 3.0,
-    speed = 1.5
-})
+-- Geosphere with GPU Perlin shader (falls back to CPU PerlinFxNode if GPU shader fails)
+local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "gpu_perlin")
+perlinFx:enable()
+local head = Object:fromMesh("gpu_perlin")
+
+local gpuFx = nil
+local ok, err = pcall(function()
+    gpuFx = Shader:load("shaders/perlin_deform.glsl", {
+        mesh = head.movable,
+        displacement = 15.0,
+        frequency = 3.0,
+        speed = 1.5
+    })
+end)
+if not ok then
+    print("[demo_gpu] GPU shader failed, using CPU PerlinFxNode: " .. tostring(err))
+end
 
 -- Audio chain
 local audioInst = Audio:start()
@@ -71,9 +80,14 @@ local updateNode = bbfx.LuaAnimationNode(UID("gpuDemo/"), function(self)
     -- Rotate mesh
     head.node:yaw(Ogre.Radian(dt * 0.3))
 
-    -- Audio → GPU displacement modulation
+    -- Audio → displacement modulation (GPU shader or CPU fallback)
     local rms = audioInst:getRMS()
-    gpuFx:setUniform("displacement", baseDisplacement + rms * 60.0)
+    if gpuFx then
+        gpuFx:setUniform("displacement", baseDisplacement + rms * 60.0)
+    else
+        local dispPort = perlinFx:getInput("displacement")
+        if dispPort then dispPort:setValue(baseDisplacement + rms * 60.0) end
+    end
 
     -- Update HUD
     hudInst:update(audioInst)

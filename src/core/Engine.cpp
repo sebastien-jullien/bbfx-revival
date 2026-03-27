@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "StatsOverlay.h"
+#include "../record/VideoExporter.h"
 #include <OgreOverlaySystem.h>
 #include <OgreViewport.h>
 #include <OgreCamera.h>
@@ -266,11 +267,37 @@ void Engine::startRendering() {
         }
 
         mRoot->renderOneFrame();
+
+        // Capture only after OGRE has rendered the backbuffer for this frame.
+        if (mVideoExporter && mVideoExporter->isExporting()) {
+            mVideoExporter->captureFrame(mRenderWindow);
+        }
     }
 }
 
 void Engine::stopRendering() {
     mStopQueued = true;
+}
+
+void Engine::setOfflineMode(int fps) {
+    mOfflineMode = true;
+    mOfflineDt = 1.0f / static_cast<float>(fps);
+    std::cout << "[Engine] Offline mode: " << fps << " fps (dt=" << mOfflineDt << ")" << std::endl;
+}
+
+void Engine::setOnlineMode() {
+    mOfflineMode = false;
+    std::cout << "[Engine] Online mode (real-time)" << std::endl;
+}
+
+void Engine::setVideoExporter(VideoExporter* exporter) {
+    mVideoExporter = exporter;
+}
+
+void Engine::clearVideoExporter(VideoExporter* exporter) {
+    if (!exporter || mVideoExporter == exporter) {
+        mVideoExporter = nullptr;
+    }
 }
 
 void Engine::screenshot() {

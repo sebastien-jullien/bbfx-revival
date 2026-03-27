@@ -51,9 +51,9 @@ function Joystick:poll()
 
     -- Update axis bindings
     for axisIndex, target in pairs(self.axisBindings) do
-        local value = self.joyMgr:getAxisValue(axisIndex)
-        -- Normalize from SDL range (-32768..32767) to (0..1)
-        local normalized = (value + 32768) / 65535
+        local value = self.joyMgr:getAxisValue(0, axisIndex)
+        -- getAxisValue returns -1..1, remap to 0..1
+        local normalized = (value + 1.0) * 0.5
         if type(target) == "function" then
             target(normalized)
         elseif target.setValue then
@@ -63,7 +63,7 @@ function Joystick:poll()
 
     -- Update button bindings (trigger on press)
     for btnIndex, callback in pairs(self.buttonBindings) do
-        local pressed = self.joyMgr:isButtonDown(btnIndex)
+        local pressed = self.joyMgr:isButtonDown(0, btnIndex)
         local wasPressed = self.buttonState[btnIndex] or false
         if pressed and not wasPressed then
             if type(callback) == "function" then

@@ -18,7 +18,8 @@ function ErrorHandler.eval(expr)
         Logger.error(msg)
         return false, msg
     end
-    local ok, result = xpcall(fn, debug.traceback)
+    local traceback = debug and debug.traceback or function(e) return e end
+    local ok, result = xpcall(fn, traceback)
     if not ok then
         Logger.error(tostring(result))
         return false, result
@@ -35,7 +36,8 @@ function ErrorHandler.dofile(filename)
         Logger.error(msg)
         return false, msg
     end
-    local ok, err = xpcall(fn, debug.traceback)
+    local traceback = debug and debug.traceback or function(e) return e end
+    local ok, err = xpcall(fn, traceback)
     if not ok then
         Logger.error(tostring(err))
         return false, err

@@ -28,7 +28,7 @@ lightObj:setPosition(Ogre.Vector3(100, 200, 100))
 local cam = scene:getCamera("MainCamera")
 local camNode = scene:getRootSceneNode():createChildSceneNode(UID("cam/"))
 camNode:attachObject(cam)
-camNode:setPosition(Ogre.Vector3(0, 0, 300))
+camNode:setPosition(Ogre.Vector3(0, 0, 100))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
 -- Load video (ReversableClip: forward + reverse files)
@@ -54,7 +54,7 @@ end
 
 if clip then
     -- Create billboard with video texture
-    local videoObj = Video:overlay(clip, cam, 30, 22)
+    local videoObj = Video:overlay(clip, cam, 80, 60)
     videoObj:setPosition(Ogre.Vector3(0, 0, 0))
     clip:setLoop(true)
     clip:play()

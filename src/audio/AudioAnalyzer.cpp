@@ -2,6 +2,8 @@
 #include "kiss_fft.h"
 #include <cmath>
 #include <algorithm>
+#include <iostream>
+#include <SDL3/SDL_timer.h>
 
 namespace bbfx {
 
@@ -76,6 +78,16 @@ void AudioAnalyzerNode::update() {
     mOutputs["peak"]->setValue(mPeak);
     for (int i = 0; i < NUM_BANDS; ++i) {
         mOutputs["band_" + std::to_string(i)]->setValue(mBands[i]);
+    }
+
+    // Log peak RMS once per second
+    if (mRMS > mPeakRMSSinceLog) mPeakRMSSinceLog = mRMS;
+    Uint64 now = SDL_GetTicks();
+    if (now - mLastLogTick >= 1000) {
+        std::cout << "[Audio] RMS peak=" << mPeakRMSSinceLog
+                  << " amp=" << (10.0f + mPeakRMSSinceLog * 80.0f) << std::endl;
+        mPeakRMSSinceLog = 0.0f;
+        mLastLogTick = now;
     }
 
     fireUpdate();

@@ -24,11 +24,10 @@ camNode:attachObject(cam)
 camNode:setPosition(Ogre.Vector3(0, 0, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
--- Create a geosphere mesh with PerlinFxNode
-local head = Object:fromMesh("ogrehead.mesh")
-
--- Create PerlinFxNode
+-- Create PerlinFxNode (clones ogrehead.mesh) then load the clone as the visible object
 local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "decl_perlin")
+perlinFx:enable()
+local head = Object:fromMesh("decl_perlin")
 
 -- Build graph declaratively (< 15 lines)
 local handles = build({

@@ -27,6 +27,11 @@ void SDLCALL AudioCapture::audioCallback(void* userdata, SDL_AudioStream* stream
 
     auto* self = static_cast<AudioCapture*>(userdata);
 
+    if (!self->mCallbackFired) {
+        self->mCallbackFired = true;
+        std::cout << "[AudioCapture] First audio data received" << std::endl;
+    }
+
     // Read available data from the stream
     std::vector<float> temp(additional_amount / sizeof(float));
     int got = SDL_GetAudioStreamData(stream, temp.data(), additional_amount);
@@ -81,6 +86,11 @@ bool AudioCapture::start() {
         std::cerr << "[AudioCapture] Failed to open recording device: " << SDL_GetError() << std::endl;
         return false;
     }
+
+    // Log the actual device name
+    SDL_AudioDeviceID devId = SDL_GetAudioStreamDevice(mStream);
+    const char* devName = SDL_GetAudioDeviceName(devId);
+    std::cout << "[AudioCapture] Device: " << (devName ? devName : "unknown") << std::endl;
 
     // Resume the device (SDL3 opens paused)
     SDL_ResumeAudioStreamDevice(mStream);
