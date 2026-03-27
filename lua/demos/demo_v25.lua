@@ -3,6 +3,8 @@
 -- Temporal chain: LFONode (sin 0.5Hz) → RampNode (rate=2) → perlinNode.displacement
 -- Preset "PerlinPulse" instantiated via declarative style
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -41,7 +43,7 @@ camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 -- ── Geosphere with PerlinFxNode ────────────────────────────────────────────
 
 local head = Object:fromMesh("ogrehead.mesh")
-local perlinFx = bbfx.PerlinFxNode(head.animNode:getName() .. "_perlin", scene, head.movable)
+local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "v25_perlin")
 
 -- ── Spline-animated particle (Compo pattern) ───────────────────────────────
 -- Use a regular object if particle template is unavailable

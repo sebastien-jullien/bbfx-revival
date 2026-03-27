@@ -20,9 +20,11 @@ public:
     int getWidth() const;
     int getHeight() const;
     float getFrameRate() const;
+    float getDuration() const;
 
 private:
     void requireSeekMap();
+    size_t getFileSize() const;
 
     th_info mInfo;
     th_comment mComment;
@@ -30,6 +32,7 @@ private:
     th_dec_ctx* mDecoder = nullptr;
     TheoraSeekMap mSeekMap;
     int mFrameCount = 0;
+    bool mLogNextFrame = false;
 };
 
 } // namespace bbfx

@@ -1,5 +1,6 @@
 #include "OggReader.h"
 #include <cstring>
+#include <algorithm>
 
 namespace bbfx {
 
@@ -36,6 +37,10 @@ int OggReader::readPage(ogg_page& page) {
         readBuffer();
     }
 
+    // Record the file offset where this page started
+    // (consumedOffset is now PAST the page, so subtract its size)
+    mLastPageOffset = consumedOffset() - page.header_len - page.body_len;
+
     if (!mStreamInitialized) {
         ogg_stream_init(&mStreamState, ogg_page_serialno(&page));
         mStreamInitialized = true;
@@ -50,6 +55,14 @@ int OggReader::readPacket(ogg_packet& packet) {
         readPage(page);
     }
     return 0;
+}
+
+long OggReader::consumedOffset() {
+    // tellg() returns -1 when eofbit/failbit is set; clear first
+    mFile.clear();
+    long filePos = static_cast<long>(mFile.tellg());
+    int buffered = mSyncState.fill - mSyncState.returned;
+    return filePos - buffered;
 }
 
 void OggReader::rawseek(long offset) {

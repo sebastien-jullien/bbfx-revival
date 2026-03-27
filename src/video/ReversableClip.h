@@ -1,7 +1,6 @@
 #pragma once
 
 #include "TheoraClip.h"
-#include <memory>
 
 namespace bbfx {
 
@@ -14,8 +13,8 @@ public:
     bool isReversed() const { return mReversed; }
 
 private:
-    std::unique_ptr<TheoraReader> mForwardReader;
-    std::unique_ptr<TheoraReader> mReverseReader;
+    std::string mForwardFile;
+    std::string mReverseFile;
     bool mReversed = false;
 };
 

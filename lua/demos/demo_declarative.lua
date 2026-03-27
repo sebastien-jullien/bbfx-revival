@@ -1,6 +1,8 @@
 -- demo_declarative.lua — BBFx v2.5 Declarative Graph Demo
 -- Builds an LFO -> Ramp -> PerlinFxNode graph in declarative style
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -26,8 +28,7 @@ camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 local head = Object:fromMesh("ogrehead.mesh")
 
 -- Create PerlinFxNode
-local perlinFx = bbfx.PerlinFxNode(head.animNode:getName() .. "_perlin",
-    scene, head.movable)
+local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "decl_perlin")
 
 -- Build graph declaratively (< 15 lines)
 local handles = build({

@@ -1,6 +1,8 @@
 -- demo_geosphere.lua — BBFx v2.3 Geosphere Perlin Demo
 -- The signature BBFx effect: geosphere with Perlin noise deformation
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'

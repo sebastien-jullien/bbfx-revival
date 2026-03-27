@@ -3,6 +3,7 @@
 #include <sstream>
 #include <filesystem>
 #include <algorithm>
+#include <iostream>
 
 namespace bbfx {
 
@@ -36,9 +37,10 @@ const SeekEntry* TheoraSeekMap::findKeyframeBefore(float time) const {
     return best ? best : &mEntries[mKeyFrameIndices[0]];
 }
 
-bool TheoraSeekMap::serialize(const std::string& filepath) const {
+bool TheoraSeekMap::serialize(const std::string& filepath, size_t sourceFileSize) const {
     std::ofstream out(filepath);
     if (!out.is_open()) return false;
+    out << "v2 " << sourceFileSize << "\n";
     out << mEntries.size() << "\n";
     for (auto& e : mEntries) {
         out << e.granulePos << " " << e.fileOffset << " " << e.time << "\n";
@@ -50,9 +52,27 @@ bool TheoraSeekMap::serialize(const std::string& filepath) const {
     return true;
 }
 
-bool TheoraSeekMap::deserialize(const std::string& filepath) {
+bool TheoraSeekMap::deserialize(const std::string& filepath, size_t sourceFileSize) {
     std::ifstream in(filepath);
     if (!in.is_open()) return false;
+
+    // Check version header and file size
+    std::string token;
+    in >> token;
+    if (token == "v2") {
+        size_t cachedSize;
+        in >> cachedSize;
+        if (sourceFileSize > 0 && cachedSize != sourceFileSize) {
+            std::cout << "[theora] Seek map cache stale (file size " << cachedSize
+                      << " vs " << sourceFileSize << "), rebuilding" << std::endl;
+            return false;
+        }
+    } else {
+        // Old format (v1) — first token is the entry count, reject stale cache
+        std::cout << "[theora] Seek map cache is old format, rebuilding" << std::endl;
+        return false;
+    }
+
     size_t count;
     in >> count;
     mEntries.resize(count);
@@ -65,6 +85,7 @@ bool TheoraSeekMap::deserialize(const std::string& filepath) {
     for (size_t i = 0; i < kfCount; i++) {
         in >> mKeyFrameIndices[i];
     }
+    mSourceFileSize = sourceFileSize;
     return true;
 }
 

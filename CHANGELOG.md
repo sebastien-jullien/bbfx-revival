@@ -2,6 +2,23 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.8.0] - 2026-03-27
+
+### Added
+- **PerlinGPU** (`resources/shaders/perlin_deform.glsl`): GLSL 330 vertex shader with Perlin 3D noise (Gustavson simplex), uniforms time/displacement/frequency/speed — replaces CPU PerlinVertexShader for 10-100x performance gain
+- **Passthrough fragment shader** (`resources/shaders/passthrough.frag`): basic diffuse+ambient lighting for GPU-deformed meshes
+- **ShaderFxNode** (`src/fx/ShaderFxNode.h/.cpp`): AnimationNode that loads any GLSL vertex shader, auto-parses float uniforms, creates DAG input ports, pushes values to GPU each frame via `GpuProgramParameters::setNamedConstant()`
+- **Shader Lua wrapper** (`lua/shader.lua`): `Shader:load(path, {mesh=entity, uniform=value})` — one-liner to load a GPU shader, wire to DAG, and set initial uniforms. `setUniform()`, `list()`, `ShaderManager` registry
+- **Profiler overlay** (`lua/profiler.lua`): real-time frame time display, toggle via `perf()` REPL command
+- **Demo GPU** (`lua/demos/demo_gpu.lua`): Perlin GPU + audio RMS → displacement + HUD + profiler
+
+### Technical
+- GLSL loaded via `Ogre::HighLevelGpuProgramManager::createProgram()`, uniforms via `GpuProgramParameters`
+- Auto-param mapping: worldViewProj, world, lightDiffuse, ambientLight, materialDiffuse
+- ShaderFxNode parses `uniform float xxx;` lines from .glsl source to discover custom uniforms
+- Shader directory `resources/shaders/` added to `resources.cfg`
+- CPU PerlinVertexShader remains available as fallback
+
 ## [2.7.0] - 2026-03-26
 
 ### Added

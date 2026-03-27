@@ -26,7 +26,8 @@ function SphereTrack:new(cam, target)
     st.azimuth = 0.0
     st.elevation = 0.3
     st.distance = 200.0
-    st.camNode = cam:getParentSceneNode() or scene:getRootSceneNode():createChildSceneNode(UID("stcam/"))
+    st.camNode = scene:getRootSceneNode():createChildSceneNode(UID("stcam/"))
+    st.camNode:attachObject(cam)
 
     -- Create AnimationNode for DAG integration
     st.animNode = bbfx.LuaAnimationNode("SphereTrack", function(self)

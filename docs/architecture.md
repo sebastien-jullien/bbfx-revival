@@ -311,3 +311,61 @@ local sync = Sync:new(song)
 sync:setAutoMode(audio)  -- BPM auto-détecté pilote le séquenceur
 sync:setAutoMode(nil)    -- retour au BPM fixe
 ```
+
+---
+
+## Section 20 — GPU & Shaders (v2.8)
+
+### 20.1 — Pipeline shader OGRE 14.5
+
+```
+.glsl file → HighLevelGpuProgramManager::createProgram()
+  ↓
+Material (Pass → setVertexProgram / setFragmentProgram)
+  ↓
+Entity::setMaterial() → GPU rendering
+  ↓
+ShaderFxNode::update() → GpuProgramParameters::setNamedConstant() each frame
+```
+
+**Auto-params OGRE :** `worldViewProj`, `world`, `lightDiffuse`, `ambientLight`, `materialDiffuse` — mappés automatiquement par ShaderFxNode.
+
+### 20.2 — ShaderFxNode
+
+```cpp
+// src/fx/ShaderFxNode.h
+auto fx = new ShaderFxNode("perlin_gpu", "shaders/perlin_deform.glsl", "", scene, entity);
+// Parses uniform float xxx; → creates input port "xxx"
+// update() pushes port values → GPU uniforms each frame
+// "time" uniform is auto-accumulated from dt
+```
+
+### 20.3 — Shader Lua wrapper
+
+```lua
+require "shader"
+local fx = Shader:load("shaders/perlin_deform.glsl", {
+    mesh = head.movable,
+    displacement = 20.0,
+    frequency = 3.0,
+    speed = 1.5
+})
+fx:setUniform("frequency", 5.0)
+-- Wire audio to GPU:
+animator:addPort(audio.analyzer, "rms", fx._node, "displacement")
+```
+
+### 20.4 — PerlinGPU GLSL
+
+Fichier : `resources/shaders/perlin_deform.glsl`
+
+Vertex shader GLSL 330 avec bruit Perlin 3D simplex (Stefan Gustavson). Déplace chaque vertex le long de sa normale : `pos += normal * snoise(pos * frequency + time * speed) * displacement`.
+
+Uniforms custom : `time` (auto-accumulé), `displacement`, `frequency`, `speed`.
+
+### 20.5 — Profiler overlay
+
+```lua
+require "profiler"
+perf()  -- toggle on/off, shows: Frame: 16.2ms (60 fps)
+```

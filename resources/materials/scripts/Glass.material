@@ -1,8 +1,11 @@
-fragment_program Ogre/Compositor/GlassFP cg
+fragment_program Ogre/Compositor/GlassFP_glsl glsl
 {
-	source GlassFP.cg
-	entry_point main_ps
-	profiles ps_2_0 arbfp1
+	source GlassFP.glsl
+	default_params
+	{
+		param_named tex0 int 0
+		param_named tex1 int 1
+	}
 }
 
 material Ogre/Compositor/GlassPass
@@ -13,17 +16,17 @@ material Ogre/Compositor/GlassPass
 		{
 			depth_check off
 
-			vertex_program_ref Ogre/Compositor/StdQuad_vp
+			vertex_program_ref StdQuad_vp_glsl
 			{
 			}
 
-			fragment_program_ref Ogre/Compositor/GlassFP
+			fragment_program_ref Ogre/Compositor/GlassFP_glsl
 			{
 			}
 
 			texture_unit RT
 			{
-                tex_coord_set 0
+				tex_coord_set 0
 				tex_address_mode clamp
 				filtering linear linear linear
 			}
@@ -31,8 +34,7 @@ material Ogre/Compositor/GlassPass
 			texture_unit
 			{
 				texture WaterNormal1.tga 2d
-                tex_coord_set 1
-				//tex_address_mode clamp
+				tex_coord_set 1
 				filtering linear linear linear
 			}
 		}

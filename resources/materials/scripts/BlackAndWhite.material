@@ -1,0 +1,31 @@
+fragment_program BlackAndWhite_ps_glsl glsl
+{
+	source BlackAndWhite.glsl
+	default_params
+	{
+		param_named tex0 int 0
+	}
+}
+
+material Ogre/Compositor/BlackAndWhite
+{
+	technique
+	{
+		pass
+		{
+			depth_check off
+
+			vertex_program_ref StdQuad_vp_glsl
+			{
+			}
+			fragment_program_ref BlackAndWhite_ps_glsl
+			{
+			}
+
+			texture_unit
+			{
+				tex_address_mode clamp
+			}
+		}
+	}
+}
