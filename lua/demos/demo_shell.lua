@@ -44,8 +44,9 @@ camNode:setPosition(Ogre.Vector3(0, 0, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
 -- Geosphere with Perlin + LFO
-local head = Object:fromMesh("ogrehead.mesh")
 local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "shell_perlin")
+perlinFx:enable()
+local head = Object:fromMesh("shell_perlin")
 
 -- Declarative graph: LFO → Ramp → Perlin
 local handles = build({

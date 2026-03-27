@@ -42,8 +42,9 @@ camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
 -- ── Geosphere with PerlinFxNode ────────────────────────────────────────────
 
-local head = Object:fromMesh("ogrehead.mesh")
 local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "v25_perlin")
+perlinFx:enable()
+local head = Object:fromMesh("v25_perlin")
 
 -- ── Spline-animated particle (Compo pattern) ───────────────────────────────
 -- Use a regular object if particle template is unavailable
@@ -56,25 +57,26 @@ if ok and psys then
     animTarget = psys
     print("[demo_v25] Particle system loaded: particle/starwars")
 else
-    -- Fallback: animate a second mesh node
-    animTarget = Object:fromMesh("ogrehead.mesh")
-    animTarget:setPosition(Ogre.Vector3(120, 0, 0))
-    print("[demo_v25] Particle unavailable — using mesh for spline animation")
+    print("[demo_v25] Particle unavailable — spline animation skipped")
 end
 
--- Spline animation on the animated target
-local splineAnim = Animation:new()
-splineAnim:addFrames(
-    {length = 1, translate = Ogre.Vector3(0,   0,   0)},
-    {length = 1, translate = Ogre.Vector3(60,  40,  0)},
-    {length = 1, translate = Ogre.Vector3(100, 0,   50)},
-    {length = 1, translate = Ogre.Vector3(60, -40,  0)},
-    {length = 1, translate = Ogre.Vector3(0,   0,   0)}
-)
-splineAnim:create(Animation.IM_SPLINE, Animation.RIM_LINEAR, true)
-splineAnim:bind(animTarget.animNode)
-splineAnim:play()
-local animPlaying = true
+-- Spline animation on the animated target (only if particles loaded)
+local splineAnim = nil
+local animPlaying = false
+if animTarget then
+    splineAnim = Animation:new()
+    splineAnim:addFrames(
+        {length = 1, translate = Ogre.Vector3(0,   0,   0)},
+        {length = 1, translate = Ogre.Vector3(60,  40,  0)},
+        {length = 1, translate = Ogre.Vector3(100, 0,   50)},
+        {length = 1, translate = Ogre.Vector3(60, -40,  0)},
+        {length = 1, translate = Ogre.Vector3(0,   0,   0)}
+    )
+    splineAnim:create(Animation.IM_SPLINE, Animation.RIM_LINEAR, true)
+    splineAnim:bind(animTarget.animNode)
+    splineAnim:play()
+    animPlaying = true
+end
 
 -- ── TextureSet cycling ─────────────────────────────────────────────────────
 
@@ -153,8 +155,8 @@ local updateNode = bbfx.LuaAnimationNode(UID("v25update/"), function(self_node)
         end
     end
 
-    -- P → play/pause spline animation
-    if keyboard:wasKeyPressed(112) then
+    -- P → play/pause spline animation (if available)
+    if splineAnim and keyboard:wasKeyPressed(112) then
         if animPlaying then
             splineAnim:stop()
             animPlaying = false

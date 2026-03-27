@@ -2,6 +2,24 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [2.9.0] - 2026-03-27
+
+### Added
+- **InputRecorder** (`src/record/InputRecorder.h/.cpp`): records keyboard/joystick/audio beat events with timestamps to `.bbfx-session` files (JSON Lines format, flushed per event)
+- **InputPlayer** (`src/record/InputPlayer.h/.cpp`): replays `.bbfx-session` files, dispatching events at correct timestamps. Simple JSON parser, no external dependency
+- **VideoExporter** (`src/record/VideoExporter.h/.cpp`): captures each rendered frame as PNG via `RenderTarget::writeContentsToFile()`, sequential numbering (frame_000001.png)
+- **Mode offline** (`Engine::setOfflineMode/setOnlineMode`): fixed dt (1/fps) instead of real-time clock, renders at max speed without vsync
+- **Lua wrappers**: `recorder.lua` (record/stoprecord), `player.lua` (replay/stopreplay), `exporter.lua` (export_start/stopexport)
+- **functional.lua**: `map(t, fn)`, `filter(t, fn)`, `reduce(t, fn, init)`, `keys(t)`, `values(t)` — Lua functional utilities
+- **remdebug.lua**: mobdebug integration for remote Lua debugging via VS Code, `debug()` REPL command
+- **Demo production** (`lua/demos/demo_production.lua`): pipeline end-to-end — R=record, P=replay offline, E=export PNG
+
+### Technical
+- `.bbfx-session` format: JSON Lines (NDJSON), one event per line, flushed immediately
+- InputPlayer: simple JSON key extraction without external lib
+- VideoExporter uses `std::filesystem::create_directories` for output dir
+- Engine offline mode modifies dt source for entire DAG chain
+
 ## [2.8.0] - 2026-03-27
 
 ### Added

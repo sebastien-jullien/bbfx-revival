@@ -18,6 +18,9 @@
 #include "../video/ReversableClip.h"
 #include "../video/TextureCrossfader.h"
 #include "../video/TheoraClipNode.h"
+#include "../record/InputRecorder.h"
+#include "../record/InputPlayer.h"
+#include "../record/VideoExporter.h"
 #include "../network/TcpServer.h"
 #include "../audio/AudioCapture.h"
 #include "../audio/AudioAnalyzer.h"
@@ -47,7 +50,13 @@ void register_bbfx_bindings(sol::state& lua) {
         "getSceneManager", &Engine::getSceneManager,
         "getRenderWindow", &Engine::getRenderWindow,
         "screenshot", &Engine::screenshot,
-        "toggleFullscreen", &Engine::toggleFullscreen
+        "toggleFullscreen", &Engine::toggleFullscreen,
+        "setOfflineMode", &Engine::setOfflineMode,
+        "setOnlineMode", &Engine::setOnlineMode,
+        "isOfflineMode", &Engine::isOfflineMode,
+        "getOfflineDt", &Engine::getOfflineDt,
+        "setVideoExporter", &Engine::setVideoExporter,
+        "clearVideoExporter", &Engine::clearVideoExporter
     );
     bbfx["Engine"] = lua["bbfx_Engine"];
 
@@ -233,7 +242,9 @@ void register_bbfx_bindings(sol::state& lua) {
         ),
         "enable", &PerlinVertexShader::enable,
         "disable", &PerlinVertexShader::disable,
-        "renderOneFrame", &PerlinVertexShader::renderOneFrame
+        "renderOneFrame", &PerlinVertexShader::renderOneFrame,
+        "setDisplacement", &PerlinVertexShader::setDisplacement,
+        "getDisplacement", &PerlinVertexShader::getDisplacement
     );
     bbfx["PerlinVertexShader"] = lua["bbfx_PerlinVertexShader"];
 
@@ -422,6 +433,7 @@ void register_bbfx_bindings(sol::state& lua) {
             }
         ),
         "hasFreshData", &AudioCaptureNode::hasFreshData,
+        "tick", [](AudioCaptureNode* n) { n->update(); },
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["AudioCaptureNode"] = lua["bbfx_AudioCaptureNode"];
@@ -435,6 +447,7 @@ void register_bbfx_bindings(sol::state& lua) {
         "getRMS", &AudioAnalyzerNode::getRMS,
         "getPeak", &AudioAnalyzerNode::getPeak,
         "getBand", &AudioAnalyzerNode::getBand,
+        "tick", [](AudioAnalyzerNode* n) { n->update(); },
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["AudioAnalyzerNode"] = lua["bbfx_AudioAnalyzerNode"];
@@ -584,6 +597,53 @@ void register_bbfx_bindings(sol::state& lua) {
         "hide", &Ogre::TextAreaOverlayElement::hide,
         sol::base_classes, sol::bases<Ogre::OverlayElement>()
     );
+
+    // ── v2.9: InputRecorder bindings ───────────────────────────────────
+    lua.new_usertype<InputRecorder>("bbfx_InputRecorder",
+        sol::call_constructor, sol::factories([]() { return new InputRecorder(); }),
+        "start", &InputRecorder::start,
+        "stop", &InputRecorder::stop,
+        "isRecording", &InputRecorder::isRecording,
+        "advanceTime", &InputRecorder::advanceTime,
+        "recordKey", &InputRecorder::recordKey,
+        "recordAxis", &InputRecorder::recordAxis,
+        "recordBeat", &InputRecorder::recordBeat
+    );
+    bbfx["InputRecorder"] = lua["bbfx_InputRecorder"];
+
+    // ── v2.9: InputPlayer bindings ──────────────────────────────────────
+    lua.new_usertype<InputPlayer>("bbfx_InputPlayer",
+        sol::call_constructor, sol::factories([]() { return new InputPlayer(); }),
+        "play", &InputPlayer::play,
+        "stop", &InputPlayer::stop,
+        "isPlaying", &InputPlayer::isPlaying,
+        "getNextEvents", [&lua](InputPlayer& self, float dt) -> sol::table {
+            auto events = self.getNextEvents(dt);
+            sol::table result = lua.create_table();
+            for (size_t i = 0; i < events.size(); ++i) {
+                sol::table e = lua.create_table();
+                e["type"] = events[i].type;
+                e["code"] = events[i].code;
+                e["state"] = events[i].state;
+                e["value"] = events[i].value;
+                e["time"] = events[i].time;
+                result[i + 1] = e;
+            }
+            return result;
+        }
+    );
+    bbfx["InputPlayer"] = lua["bbfx_InputPlayer"];
+
+    // ── v2.9: VideoExporter bindings ────────────────────────────────────
+    lua.new_usertype<VideoExporter>("bbfx_VideoExporter",
+        sol::call_constructor, sol::factories([]() { return new VideoExporter(); }),
+        "start", &VideoExporter::start,
+        "captureFrame", [](VideoExporter& self, Ogre::RenderWindow* rw) { self.captureFrame(rw); },
+        "stop", &VideoExporter::stop,
+        "isExporting", &VideoExporter::isExporting,
+        "getFrameCount", &VideoExporter::getFrameCount
+    );
+    bbfx["VideoExporter"] = lua["bbfx_VideoExporter"];
 
     // ── v2.6: fileModTime binding ───────────────────────────────────────
     bbfx["fileModTime"] = [](const std::string& path) -> double {

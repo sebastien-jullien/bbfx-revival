@@ -51,6 +51,7 @@ private:
     std::vector<float> mRingBuffer;
     int mWritePos = 0;
     bool mNewData = false;
+    bool mCallbackFired = false;
 };
 
 /// AnimationNode wrapper for AudioCapture.

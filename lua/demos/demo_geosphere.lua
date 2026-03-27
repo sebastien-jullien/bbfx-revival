@@ -52,6 +52,12 @@ local js = nil
 local joyMgr = bbfx.InputManager.instance():getJoystick()
 if joyMgr:getCount() > 0 then
     js = Joystick:open(0)
+    js:bind("axis", 1, function(val)
+        -- val is 0..1, center ~0.5; deadzone prevents overriding keyboard at rest
+        if math.abs(val - 0.5) > 0.1 then
+            displacementVal = val * 0.5
+        end
+    end)
     print("[demo_geosphere] Joystick detected")
 end
 
@@ -65,6 +71,7 @@ local updateNode = bbfx.LuaAnimationNode("geoUpdate", function(self)
     geoObj.node:yaw(Ogre.Radian(dt * rotSpeed))
 
     -- Perlin update
+    perlin:setDisplacement(displacementVal)
     perlin:renderOneFrame(dt)
 
     -- SphereTrack auto-rotate

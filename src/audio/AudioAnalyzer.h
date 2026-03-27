@@ -27,6 +27,8 @@ private:
     float mRMS = 0.0f;
     float mPeak = 0.0f;
     float mBands[NUM_BANDS] = {};
+    float mPeakRMSSinceLog = 0.0f;
+    Uint64 mLastLogTick = 0;
 };
 
 } // namespace bbfx

@@ -83,6 +83,11 @@ function Audio:start(params)
     return o
 end
 
+function Audio:tick()
+    self._captureNode:tick()
+    self._analyzerNode:tick()
+end
+
 function Audio:getRMS()
     return self._analyzerNode:getRMS()
 end

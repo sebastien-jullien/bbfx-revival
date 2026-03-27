@@ -151,7 +151,7 @@ void SoftwareVertexShader::_prepareClonedMesh() {
                 auto it = snaps.find(src);
                 if (it != snaps.end()) {
                     auto buf = HardwareBufferManager::getSingleton().createVertexBuffer(
-                        it->second.vertexSize, it->second.numVertices, HBU_CPU_ONLY, false);
+                        it->second.vertexSize, it->second.numVertices, HBU_CPU_TO_GPU, false);
                     // Write snapshot data into the new CPU buffer
                     void* dst = buf->lock(HardwareBuffer::HBL_DISCARD);
                     std::memcpy(dst, it->second.data.data(), it->second.data.size());

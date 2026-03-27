@@ -11,6 +11,7 @@ public:
     JoystickManager();
     ~JoystickManager();
 
+    void init();
     void handleEvent(const SDL_Event& evt);
 
     float getAxisValue(int joystickId, int axis) const;
@@ -20,7 +21,8 @@ public:
 private:
     struct GamepadEntry {
         SDL_JoystickID id;
-        SDL_Gamepad* gamepad;
+        SDL_Gamepad*   gamepad;   // non-null if SDL gamepad mapping exists
+        SDL_Joystick*  joystick;  // non-null if raw joystick fallback
     };
     std::vector<GamepadEntry> mGamepads;
 

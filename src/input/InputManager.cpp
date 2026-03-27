@@ -7,6 +7,7 @@ InputManager* InputManager::sInstance = nullptr;
 InputManager::InputManager() {
     assert(!sInstance);
     sInstance = this;
+    mJoystick.init();
 }
 
 InputManager* InputManager::instance() {
