@@ -13,6 +13,7 @@
 #include "../fx/TextureBlitterNode.h"
 #include "../fx/WaveVertexShader.h"
 #include "../fx/ColorShiftNode.h"
+#include "../fx/ShaderFxNode.h"
 #include "../video/TheoraClip.h"
 #include "../video/ReversableClip.h"
 #include "../video/TextureCrossfader.h"
@@ -27,6 +28,10 @@
 #include <OgreOverlayElement.h>
 #include <OgreTextAreaOverlayElement.h>
 #include <OgreFontManager.h>
+#include <OgreViewport.h>
+#include <OgreRenderWindow.h>
+#include <OgreParticleSystem.h>
+#include <OgreCompositorManager.h>
 
 namespace bbfx {
 
@@ -309,6 +314,8 @@ void register_bbfx_bindings(sol::state& lua) {
         "setTime", &TheoraClip::setTime,
         "getTime", &TheoraClip::getTime,
         "isPlaying", &TheoraClip::isPlaying,
+        "setLoop", &TheoraClip::setLoop,
+        "isLooping", &TheoraClip::isLooping,
         "getMaterialName", &TheoraClip::getMaterialName,
         "getWidth", &TheoraClip::getWidth,
         "getHeight", &TheoraClip::getHeight
@@ -442,8 +449,79 @@ void register_bbfx_bindings(sol::state& lua) {
     );
     bbfx["BeatDetectorNode"] = lua["bbfx_BeatDetectorNode"];
 
-    // ── v2.7: Overlay bindings ────────────────────────────────────────
+    // ── Ogre::Viewport / RenderWindow bindings ────────────────────────
     auto ogre = lua["Ogre"].get_or_create<sol::table>();
+
+    lua.new_usertype<Ogre::Viewport>("Ogre_Viewport",
+        sol::no_constructor,
+        "setBackgroundColour", &Ogre::Viewport::setBackgroundColour,
+        "getBackgroundColour", &Ogre::Viewport::getBackgroundColour
+    );
+
+    lua.new_usertype<Ogre::RenderWindow>("Ogre_RenderWindow",
+        sol::no_constructor,
+        "getViewport", &Ogre::RenderWindow::getViewport,
+        "getNumViewports", &Ogre::RenderWindow::getNumViewports,
+        "getWidth", &Ogre::RenderWindow::getWidth,
+        "getHeight", &Ogre::RenderWindow::getHeight
+    );
+
+    // ── Ogre::ParticleSystem bindings ──────────────────────────────────
+    lua.new_usertype<Ogre::ParticleSystem>("Ogre_ParticleSystem",
+        sol::no_constructor,
+        sol::base_classes, sol::bases<Ogre::MovableObject>(),
+        "setVisible", &Ogre::ParticleSystem::setVisible,
+        "getName", &Ogre::ParticleSystem::getName,
+        "getNumParticles", &Ogre::ParticleSystem::getNumParticles,
+        "setEmitting", &Ogre::ParticleSystem::setEmitting,
+        "fastForward", &Ogre::ParticleSystem::fastForward
+    );
+
+    ogre.set_function("createParticleSystem",
+        [](Ogre::SceneManager* sm, const std::string& name, const std::string& templateName) -> Ogre::ParticleSystem* {
+            return sm->createParticleSystem(name, templateName);
+        }
+    );
+
+    // ── Ogre::CompositorManager bindings (lightweight table approach) ──
+    // Lua code uses: Ogre.CompositorManager.getSingleton():addCompositor(vp, name)
+    // We emulate this by creating a table with methods that delegate to the singleton.
+    {
+        sol::table cmgr = lua.create_table();
+        cmgr["getSingleton"] = [&lua]() {
+            sol::table inst = lua.create_table();
+            inst["addCompositor"] = [](sol::table, Ogre::Viewport* vp, const std::string& name) {
+                Ogre::CompositorManager::getSingleton().addCompositor(vp, name);
+            };
+            inst["removeCompositor"] = [](sol::table, Ogre::Viewport* vp, const std::string& name) {
+                Ogre::CompositorManager::getSingleton().removeCompositor(vp, name);
+            };
+            inst["setCompositorEnabled"] = [](sol::table, Ogre::Viewport* vp, const std::string& name, bool enabled) {
+                Ogre::CompositorManager::getSingleton().setCompositorEnabled(vp, name, enabled);
+            };
+            return inst;
+        };
+        ogre["CompositorManager"] = cmgr;
+    }
+
+    // ── v2.8: ShaderFxNode bindings ────────────────────────────────────
+    lua.new_usertype<ShaderFxNode>("bbfx_ShaderFxNode",
+        sol::call_constructor, sol::factories(
+            [](const std::string& name, const std::string& vertPath,
+               const std::string& fragPath, Ogre::SceneManager* scene,
+               Ogre::Entity* entity) {
+                return new ShaderFxNode(name, vertPath, fragPath, scene, entity);
+            },
+            [](const std::string& name, const std::string& vertPath,
+               Ogre::SceneManager* scene, Ogre::Entity* entity) {
+                return new ShaderFxNode(name, vertPath, "", scene, entity);
+            }
+        ),
+        sol::base_classes, sol::bases<AnimationNode>()
+    );
+    bbfx["ShaderFxNode"] = lua["bbfx_ShaderFxNode"];
+
+    // ── v2.7: Overlay bindings ────────────────────────────────────────
 
     ogre.set_function("OverlayManager_getSingleton", []() -> Ogre::OverlayManager& {
         return Ogre::OverlayManager::getSingleton();

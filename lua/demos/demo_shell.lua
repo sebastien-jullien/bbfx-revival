@@ -1,6 +1,8 @@
 -- demo_shell.lua — BBFx v2.6 "Shell & Scripting" Interactive Demo
 -- REPL console + TCP shell server (port 33195) + hot reload
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -43,7 +45,7 @@ camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
 -- Geosphere with Perlin + LFO
 local head = Object:fromMesh("ogrehead.mesh")
-local perlinFx = bbfx.PerlinFxNode(head.animNode:getName() .. "_perlin", scene, head.movable)
+local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "shell_perlin")
 
 -- Declarative graph: LFO → Ramp → Perlin
 local handles = build({

@@ -8,6 +8,43 @@
 #include <iostream>
 #include <filesystem>
 
+namespace {
+std::filesystem::path findProjectRoot(const std::filesystem::path& start) {
+    auto current = std::filesystem::absolute(start);
+    while (!current.empty()) {
+        if (std::filesystem::exists(current / "resources.cfg") &&
+            std::filesystem::exists(current / "lua") &&
+            std::filesystem::exists(current / "src")) {
+            return current;
+        }
+        auto parent = current.parent_path();
+        if (parent == current) break;
+        current = parent;
+    }
+    return {};
+}
+
+std::filesystem::path resolveLuaScriptPath(const std::filesystem::path& projectRoot,
+                                           const std::filesystem::path& exeDir,
+                                           const std::string& argPath) {
+    std::filesystem::path requested(argPath);
+    if (requested.is_absolute() && std::filesystem::exists(requested)) {
+        return requested;
+    }
+    if (!projectRoot.empty()) {
+        auto fromProject = projectRoot / requested;
+        if (std::filesystem::exists(fromProject)) {
+            return fromProject;
+        }
+    }
+    auto fromExe = exeDir / requested;
+    if (std::filesystem::exists(fromExe)) {
+        return fromExe;
+    }
+    return requested;
+}
+} // namespace
+
 int main(int argc, char* argv[]) {
     try {
         // Set working directory to executable location (so resources.cfg is found)
@@ -15,10 +52,20 @@ int main(int argc, char* argv[]) {
         if (!exePath.empty()) {
             std::filesystem::current_path(exePath);
         }
+        auto projectRoot = findProjectRoot(std::filesystem::current_path());
         sol::state lua;
         lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
                            sol::lib::table, sol::lib::io, sol::lib::os,
                            sol::lib::package);
+
+        // Prepend lua/ to package.path so scripts in lua/demos/ can require
+        // modules that live in lua/ (helpers, object, effect, etc.)
+        std::string packagePath = lua["package"]["path"].get<std::string>();
+        if (!projectRoot.empty()) {
+            packagePath = (projectRoot / "lua" / "?.lua").string() + ";" + packagePath;
+        }
+        packagePath = std::string("lua/?.lua;") + packagePath;
+        lua["package"]["path"] = packagePath;
 
         // Register ogre-lua bindings (Ogre.Vector3, etc.)
         ogre_lua::register_all(lua);
@@ -40,7 +87,8 @@ int main(int argc, char* argv[]) {
 
         // Run Lua script if provided
         if (argc > 1) {
-            auto result = lua.safe_script_file(argv[1], sol::script_pass_on_error);
+            auto scriptPath = resolveLuaScriptPath(projectRoot, exePath, argv[1]);
+            auto result = lua.safe_script_file(scriptPath.string(), sol::script_pass_on_error);
             if (!result.valid()) {
                 sol::error err = result;
                 std::cerr << "Lua error: " << err.what() << '\n';

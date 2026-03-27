@@ -1,7 +1,7 @@
 // Example particle systems
 
 // Exudes greeny particles which float upwards
-Examples/GreenyNimbus
+particle_system Examples/GreenyNimbus
 {
     material        Examples/FlarePointSprite
 	point_rendering	true
@@ -44,7 +44,7 @@ Examples/GreenyNimbus
 }
 
 // A sparkly purple fountain
-Examples/PurpleFountain
+particle_system Examples/PurpleFountain
 {
     material        Examples/Flare2
     particle_width  20
@@ -84,7 +84,7 @@ Examples/PurpleFountain
 
 
 // A downpour
-Examples/Rain
+particle_system Examples/Rain
 {
     material        Examples/Droplet
     particle_width  20
@@ -120,7 +120,7 @@ Examples/Rain
 }
 
 // A jet engine (of sorts)
-Examples/JetEngine1
+particle_system Examples/JetEngine1
 {
 	material 		Examples/Flare
 	particle_width 	25
@@ -149,7 +149,7 @@ Examples/JetEngine1
 	}
 	
 }
-Examples/JetEngine2
+particle_system Examples/JetEngine2
 {
 	material 		Examples/Flare
 	particle_width 	15
@@ -180,7 +180,7 @@ Examples/JetEngine2
 }
 
 // Exudes aureola particles which around the model float upwards
-Examples/Aureola
+particle_system Examples/Aureola
 {
     material        Examples/Aureola
     particle_width  200
@@ -242,7 +242,7 @@ Examples/Aureola
 }
 
 // Exudes aureola particles which around the model float upwards
-Examples/Aureola_tweak
+particle_system Examples/Aureola_tweak
 {
     material        Examples/Aureola
     particle_width  200
@@ -282,11 +282,10 @@ Examples/Aureola_tweak
     // Fader
     affector ColourFader
     {
-        red1 +0.1
-        green1 +0.1
-        blue1 +0.1
-        alpha1 +0.1
-
+        red +0.1
+        green +0.1
+        blue +0.1
+        alpha +0.1
     }
 
     // Rotater
@@ -300,7 +299,7 @@ Examples/Aureola_tweak
 }
 
 
-Examples/Swarm
+particle_system Examples/Swarm
 {
 	quota	3000
 	material	Examples/Flare2
@@ -395,7 +394,7 @@ Examples/Swarm
 }
 
 
-Examples/Snow
+particle_system Examples/Snow
 {
 	quota	2000
 	material	Examples/Flare

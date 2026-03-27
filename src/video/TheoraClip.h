@@ -25,6 +25,8 @@ public:
     float getTime() const { return mTime; }
     bool isPlaying() const { return mPlaying.load(); }
     bool isFrameReady() const { return mFrameReady.load(); }
+    void setLoop(bool loop) { mLoop.store(loop); }
+    bool isLooping() const { return mLoop.load(); }
 
     const std::string& getMaterialName() const { return mBlitter->getMaterialName(); }
     int getWidth() const { return mReader->getWidth(); }
@@ -32,6 +34,7 @@ public:
 
 protected:
     void run(std::stop_token stopToken);
+    virtual float getLoopStart() const { return 0.0f; }
 
     std::unique_ptr<TheoraReader> mReader;
     std::unique_ptr<TheoraBlitter> mBlitter;
@@ -44,9 +47,12 @@ protected:
     std::atomic<bool> mPlaying{false};
     std::atomic<bool> mRunning{false};
     std::atomic<bool> mFrameReady{false};
+    std::atomic<bool> mSeeking{false};
+    std::atomic<bool> mLoop{false};
 
     float mTime = 0.0f;
     float mDecodeTime = 0.0f;
+    float mFrameTimer = 0.0f;  // accumulator for frame pacing
     th_ycbcr_buffer mYCbCr;
     int mFramesRendered = 0;
     int mFramesDropped = 0;

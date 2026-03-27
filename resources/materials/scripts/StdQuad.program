@@ -1,0 +1,4 @@
+vertex_program StdQuad_vp_glsl glsl
+{
+	source StdQuad_vp.glsl
+}
