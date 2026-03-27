@@ -28,9 +28,9 @@ public:
     // Find the nearest keyframe at or before the given time
     const SeekEntry* findKeyframeBefore(float time) const;
 
-    // Serialize/deserialize as simple text format
-    bool serialize(const std::string& filepath) const;
-    bool deserialize(const std::string& filepath);
+    // Serialize/deserialize as simple text format (includes file size for staleness detection)
+    bool serialize(const std::string& filepath, size_t sourceFileSize = 0) const;
+    bool deserialize(const std::string& filepath, size_t sourceFileSize = 0);
 
     // Generate a portable cache filename
     static std::string cacheFilename(const std::string& videoFilename);
@@ -38,6 +38,7 @@ public:
 private:
     std::vector<SeekEntry> mEntries;
     std::vector<size_t> mKeyFrameIndices;
+    size_t mSourceFileSize = 0;
 };
 
 } // namespace bbfx

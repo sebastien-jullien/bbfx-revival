@@ -28,6 +28,10 @@ public:
     void rawseek(long offset);
     void seekPacket(long packetNo);
 
+    // File offset up to which OGG sync has consumed data.
+    // Unlike mFile.tellg(), this accounts for buffered-but-unconsumed bytes.
+    long consumedOffset();
+
     const std::string& getFilename() const { return mFilename; }
     long getDataStartOffset() const { return mDataStartOffset; }
 
@@ -38,6 +42,7 @@ protected:
     ogg_stream_state mStreamState;
     bool mStreamInitialized = false;
     long mDataStartOffset = 0;
+    long mLastPageOffset = 0;  // file offset of last page extracted by readPage
 
     static constexpr int BUFFER_SIZE = 4096;
 };

@@ -1,6 +1,8 @@
 -- demo_video.lua — BBFx v2.4 Video Demo
 -- Plays bombe.ogg as a dynamic texture on a billboard
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -9,9 +11,9 @@ require 'video'
 bbfx_globals()
 
 print("[demo_video] BBFx Theora Video Demo")
-print("  P: Play/Pause")
-print("  R: Reverse (if available)")
-print("  S: Stop")
+print("  P: Play / Pause")
+print("  R: Rewind to start")
+print("  B: Toggle reverse direction")
 print("  ESC: Quit")
 
 -- Scene setup
@@ -29,22 +31,38 @@ camNode:attachObject(cam)
 camNode:setPosition(Ogre.Vector3(0, 0, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
--- Try to load video
+-- Load video (ReversableClip: forward + reverse files)
+local videoBases = {
+    "resources/video/",
+    "../resources/video/",
+    "../../resources/video/",
+}
 local clip = nil
-local ok, err = pcall(function()
-    clip = Video:createClip("bombe.ogg")
-end)
+local lastErr = nil
+for _, base in ipairs(videoBases) do
+    local fwd = base .. "bombe.ogg"
+    local rev = base .. "bombe_reverse.ogg"
+    local ok, err = pcall(function()
+        clip = bbfx.ReversableClip(fwd, rev)
+    end)
+    if ok and clip then
+        print("[demo_video] Loaded ReversableClip: " .. fwd)
+        break
+    end
+    lastErr = err
+end
 
 if clip then
     -- Create billboard with video texture
     local videoObj = Video:overlay(clip, cam, 30, 22)
     videoObj:setPosition(Ogre.Vector3(0, 0, 0))
+    clip:setLoop(true)
     clip:play()
-    print("[demo_video] Video playing: bombe.ogg")
+    print("[demo_video] Playing (loop, P=play/pause, R=rewind, B=reverse)")
 else
-    print("[demo_video] Could not load bombe.ogg: " .. tostring(err))
+    print("[demo_video] Could not load bombe.ogg / bombe_reverse.ogg")
+    print("[demo_video] Last error: " .. tostring(lastErr))
     print("[demo_video] Falling back to static scene")
-    -- Fallback: show ogrehead
     local head = Object:fromMesh("ogrehead.mesh")
 end
 
@@ -74,10 +92,16 @@ local updateNode = bbfx.LuaAnimationNode("videoUpdate", function(self)
             end
         end
     end
-    if keyboard:wasKeyPressed(115) then -- 's'
+    if keyboard:wasKeyPressed(114) then -- 'r' rewind
         if clip then
-            clip:stop()
-            print("[demo_video] Stopped")
+            clip:setTime(0)
+            print("[demo_video] Rewound to start")
+        end
+    end
+    if keyboard:wasKeyPressed(98) then -- 'b' backward/forward toggle
+        if clip then
+            clip:doReverse()
+            print("[demo_video] Direction: " .. (clip:isReversed() and "REVERSE" or "FORWARD"))
         end
     end
 end)

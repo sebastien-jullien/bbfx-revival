@@ -46,6 +46,9 @@ private:
     static int sGV[256];
     static int sBU[256];
     static void initTables();
+    int mBlitCount = 0;
+public:
+    void resetDiagnostics() { mBlitCount = 0; }
 };
 
 } // namespace bbfx

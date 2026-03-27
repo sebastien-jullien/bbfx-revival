@@ -9,6 +9,7 @@
 #include <OgreMaterialManager.h>
 #include <OgreTechnique.h>
 #include <vector>
+#include <filesystem>
 
 namespace {
 // RTSS material listener: auto-generates shaders for fixed-function materials
@@ -26,8 +27,13 @@ public:
             *mat, Ogre::MaterialManager::DEFAULT_SCHEME_NAME, schemeName);
         if (success) {
             mShaderGen->validateMaterial(schemeName, mat->getName(), mat->getGroup());
-            if (mat->getTechnique(0)->getPass(0)->hasVertexProgram()) {
-                return mat->getTechnique(0);
+            // Return the RTSS-generated technique (last one added), not the original
+            unsigned short numTechs = mat->getNumTechniques();
+            for (short i = (short)numTechs - 1; i >= 0; --i) {
+                Ogre::Technique* tech = mat->getTechnique((unsigned short)i);
+                if (tech->getSchemeName() == schemeName) {
+                    return tech;
+                }
             }
         }
         return nullptr;
@@ -37,6 +43,22 @@ private:
 };
 
 static std::unique_ptr<ShaderGeneratorResolver> sShaderResolver;
+
+std::filesystem::path findProjectRoot(const std::filesystem::path& start) {
+    auto current = std::filesystem::absolute(start);
+    while (!current.empty()) {
+        if (std::filesystem::exists(current / "resources.cfg") &&
+            std::filesystem::exists(current / "lua") &&
+            std::filesystem::exists(current / "src")) {
+            return current;
+        }
+        auto parent = current.parent_path();
+        if (parent == current) break;
+        current = parent;
+    }
+    return {};
+}
+
 } // anon namespace
 
 namespace bbfx {
@@ -137,13 +159,27 @@ void Engine::loadOgrePlugins() {
 }
 
 void Engine::loadResources() {
+    auto exeDir = std::filesystem::current_path();
+    auto projectRoot = findProjectRoot(exeDir);
+    auto configPath = !projectRoot.empty()
+        ? (projectRoot / "resources.cfg")
+        : (exeDir / "resources.cfg");
+
     Ogre::ConfigFile cf;
-    cf.load("resources.cfg");
+    cf.load(configPath.string());
 
     for (const auto& sec : cf.getSettingsBySection()) {
         for (const auto& setting : sec.second) {
+            auto resourcePath = std::filesystem::path(setting.second);
+            if (!resourcePath.is_absolute()) {
+                if (!projectRoot.empty()) {
+                    resourcePath = projectRoot / resourcePath;
+                } else {
+                    resourcePath = exeDir / resourcePath;
+                }
+            }
             Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
-                setting.second, setting.first, sec.first);
+                resourcePath.string(), setting.first, sec.first);
         }
     }
 

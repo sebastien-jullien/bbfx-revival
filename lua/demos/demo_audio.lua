@@ -1,6 +1,8 @@
 -- demo_audio.lua — BBFx v2.7 "Audio Réactif" Demo
 -- The Saint Graal: visuals react to music in real-time
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -39,7 +41,7 @@ camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
 -- Geosphere with Perlin
 local head = Object:fromMesh("ogrehead.mesh")
-local perlinFx = bbfx.PerlinFxNode(head.animNode:getName() .. "_perlin", scene, head.movable)
+local perlinFx = bbfx.PerlinFxNode("ogrehead.mesh", "audio_perlin")
 
 -- Audio chain
 local audioInst = Audio:start()

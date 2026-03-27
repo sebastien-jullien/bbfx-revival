@@ -1,0 +1,32 @@
+fragment_program Embossed_ps_glsl glsl
+{
+	source Embossed.glsl
+	default_params
+	{
+		param_named tex0 int 0
+		param_named texelSize float2 0.001 0.001
+	}
+}
+
+material Ogre/Compositor/Embossed
+{
+	technique
+	{
+		pass
+		{
+			depth_check off
+
+			vertex_program_ref StdQuad_vp_glsl
+			{
+			}
+			fragment_program_ref Embossed_ps_glsl
+			{
+			}
+
+			texture_unit
+			{
+				tex_address_mode clamp
+			}
+		}
+	}
+}

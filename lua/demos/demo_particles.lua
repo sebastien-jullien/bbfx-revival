@@ -1,5 +1,7 @@
 -- demo_particles.lua — BBFx v2.3 Particle Systems Demo
 
+package.path = "lua/?.lua;" .. package.path
+
 require 'helpers'
 require 'object'
 require 'effect'
@@ -34,20 +36,25 @@ camNode:attachObject(cam)
 camNode:setPosition(Ogre.Vector3(0, 50, 300))
 camNode:lookAt(Ogre.Vector3(0, 0, 0), 2)
 
--- Particle systems (created but may need templates to be loaded)
+-- Particle systems
 local particles = {}
 local particleNames = {"Examples/Aureola", "Examples/PurpleFountain", "Examples/Rain"}
-local particleVisible = {false, false, false}
+local particlePositions = {
+    Ogre.Vector3(  0,   0, 0),   -- Aureola: autour de la tête
+    Ogre.Vector3(-120,  0, 0),   -- PurpleFountain: à gauche
+    Ogre.Vector3( 120, 200, 0),  -- Rain: en haut à droite
+}
+local particleVisible = {true, true, true}
 
 for i, name in ipairs(particleNames) do
-    local ok, psys = pcall(function()
-        return Ogre.createParticleSystem(scene, UID("psys/"), name)
+    local ok, obj = pcall(function()
+        return Object:fromPsys(name)
     end)
-    if ok and psys then
-        local node = scene:getRootSceneNode():createChildSceneNode(UID("psysNode/"))
-        node:attachObject(psys)
-        psys:setVisible(false)
-        particles[i] = {system = psys, node = node, name = name}
+    if ok and obj then
+        obj:setPosition(particlePositions[i])
+        obj.movable:setEmitting(true)
+        obj.movable:fastForward(2.0, 0.1)
+        particles[i] = {system = obj.movable, node = obj.node, obj = obj, name = name}
         print("[demo_particles] Loaded: " .. name)
     else
         print("[demo_particles] Could not load: " .. name .. " (template may not exist)")
@@ -58,10 +65,18 @@ end
 local tn = bbfx.RootTimeNode.instance()
 local animator = bbfx.Animator.instance()
 
+local debugFrame = 0
 local rotNode = bbfx.LuaAnimationNode("particleUpdate", function(self)
     local dtPort = self:getInput("dt")
     if not dtPort then return end
     local dt = dtPort:getValue()
+
+    debugFrame = debugFrame + 1
+    if debugFrame == 1 or debugFrame == 60 then
+        for i, p in ipairs(particles) do
+            print("[debug] psys[" .. i .. "] numParticles=" .. p.system:getNumParticles())
+        end
+    end
 
     head.node:yaw(Ogre.Radian(dt * 0.3))
 
