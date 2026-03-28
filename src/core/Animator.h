@@ -72,6 +72,11 @@ public:
     AnimationNode* getRegisteredNode(const std::string& name) const;
     void exportDOT(const string& filename) const;
 
+    struct LinkInfo {
+        std::string fromNode, fromPort, toNode, toPort;
+    };
+    std::vector<LinkInfo> getLinks() const;
+
     void renderOneFrame();
 
 protected:

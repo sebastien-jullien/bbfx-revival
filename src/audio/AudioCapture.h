@@ -62,6 +62,7 @@ public:
     ~AudioCaptureNode() override = default;
 
     void update() override;
+    std::string getTypeName() const override { return "AudioCaptureNode"; }
 
     /// Access the latest sample buffer (for downstream nodes like AudioAnalyzer)
     const std::vector<float>& getSamples() const { return mSamples; }

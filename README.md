@@ -1,8 +1,10 @@
-# BBFx Revival — v2.x
+# BBFx Revival — v3.0
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BlackBox Effects) engine.
 
-BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drives OGRE 3D rendering in real time. Animation nodes are defined and wired in Lua; BBFx propagates values through the graph each frame at render speed.
+BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drives OGRE 3D rendering in real time. Animation nodes are defined and wired in Lua or via the visual node editor; BBFx propagates values through the graph each frame at render speed.
+
+**v3.0 "BBFx Studio"** adds a full GUI application with Dear ImGui: interactive node editor, inspector, timeline, performance mode (F5), and video export — no code required for artists and VJs.
 
 ---
 
@@ -57,6 +59,18 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Offline mode** — fixed dt (1/fps), renders at max speed without vsync
 - **VideoExporter** — captures sequential PNG frames (`frame_000001.png`, …) via `RenderTarget::writeContentsToFile()`
 - **End-to-end pipeline** — record → replay offline → export PNG → FFmpeg
+
+### BBFx Studio (v3.0)
+- **StudioEngine** — OGRE renders to RenderTexture, shared SDL3/OpenGL context with ImGui
+- **Viewport Panel** — live OGRE render with FPS/resolution/mode overlay, dynamic resize
+- **Node Editor Panel** — interactive DAG visualization (imgui-node-editor), link create/delete by drag & drop, right-click context menus, color by type, real-time port values
+- **Inspector Panel** — float sliders, enum dropdowns, Lua source editor, ShaderFx uniforms, rename/delete
+- **Timeline Panel** — beat/bar markers, animated playhead, draggable chord blocks (snap-to-beat), transport controls, BPM, 8-band audio spectrum
+- **Preset Browser** — filesystem scan, drag-to-graph instantiation, effect rack with bypass, 8-slot quick access bar
+- **Performance Mode (F5)** — fullscreen viewport 80%, 4x4 trigger grid, 8 configurable faders, VU meters, BPM overlay, PANIC button
+- **Project Save/Load** — `.bbfx-project` JSON format, auto-save, recent projects
+- **Export Dialog** — frame-by-frame PNG export with progress bar, offline rendering
+- **CPack NSIS** — Windows installer with shortcuts and `.bbfx-project` file association
 
 ---
 

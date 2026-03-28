@@ -15,6 +15,7 @@ public:
     ~BeatDetectorNode() override = default;
 
     void update() override;
+    std::string getTypeName() const override { return "BeatDetectorNode"; }
 
 private:
     AudioAnalyzerNode* mAnalyzer;

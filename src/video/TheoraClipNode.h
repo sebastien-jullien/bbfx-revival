@@ -11,6 +11,7 @@ public:
     explicit TheoraClipNode(const std::string& filename);
     ~TheoraClipNode() override;
     void update() override;
+    std::string getTypeName() const override { return "TheoraClipNode"; }
 
     void play() { mClip->play(); }
     void pause() { mClip->pause(); }

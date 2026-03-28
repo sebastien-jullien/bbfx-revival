@@ -2,6 +2,47 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [3.0.0] - 2026-03-28 — BBFx Studio
+
+### Added
+- **BBFx Studio** (`bbfx-studio`): GUI application with Dear ImGui (docking branch) + imgui-node-editor
+- **StudioEngine**: OGRE renders off-screen to `RenderTexture`, shared SDL3/OpenGL context with ImGui
+- **Viewport Panel**: live OGRE render with FPS/resolution/mode overlay, dynamic resize
+- **Node Editor Panel**: interactive DAG (imgui-node-editor), link create/delete, node context menu, color by type, selection sync
+- **Inspector Panel**: float sliders, enum dropdowns (waveform/interpolation/mode), Lua source editor with error display, ShaderFx uniforms, rename/delete
+- **Timeline Panel**: beat/bar markers, animated playhead, draggable chord blocks (snap-to-beat), transport (Play/Pause/Stop/Record), BPM, 8-band spectrum
+- **Preset Browser Panel**: filesystem scan `lua/presets/`, drag-to-graph, effect rack with bypass, 8-slot quick access bar
+- **Performance Mode (F5)**: fullscreen viewport 80%, 4x4 trigger grid, 8 faders, VU meters, BPM overlay, PANIC button, keyboard navigation
+- **ProjectSerializer**: `.bbfx-project` JSON save/load (atomic write), auto-save 120s, recent projects
+- **ExportDialog**: frame-by-frame PNG export with progress bar, offline rendering
+- **CPack NSIS**: Windows installer with shortcuts and `.bbfx-project` file association
+- **Dark theme**: #1A1A1A background, cyan #00FFFF accents, auto-dock layout on first launch
+- `AnimationNode::getTypeName()` virtual method on all node subclasses
+- `Engine` two-phase init for StudioEngine inheritance
+- `lua/demos/demo_studio.lua`: default studio scene (ogrehead + rotation)
+- `lua/presets/perlin_pulse.lua`: sample preset file
+- Launcher script `./bbfx-studio [--build] [script.lua]`
+
+### Fixed
+- **OGRE GL3Plus FBO cache bug**: `mActiveRenderTarget` cache causes OGRE to skip FBO re-bind after ImGui renders to framebuffer 0 between frames. Fix: capture FBO ID on first render, force `glBindFramebuffer()` before each `rt->update()`
+- **Node Editor links not visible**: `syncLinksFromDAG()` rebuilds `mLinks` from `Animator::getLinks()` each frame so DAG edges created via Lua/REPL appear in the editor
+- **Link creation fires during drag**: guarded DAG mutation behind `AcceptNewItem()` return value (true only on mouse release)
+- **Right-click link deletion**: added `ShowLinkContextMenu()` with "Delete Link" option that calls `Animator::unlink()`
+- **Oscillator min/max**: added `min` and `max` input ports to oscillator node (output remapped to `[min, max]` range)
+- **rotate_head speed port**: added `speed` input, set `angle` output, continuous rotation driven by `time * speed`
+- **ViewportPanel resize race**: separated size detection (ImGui frame) from OGRE render to prevent rendering to a just-destroyed texture
+- `OldTV.material` invalid parameter `frameShape` (removed duplicate line)
+- `AudioAnalyzer.h` `Uint64` → `uint64_t` for MSVC portability
+- OGRE 14.x API: `TexturePtr.isNull()`/`.setNull()` → `!ptr`/`.reset()`
+- imgui-node-editor `BeginDelete()` called twice per frame → merged into single scope
+- `GetSelectedNodes()` called outside `Begin()/End()` scope → moved inside
+
+### Changed
+- CMake version bumped to 3.0.0
+- Tri-cible build: `bbfx-core` (static lib), `bbfx` (headless), `bbfx-studio` (GUI)
+- FetchContent: imgui (docking), imgui-node-editor (develop branch)
+- vcpkg: nlohmann-json added
+
 ## [2.9.0] - 2026-03-27
 
 ### Added

@@ -11,6 +11,7 @@ public:
     PerlinFxNode(const string& meshName, const string& cloneName);
     virtual ~PerlinFxNode();
     void update() override;
+    std::string getTypeName() const override { return "PerlinFxNode"; }
     void enable();
     void disable();
 

@@ -32,6 +32,7 @@ public:
 
     ~ShaderFxNode() override = default;
     void update() override;
+    std::string getTypeName() const override { return "ShaderFxNode"; }
 
     Ogre::MaterialPtr getMaterial() const { return mMaterial; }
 

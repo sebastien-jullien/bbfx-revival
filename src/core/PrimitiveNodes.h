@@ -23,6 +23,7 @@ public:
     void addInput(const string& name);
     void addOutput(const string& name);
     void update() override;
+    std::string getTypeName() const override { return "LuaAnimationNode"; }
 protected:
     sol::function mUpdateHook;
 };
@@ -61,6 +62,7 @@ public:
     void update() override;
     void reset();
     Ogre::Real getTotalTime() const;
+    std::string getTypeName() const override { return "RootTimeNode"; }
 protected:
     static RootTimeNode* sInstance;
     AnimationPort* mFrameTimePort;
@@ -73,6 +75,7 @@ class AccumulatorNode : public AnimationNode {
 public:
     AccumulatorNode();
     void update() override;
+    std::string getTypeName() const override { return "AccumulatorNode"; }
 protected:
     AnimationPort* mInput;
     AnimationPort* mSum;

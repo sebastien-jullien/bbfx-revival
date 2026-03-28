@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+EXE="$REPO_ROOT/build/windows-debug/Debug/bbfx-studio.exe"
+
+if [[ ! -f "$EXE" ]]; then
+  echo "Executable not found: $EXE" >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+exec "$EXE" "$@"
