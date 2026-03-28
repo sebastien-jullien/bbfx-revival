@@ -21,6 +21,7 @@ public:
     virtual ~AnimationNode();
 
     const string& getName() const;
+    virtual std::string getTypeName() const { return "AnimationNode"; }
 
     using Ports = std::map<string, AnimationPort*>;
     const Ports& getInputs() const;

@@ -11,6 +11,7 @@ public:
     explicit ColorShiftNode(const string& materialName);
     virtual ~ColorShiftNode();
     void update() override;
+    std::string getTypeName() const override { return "ColorShiftNode"; }
 
 private:
     string mMaterialName;

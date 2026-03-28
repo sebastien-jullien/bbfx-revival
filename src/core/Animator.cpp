@@ -136,6 +136,28 @@ AnimationNode* Animator::getRegisteredNode(const std::string& name) const {
     return (it != mRegisteredNodes.end()) ? it->second : nullptr;
 }
 
+std::vector<Animator::LinkInfo> Animator::getLinks() const {
+    std::vector<LinkInfo> result;
+    auto edges = boost::edges(mGraph);
+    for (auto ei = edges.first; ei != edges.second; ++ei) {
+        auto sv = boost::source(*ei, mGraph);
+        auto tv = boost::target(*ei, mGraph);
+        auto si = mPortMap.find(sv);
+        auto ti = mPortMap.find(tv);
+        if (si != mPortMap.end() && ti != mPortMap.end()) {
+            AnimationPort* sp = si->second;
+            AnimationPort* tp = ti->second;
+            if (sp->getNode() && tp->getNode()) {
+                result.push_back({
+                    sp->getNode()->getName(), sp->getName(),
+                    tp->getNode()->getName(), tp->getName()
+                });
+            }
+        }
+    }
+    return result;
+}
+
 void Animator::exportDOT(const string& filename) const {
     std::ofstream out(filename);
     if (!out.is_open()) return;

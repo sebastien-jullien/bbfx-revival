@@ -82,7 +82,7 @@ void AudioAnalyzerNode::update() {
 
     // Log peak RMS once per second
     if (mRMS > mPeakRMSSinceLog) mPeakRMSSinceLog = mRMS;
-    Uint64 now = SDL_GetTicks();
+    uint64_t now = SDL_GetTicks();
     if (now - mLastLogTick >= 1000) {
         std::cout << "[Audio] RMS peak=" << mPeakRMSSinceLog
                   << " amp=" << (10.0f + mPeakRMSSinceLog * 80.0f) << std::endl;

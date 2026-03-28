@@ -3,6 +3,7 @@
 #include "../core/AnimationNode.h"
 #include "AudioCapture.h"
 #include <vector>
+#include <cstdint>
 
 namespace bbfx {
 
@@ -14,6 +15,7 @@ public:
     ~AudioAnalyzerNode() override = default;
 
     void update() override;
+    std::string getTypeName() const override { return "AudioAnalyzerNode"; }
 
     static constexpr int NUM_BANDS = 8;
 
@@ -28,7 +30,7 @@ private:
     float mPeak = 0.0f;
     float mBands[NUM_BANDS] = {};
     float mPeakRMSSinceLog = 0.0f;
-    Uint64 mLastLogTick = 0;
+    uint64_t mLastLogTick = 0;
 };
 
 } // namespace bbfx

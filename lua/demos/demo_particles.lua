@@ -65,18 +65,10 @@ end
 local tn = bbfx.RootTimeNode.instance()
 local animator = bbfx.Animator.instance()
 
-local debugFrame = 0
 local rotNode = bbfx.LuaAnimationNode("particleUpdate", function(self)
     local dtPort = self:getInput("dt")
     if not dtPort then return end
     local dt = dtPort:getValue()
-
-    debugFrame = debugFrame + 1
-    if debugFrame == 1 or debugFrame == 60 then
-        for i, p in ipairs(particles) do
-            print("[debug] psys[" .. i .. "] numParticles=" .. p.system:getNumParticles())
-        end
-    end
 
     head.node:yaw(Ogre.Radian(dt * 0.3))
 

@@ -11,6 +11,7 @@ public:
     explicit TextureBlitterNode(const string& textureName);
     virtual ~TextureBlitterNode();
     void update() override;
+    std::string getTypeName() const override { return "TextureBlitterNode"; }
 
 private:
     std::unique_ptr<TextureBlitter> mBlitter;

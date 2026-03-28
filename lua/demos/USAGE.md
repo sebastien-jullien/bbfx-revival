@@ -1,5 +1,40 @@
 # BBFx Demos
 
+## BBFx Studio v3.0 (GUI Application)
+
+Launch the graphical studio interface:
+```
+cd build/windows-debug/Debug
+bbfx-studio.exe
+```
+Or with an initial Lua scene:
+```
+bbfx-studio.exe lua/demos/demo_studio.lua
+```
+
+**Panels:**
+- **Viewport** — Live OGRE render, resizable, drag to reposition
+- **Node Editor** — Interactive DAG: drag pins to create links, Delete to remove
+- **Inspector** — Float sliders for input ports, Lua source editor for Lua nodes
+- **Timeline** — Beat/bar markers, chord state blocks, BPM, transport
+- **Presets** — Browse and drag-to-graph preset instantiation
+
+**Controls:**
+- **F5** — Toggle Design Mode ↔ Performance Mode
+- **ESC** — Quit
+- **Ctrl+S** — Save project
+
+**Performance Mode (F5):**
+- Full-screen OGRE viewport (80%)
+- 4×4 trigger grid (chord states)
+- 8 vertical faders (DAG port control)
+- VU meters + BPM overlay
+- PANIC button (resets all ports to 0)
+
+---
+
+## Headless Demos (CLI)
+
 All demos are launched from the build directory:
 ```
 cd build/windows-debug/Debug

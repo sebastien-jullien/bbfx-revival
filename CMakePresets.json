@@ -34,7 +34,7 @@
     {
       "name": "windows-debug",
       "inherits": "base",
-      "generator": "Visual Studio 17 2022",
+      "generator": "Visual Studio 16 2019",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-debug",
       "cacheVariables": {
@@ -44,7 +44,7 @@
     {
       "name": "windows-release",
       "inherits": "base",
-      "generator": "Visual Studio 17 2022",
+      "generator": "Visual Studio 16 2019",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-release",
       "cacheVariables": {

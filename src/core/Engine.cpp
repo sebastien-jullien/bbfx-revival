@@ -66,7 +66,13 @@ namespace bbfx {
 
 Engine* Engine::sInstance = nullptr;
 
+// ── Standard headless constructor ─────────────────────────────────────────────
 Engine::Engine(sol::state& lua)
+    : Engine(lua, 0, false) {}
+
+// ── Two-phase init constructor (used by StudioEngine) ────────────────────────
+// Phase 1: SDL3 init + window creation only. OGRE deferred if deferOgreInit=true.
+Engine::Engine(sol::state& lua, SDL_WindowFlags extraWindowFlags, bool deferOgreInit)
     : mLua(lua) {
     assert(!sInstance);
     sInstance = this;
@@ -76,19 +82,31 @@ Engine::Engine(sol::state& lua)
         throw Exception(string("SDL_Init failed: ") + SDL_GetError());
     }
 
-    mWindow = SDL_CreateWindow("BBFx v2", 800, 600, SDL_WINDOW_RESIZABLE);
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | extraWindowFlags;
+    mWindow = SDL_CreateWindow("BBFx", 800, 600, flags);
     if (!mWindow) {
         SDL_Quit();
         throw Exception(string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
 
-    // OGRE init
+    if (!deferOgreInit) {
+        initOGRE(false);
+    }
+}
+
+// ── Phase 2: OGRE init ────────────────────────────────────────────────────────
+void Engine::initOGRE(bool externalGLContext) {
     mRoot = new Ogre::Root("", "", "bbfx.log");
     loadOgrePlugins();
 
-    Ogre::RenderSystem* rs = mRoot->getRenderSystemByName(BBFX_OGRE_RENDERER);
-    if (!rs) {
+    // For external GL context (Studio), use GL3Plus explicitly.
+    // For headless mode, try the platform default, then GL3Plus fallback.
+    Ogre::RenderSystem* rs = nullptr;
+    if (externalGLContext) {
         rs = mRoot->getRenderSystemByName("OpenGL 3+ Rendering Subsystem");
+    } else {
+        rs = mRoot->getRenderSystemByName(BBFX_OGRE_RENDERER);
+        if (!rs) rs = mRoot->getRenderSystemByName("OpenGL 3+ Rendering Subsystem");
     }
     if (!rs) {
         throw Exception("No render system available");
@@ -97,7 +115,7 @@ Engine::Engine(sol::state& lua)
     mRoot->initialise(false);
 
     Ogre::NameValuePairList params;
-    fillWindowParams(params);
+    fillWindowParams(params, externalGLContext);
     mRenderWindow = mRoot->createRenderWindow("BBFx", 800, 600, false, &params);
 
     mSceneManager = mRoot->createSceneManager("OctreeSceneManager");
@@ -109,8 +127,6 @@ Engine::Engine(sol::state& lua)
     if (Ogre::RTShader::ShaderGenerator::initialize()) {
         auto* shaderGen = Ogre::RTShader::ShaderGenerator::getSingletonPtr();
         shaderGen->addSceneManager(mSceneManager);
-        // Install listener: when OGRE encounters a material without shaders,
-        // the RTSS generates vertex+fragment shaders automatically
         sShaderResolver = std::make_unique<ShaderGeneratorResolver>(shaderGen);
         Ogre::MaterialManager::getSingleton().addListener(sShaderResolver.get());
     }
@@ -121,13 +137,8 @@ Engine::Engine(sol::state& lua)
     auto* vp = mRenderWindow->addViewport(cam);
     vp->setBackgroundColour(Ogre::ColourValue(0.2f, 0.2f, 0.4f));
 
-    // Load resources (meshes, materials, textures)
     loadResources();
-
-    // Stats overlay (must be after OverlaySystem)
     new StatsOverlay();
-
-    // Input manager
     mInputManager = new InputManager();
 
     cout << "OGRE " << OGRE_VERSION_MAJOR << "." << OGRE_VERSION_MINOR << "." << OGRE_VERSION_PATCH
@@ -187,8 +198,14 @@ void Engine::loadResources() {
     Ogre::ResourceGroupManager::getSingleton().initialiseAllResourceGroups();
 }
 
-void Engine::fillWindowParams(Ogre::NameValuePairList& params) {
+void Engine::fillWindowParams(Ogre::NameValuePairList& params, bool externalGLContext) {
     params["externalWindowHandle"] = getNativeWindowHandle(mWindow);
+    if (externalGLContext) {
+        // Tell OGRE to use the currently bound GL context (created by SDL3)
+        // and not to swap buffers (we do it manually via SDL_GL_SwapWindow).
+        params["currentGLContext"] = "true";
+        params["externalGLControl"] = "true";
+    }
 }
 
 Ogre::SceneManager* Engine::getSceneManager() const {
