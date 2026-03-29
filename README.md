@@ -1,10 +1,12 @@
-# BBFx Revival — v3.0
+# BBFx Revival — v3.1
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BlackBox Effects) engine.
 
 BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drives OGRE 3D rendering in real time. Animation nodes are defined and wired in Lua or via the visual node editor; BBFx propagates values through the graph each frame at render speed.
 
 **v3.0 "BBFx Studio"** adds a full GUI application with Dear ImGui: interactive node editor, inspector, timeline, performance mode (F5), and video export — no code required for artists and VJs.
+
+**v3.1 "BBFx Studio++"** completes and stabilizes the Studio: all stubs wired, BPM-to-DAG sync (beat/beatFrac ports), scene/project separation, Lua source serialization in `.bbfx-project`, CLI arguments (`--default`, `--reset`, `--clear`, `--fullscreen`), native Windows file dialogs, console REPL (`graph`/`ports`/`set`/`help`), full keyboard shortcuts (F1-F7, Space, Ctrl+E/N/O), undo/redo (Command pattern, Ctrl+Z/Y), node duplication (Ctrl+D), bookmarks (Ctrl+1-9), and flow animation on links.
 
 ---
 
@@ -71,6 +73,20 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Project Save/Load** — `.bbfx-project` JSON format, auto-save, recent projects
 - **Export Dialog** — frame-by-frame PNG export with progress bar, offline rendering
 - **CPack NSIS** — Windows installer with shortcuts and `.bbfx-project` file association
+
+### BBFx Studio++ (v3.1)
+- **Studio++ completion** — all stubs wired, full feature parity
+- **BPM to DAG sync** — beat/beatFrac ports driven by BeatDetector
+- **Scene/project separation** — independent scene and project lifecycles
+- **Lua source serialization** — full graph state saved in `.bbfx-project`
+- **CLI arguments** — `--default`, `--reset`, `--clear`, `--fullscreen`
+- **Native Windows file dialogs** — open/save via OS dialogs
+- **Console REPL** — `graph`, `ports`, `set`, `help` commands
+- **Full keyboard shortcuts** — F1-F7, Space, Ctrl+E/N/O
+- **Undo/redo** — Command pattern, Ctrl+Z / Ctrl+Y
+- **Node duplication** — Ctrl+D
+- **Bookmarks** — Ctrl+1-9
+- **Flow animation on links** — animated particles along DAG edges
 
 ---
 

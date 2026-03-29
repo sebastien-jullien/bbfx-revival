@@ -1,23 +1,7 @@
 #include "ViewportPanel.h"
 #include <imgui.h>
-#include <OgreRenderWindow.h>
 #include <OgreRoot.h>
-#include <OgreViewport.h>
 #include <OgreFrameListener.h>
-#include <OgreSceneManager.h>
-#include <iostream>
-#ifdef _WIN32
-#include <windows.h>
-#include <GL/gl.h>
-#ifndef GL_FRAMEBUFFER_BINDING
-#define GL_FRAMEBUFFER_BINDING 0x8CA6
-#endif
-#ifndef GL_FRAMEBUFFER
-#define GL_FRAMEBUFFER 0x8D40
-#endif
-typedef void (APIENTRY *PFNGLBINDFRAMEBUFFERPROC)(GLenum target, GLuint framebuffer);
-static PFNGLBINDFRAMEBUFFERPROC sGLBindFramebuffer = nullptr;
-#endif
 
 namespace bbfx {
 
@@ -36,25 +20,8 @@ void ViewportPanel::updateOgreRender() {
     evt.timeSinceLastEvent = evt.timeSinceLastFrame = 0.016f;
     root->_fireFrameStarted(evt);
 
-    // OGRE GL3Plus caches mActiveRenderTarget and skips FBO re-bind when the
-    // C++ pointer hasn't changed.  Between frames ImGui renders to framebuffer 0
-    // behind OGRE's back, so the FBO is unbound but OGRE doesn't know.
-    // Fix: capture the FBO ID on the first render, then force-bind it before
-    // every subsequent rt->update().
-#ifdef _WIN32
-    if (mOgreFBO < 0) {
-        rt->update();
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &mOgreFBO);
-    } else {
-        if (!sGLBindFramebuffer)
-            sGLBindFramebuffer = (PFNGLBINDFRAMEBUFFERPROC)wglGetProcAddress("glBindFramebuffer");
-        if (sGLBindFramebuffer)
-            sGLBindFramebuffer(GL_FRAMEBUFFER, (GLuint)mOgreFBO);
-        rt->update();
-    }
-#else
-    rt->update();
-#endif
+    // FBO + glViewport fix is now handled inside StudioEngine::updateRenderTarget().
+    mEngine->updateRenderTarget();
 
     root->_fireFrameEnded(evt);
 }
@@ -65,7 +32,6 @@ void ViewportPanel::syncSize() {
         mEngine->resizeRenderTexture(mPendingW, mPendingH);
         mLastWidth  = mPendingW;
         mLastHeight = mPendingH;
-        mOgreFBO = -1; // new render texture → need to recapture FBO ID
     }
 }
 

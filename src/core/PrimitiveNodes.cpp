@@ -81,6 +81,9 @@ RootTimeNode::RootTimeNode() : AnimationNode("time") {
     sInstance = this;
     mFrameTimePort = addOutput(new AnimationPort("dt", 0.0f));
     mTotalTimePort = addOutput(new AnimationPort("total", 0.0f));
+    mBeatPort      = addOutput(new AnimationPort("beat", 0.0f));
+    mBeatFracPort  = addOutput(new AnimationPort("beatFrac", 0.0f));
+    mBPMPort       = addInput(new AnimationPort("bpm", 120.0f));
     mLastTime = std::chrono::steady_clock::now();
 }
 
@@ -97,11 +100,21 @@ void RootTimeNode::reset() {
     mLastTime = std::chrono::steady_clock::now();
     mFrameTimePort->setValue(0.0f);
     mTotalTimePort->setValue(0.0f);
+    mBeatPort->setValue(0.0f);
+    mBeatFracPort->setValue(0.0f);
     fireUpdate();
 }
 
 Ogre::Real RootTimeNode::getTotalTime() const {
     return mTotalTime;
+}
+
+void RootTimeNode::setBPM(float bpm) {
+    if (bpm > 0.0f) mBPMPort->setValue(bpm);
+}
+
+float RootTimeNode::getBPM() const {
+    return mBPMPort->getValue();
 }
 
 void RootTimeNode::update() {
@@ -111,6 +124,15 @@ void RootTimeNode::update() {
     mTotalTime += elapsed;
     mFrameTimePort->setValue(elapsed);
     mTotalTimePort->setValue(mTotalTime);
+
+    // Beat-synced outputs: beat number and fractional beat (0..1 sawtooth)
+    float bpm = mBPMPort->getValue();
+    if (bpm > 0.0f) {
+        float beatsPerSec = bpm / 60.0f;
+        float currentBeat = mTotalTime * beatsPerSec;
+        mBeatPort->setValue(currentBeat);
+        mBeatFracPort->setValue(currentBeat - std::floor(currentBeat));
+    }
     fireUpdate();
 }
 

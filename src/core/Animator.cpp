@@ -122,6 +122,24 @@ void Animator::registerNode(AnimationNode* node) {
     mRegisteredNodes[node->getName()] = node;
 }
 
+bool Animator::renameNode(const std::string& oldName, const std::string& newName) {
+    Lock guard(mMutex);
+    auto it = mRegisteredNodes.find(oldName);
+    if (it == mRegisteredNodes.end()) return false;
+    if (mRegisteredNodes.count(newName)) return false;
+    AnimationNode* node = it->second;
+    mRegisteredNodes.erase(it);
+    node->mName = newName;
+    for (auto& [pname, port] : node->mInputs) {
+        port->mFullName = newName + "." + port->getName();
+    }
+    for (auto& [pname, port] : node->mOutputs) {
+        port->mFullName = newName + "." + port->getName();
+    }
+    mRegisteredNodes[newName] = node;
+    return true;
+}
+
 std::vector<std::string> Animator::getRegisteredNodeNames() const {
     std::vector<std::string> names;
     names.reserve(mRegisteredNodes.size());

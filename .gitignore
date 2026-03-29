@@ -30,3 +30,15 @@ compile_commands.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# BBFx Studio runtime state (generated, user-specific)
+imgui.ini
+node_editor.json
+*.bbfx-session
+*.bbfx-project.autosave
+*.bbfx-project.bak
+*.bbfx-project.tmp
+bbfx.log
+
+# FetchContent downloads (auto-fetched by CMake)
+_deps/

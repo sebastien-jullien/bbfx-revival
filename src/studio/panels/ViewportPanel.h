@@ -24,7 +24,6 @@ private:
     uint32_t mLastHeight = 0;
     uint32_t mPendingW   = 0;
     uint32_t mPendingH   = 0;
-    int      mOgreFBO    = -1; // cached GL FBO id for the OGRE render texture
     bool mShowOverlay = true;
 };
 

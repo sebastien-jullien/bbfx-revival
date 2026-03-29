@@ -31,10 +31,15 @@ public:
     void updateRenderTarget();
     /// Returns the GL texture ID cast to ImTextureID for ImGui::Image().
     ImTextureID getRenderTextureID() const;
+    /// Capture the current RenderTexture contents to a PNG file.
+    bool captureFrame(const std::string& path);
     /// Returns the OGRE RenderTexture (for debug/FBO access).
     Ogre::RenderTexture* getRenderTarget() const { return mRenderTarget; }
 
     SDL_GLContext getGLContext() const { return mGLContext; }
+
+    /// Must be called when the RenderTexture is recreated (resets FBO cache).
+    void invalidateFBOCache() { mCachedFBO = -1; }
 
 private:
     SDL_GLContext mGLContext = nullptr;
@@ -43,6 +48,7 @@ private:
     Ogre::RenderTexture* mRenderTarget = nullptr;
     uint32_t mRTWidth = 1280;
     uint32_t mRTHeight = 720;
+    int mCachedFBO = -1; // cached GL FBO ID for the RenderTexture
 };
 
 } // namespace bbfx

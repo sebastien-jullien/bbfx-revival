@@ -7,8 +7,24 @@ EXE="$REPO_ROOT/build/windows-debug/Debug/bbfx-studio.exe"
 
 if [[ ! -f "$EXE" ]]; then
   echo "Executable not found: $EXE" >&2
+  echo "Hint: ./bbfx-studio --build (from repo root)" >&2
   exit 1
 fi
 
+# Parse args: pass flags directly, resolve script paths
+CMD_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == -* ]]; then
+    CMD_ARGS+=("$arg")
+  else
+    # Resolve script path relative to repo root
+    if [[ -f "$REPO_ROOT/$arg" ]]; then
+      CMD_ARGS+=("$REPO_ROOT/$arg")
+    else
+      CMD_ARGS+=("$arg")
+    fi
+  fi
+done
+
 cd "$REPO_ROOT"
-exec "$EXE" "$@"
+exec "$EXE" "${CMD_ARGS[@]}"

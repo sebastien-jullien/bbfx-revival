@@ -1,0 +1,60 @@
+{
+  "version": "3.1",
+  "created": "2026-03-29T00:00:00Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "time",
+        "type": "RootTimeNode",
+        "position": { "x": 50, "y": 250 },
+        "ports": { "bpm": 120.0 }
+      },
+      {
+        "id": "rotate_head",
+        "type": "LuaAnimationNode",
+        "position": { "x": 50, "y": 500 },
+        "inputNames": ["time", "speed"],
+        "outputNames": ["angle"],
+        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal s = node:getInput('speed') and node:getInput('speed'):getValue() or 1.0\nlocal angle = t * s\nif headNode then headNode:setOrientation(Quaternion(Radian(angle), Vector3(0, 1, 0))) end\nlocal out = node:getOutput('angle')\nif out then out:setValue(angle) end",
+        "ports": { "time": 0, "speed": 1.0 }
+      },
+      {
+        "id": "oscillator",
+        "type": "LuaAnimationNode",
+        "position": { "x": 400, "y": 200 },
+        "inputNames": ["time", "frequency", "min", "max"],
+        "outputNames": ["value"],
+        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal f = node:getInput('frequency') and node:getInput('frequency'):getValue() or 0.5\nlocal lo = node:getInput('min') and node:getInput('min'):getValue() or 0\nlocal hi = node:getInput('max') and node:getInput('max'):getValue() or 1\nlocal norm = math.sin(t * f * 2 * math.pi) * 0.5 + 0.5\nlocal value = lo + (hi - lo) * norm\nlocal outPort = node:getOutput('value')\nif outPort then outPort:setValue(value) end",
+        "ports": { "time": 0, "frequency": 1.0, "min": 0, "max": 1.0 }
+      }
+    ],
+    "links": [
+      { "from_node": "time", "from_port": "beat", "to_node": "rotate_head", "to_port": "time" },
+      { "from_node": "time", "from_port": "beat", "to_node": "oscillator", "to_port": "time" }
+    ]
+  },
+  "chords": [
+    { "name": "Intro",  "startBeat": 0,  "endBeat": 4,  "hue": 0.5 },
+    { "name": "Verse",  "startBeat": 4,  "endBeat": 12, "hue": 0.6 },
+    { "name": "Chorus", "startBeat": 12, "endBeat": 20, "hue": 0.0 },
+    { "name": "Bridge", "startBeat": 20, "endBeat": 24, "hue": 0.8 },
+    { "name": "Drop",   "startBeat": 24, "endBeat": 32, "hue": 0.3 }
+  ],
+  "timeline": { "bpm": 120.0, "time_signature": "4/4" },
+  "media": { "videos": [], "shaders": [] },
+  "performance": {
+    "triggers": ["Intro","Verse","Chorus","Bridge","Drop","Build","Break","Outro","FX1","FX2","FX3","FX4","Trig1","Trig2","Trig3","Trig4"],
+    "faders": [
+      {"nodeName":"","portName":""},{"nodeName":"","portName":""},
+      {"nodeName":"","portName":""},{"nodeName":"","portName":""},
+      {"nodeName":"","portName":""},{"nodeName":"","portName":""},
+      {"nodeName":"","portName":""},{"nodeName":"","portName":""}
+    ],
+    "quickAccess": [
+      {"label":"+","target":""},{"label":"+","target":""},
+      {"label":"+","target":""},{"label":"+","target":""},
+      {"label":"+","target":""},{"label":"+","target":""},
+      {"label":"+","target":""},{"label":"+","target":""}
+    ]
+  }
+}

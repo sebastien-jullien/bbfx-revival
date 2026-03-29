@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.0.0 LANGUAGES CXX)
+project(BBFx VERSION 3.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -151,12 +151,20 @@ add_executable(bbfx-studio
     src/studio/main_studio.cpp
     src/studio/StudioApp.cpp
     src/studio/StudioEngine.cpp
+    src/studio/NodeTypeRegistry.cpp
+    src/studio/SettingsManager.cpp
+    src/studio/commands/CommandManager.cpp
+    src/studio/commands/NodeCommands.cpp
+    src/studio/commands/LinkCommands.cpp
+    src/studio/commands/EditCommands.cpp
+    src/studio/commands/ChordCommands.cpp
     src/studio/panels/ViewportPanel.cpp
     src/studio/panels/NodeEditorPanel.cpp
     src/studio/panels/InspectorPanel.cpp
     src/studio/panels/TimelinePanel.cpp
     src/studio/panels/PresetBrowserPanel.cpp
     src/studio/panels/PerformanceModePanel.cpp
+    src/studio/panels/ConsolePanel.cpp
     src/studio/project/ProjectSerializer.cpp
     src/studio/project/ExportDialog.cpp
     # imgui-node-editor (compiled directly — FetchContent target unreliable)
@@ -170,13 +178,14 @@ target_include_directories(bbfx-studio PRIVATE
     ${imgui_SOURCE_DIR}/backends
     ${imgui_node_editor_SOURCE_DIR}
 )
+target_compile_definitions(bbfx-studio PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
 target_link_libraries(bbfx-studio PRIVATE
     bbfx-core
     imgui_studio
     nlohmann_json::nlohmann_json
 )
 if(WIN32)
-    target_link_libraries(bbfx-studio PRIVATE opengl32)
+    target_link_libraries(bbfx-studio PRIVATE opengl32 comdlg32)
     set_target_properties(bbfx-studio PROPERTIES WIN32_EXECUTABLE FALSE)
 endif()
 
@@ -240,6 +249,12 @@ add_custom_command(TARGET bbfx-studio POST_BUILD
         "$<TARGET_FILE_DIR:bbfx-studio>/resources.cfg"
     COMMENT "Copying resources.cfg to bbfx-studio"
 )
+add_custom_command(TARGET bbfx-studio POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/data"
+        "$<TARGET_FILE_DIR:bbfx-studio>/data"
+    COMMENT "Copying data (templates) to bbfx-studio"
+)
 
 # ── Copy scripts and resources next to executable ────────────────────────────
 add_custom_command(TARGET bbfx POST_BUILD
@@ -289,7 +304,7 @@ set(CPACK_PACKAGE_VENDOR            "Sébastien JULLIEN")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "BBFx Studio — Real-time 3D Animation Engine")
 set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_VERSION_MAJOR     "3")
-set(CPACK_PACKAGE_VERSION_MINOR     "0")
+set(CPACK_PACKAGE_VERSION_MINOR     "1")
 set(CPACK_PACKAGE_VERSION_PATCH     "0")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "BBFx-Studio")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

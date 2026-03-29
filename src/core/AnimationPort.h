@@ -9,6 +9,7 @@ class AnimationNode; // forward
 
 class AnimationPort {
     friend class AnimationNode;
+    friend class Animator; // for renameNode() access to mFullName
 public:
     AnimationPort(const string& name = "", Ogre::Real value = 0.0f);
     virtual ~AnimationPort();
