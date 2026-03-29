@@ -7,6 +7,10 @@
 #include "panels/TimelinePanel.h"
 #include "panels/PresetBrowserPanel.h"
 #include "panels/PerformanceModePanel.h"
+#include "panels/ConsolePanel.h"
+#include "commands/CommandManager.h"
+#include "NodeTypeRegistry.h"
+#include "SettingsManager.h"
 #include "project/ProjectSerializer.h"
 #include "project/ExportDialog.h"
 
@@ -24,11 +28,14 @@ namespace bbfx {
 /// Orchestrates all panels (Viewport, Node Editor, Inspector, Timeline, Presets, Performance).
 class StudioApp {
 public:
-    explicit StudioApp(sol::state& lua, const std::string& initialScript = "");
+    explicit StudioApp(sol::state& lua, const std::string& initialScript = "",
+                       bool forceDefault = false, bool forceReset = false);
     ~StudioApp();
 
     /// Run the main loop until the user closes the window.
     void run();
+
+    StudioEngine* getEngine() { return mEngine.get(); }
 
 private:
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -42,6 +49,13 @@ private:
     void renderFrame();
     void renderMenuBar();
     void renderPanels();
+    void renderStatusBar();
+    void renderAboutDialog();
+    void renderShortcutsDialog();
+    void renderSettingsDialog();
+
+    // ── Node type registration ──────────────────────────────────────────────
+    void initNodeTypeRegistry();
 
     // ── Project / IO ─────────────────────────────────────────────────────────
     void saveProject(const std::string& path);
@@ -53,6 +67,8 @@ private:
     std::unique_ptr<StudioEngine> mEngine;
     bool mRunning = true;
     bool mPerformanceMode = false;
+    bool mForceDefault = false;
+    bool mForceReset = false;
     std::string mInitialScript;
 
     // Project state
@@ -72,6 +88,7 @@ private:
     std::unique_ptr<TimelinePanel>         mTimelinePanel;
     std::unique_ptr<PresetBrowserPanel>    mPresetBrowserPanel;
     std::unique_ptr<PerformanceModePanel>  mPerformanceModePanel;
+    std::unique_ptr<ConsolePanel>          mConsolePanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -79,6 +96,11 @@ private:
     bool mShowInspector     = true;
     bool mShowTimeline      = true;
     bool mShowPresetBrowser = true;
+    bool mShowConsole       = false;
+    bool mShowAbout         = false;
+    bool mShowShortcuts     = false;
+    bool mShowSettings      = false;
+    bool mProjectDirty      = false;
 };
 
 } // namespace bbfx

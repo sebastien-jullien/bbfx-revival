@@ -3,13 +3,29 @@
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
+#include "../../audio/AudioAnalyzer.h"
+#include "../../audio/BeatDetector.h"
 
 #include <imgui.h>
+#include <sol/sol.hpp>
 #include <GL/gl.h>
 #include <algorithm>
 #include <iostream>
 
 namespace bbfx {
+
+PerformanceModePanel::PerformanceModePanel(sol::state& lua) : mLua(lua) {
+    // Initialize trigger chord assignments from default names
+    static const char* defaultChords[16] = {
+        "Intro","Verse","Chorus","Bridge",
+        "Drop","Build","Break","Outro",
+        "FX1","FX2","FX3","FX4",
+        "Trig1","Trig2","Trig3","Trig4"
+    };
+    for (int i = 0; i < 16; ++i) {
+        mTriggerChords[i] = defaultChords[i];
+    }
+}
 
 void PerformanceModePanel::render(StudioEngine* engine) {
     // Fill the entire screen with the OGRE viewport
@@ -74,12 +90,6 @@ void PerformanceModePanel::render(StudioEngine* engine) {
 void PerformanceModePanel::renderTriggerGrid() {
     ImGui::TextColored({0.0f, 1.0f, 1.0f, 1.0f}, "TRIGGER");
 
-    static const char* chordNames[16] = {
-        "Intro","Verse","Chorus","Bridge",
-        "Drop","Build","Break","Outro",
-        "FX1","FX2","FX3","FX4",
-        "Trig1","Trig2","Trig3","Trig4"
-    };
     static const ImU32 btnColors[4] = {
         IM_COL32(0,150,150,255), IM_COL32(150,0,150,255),
         IM_COL32(150,150,0,255), IM_COL32(200,100,0,255)
@@ -88,14 +98,32 @@ void PerformanceModePanel::renderTriggerGrid() {
     for (int i = 0; i < 16; ++i) {
         if (i % 4 != 0) ImGui::SameLine();
 
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(
-            ((btnColors[i/4] >> 0)  & 0xFF) / 255.0f,
-            ((btnColors[i/4] >> 8)  & 0xFF) / 255.0f,
-            ((btnColors[i/4] >> 16) & 0xFF) / 255.0f, 0.8f));
+        // Color based on active state
+        if (mTriggerStates[i]) {
+            ImGui::PushStyleColor(ImGuiCol_Button, {1.0f, 1.0f, 1.0f, 0.9f});
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(
+                ((btnColors[i/4] >> 0)  & 0xFF) / 255.0f,
+                ((btnColors[i/4] >> 8)  & 0xFF) / 255.0f,
+                ((btnColors[i/4] >> 16) & 0xFF) / 255.0f, 0.8f));
+        }
 
-        std::string lbl = std::string(chordNames[i]) + "##tg" + std::to_string(i);
+        std::string lbl = mTriggerChords[i] + "##tg" + std::to_string(i);
         if (ImGui::Button(lbl.c_str(), {56, 48})) {
-            std::cout << "[PerfMode] Trigger: " << chordNames[i] << std::endl;
+            mTriggerStates[i] = !mTriggerStates[i];
+            // Toggle chord via Lua chord system
+            try {
+                sol::object obj = mLua["ChordSystem"];
+                if (obj.valid() && obj.get_type() == sol::type::table) {
+                    sol::table chordSys = obj.as<sol::table>();
+                    sol::function toggleFn = chordSys["toggle"];
+                    if (toggleFn.valid()) {
+                        toggleFn(chordSys, mTriggerChords[i]);
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[PerfMode] Chord toggle error: " << e.what() << std::endl;
+            }
         }
         ImGui::PopStyleColor();
     }
@@ -121,6 +149,7 @@ void PerformanceModePanel::renderFaders() {
             }
         }
 
+        ImGui::BeginGroup();
         ImGui::VSliderFloat(lbl.c_str(), {44, 100}, &slot.value, 0.0f, 10.0f);
 
         // Write back to DAG
@@ -135,10 +164,85 @@ void PerformanceModePanel::renderFaders() {
 
         std::string caption = slot.portName.empty() ? "---" : slot.portName;
         ImGui::TextDisabled("%s", caption.substr(0, 4).c_str());
+        ImGui::EndGroup();
+
+        // Right-click context menu for port assignment
+        std::string ctxId = "##faderCtx" + std::to_string(i);
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            ImGui::OpenPopup(ctxId.c_str());
+        }
+        if (ImGui::BeginPopup(ctxId.c_str())) {
+            ImGui::TextDisabled("Assign Port");
+            if (animator) {
+                for (auto& name : animator->getRegisteredNodeNames()) {
+                    auto* node = animator->getRegisteredNode(name);
+                    if (!node) continue;
+                    if (ImGui::BeginMenu(name.c_str())) {
+                        for (auto& [portName, port] : node->getInputs()) {
+                            if (ImGui::MenuItem(portName.c_str())) {
+                                slot.nodeName = name;
+                                slot.portName = portName;
+                                slot.value = port->getValue();
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear")) {
+                slot.nodeName.clear();
+                slot.portName.clear();
+                slot.value = 0.0f;
+            }
+            ImGui::EndPopup();
+        }
     }
 }
 
 void PerformanceModePanel::renderVUMeters() {
+    // Try to read bands from AudioAnalyzerNode in DAG
+    auto* animator = Animator::instance();
+    bool foundAnalyzer = false;
+    if (animator) {
+        for (auto& name : animator->getRegisteredNodeNames()) {
+            auto* node = animator->getRegisteredNode(name);
+            if (node && node->getTypeName() == "AudioAnalyzerNode") {
+                auto* analyzerNode = dynamic_cast<AudioAnalyzerNode*>(node);
+                if (analyzerNode) {
+                    // Average bands into low (0-2), mid (3-5), high (6-7)
+                    mBands[0] = (analyzerNode->getBand(0) + analyzerNode->getBand(1) + analyzerNode->getBand(2)) / 3.0f;
+                    mBands[1] = (analyzerNode->getBand(3) + analyzerNode->getBand(4) + analyzerNode->getBand(5)) / 3.0f;
+                    mBands[2] = (analyzerNode->getBand(6) + analyzerNode->getBand(7)) / 2.0f;
+                    mRMS = analyzerNode->getRMS();
+                    foundAnalyzer = true;
+                }
+                break;
+            }
+        }
+        // Sync BPM from BeatDetectorNode if present
+        for (auto& name : animator->getRegisteredNodeNames()) {
+            auto* node = animator->getRegisteredNode(name);
+            if (node && node->getTypeName() == "BeatDetectorNode") {
+                auto& outputs = node->getOutputs();
+                auto bpmIt = outputs.find("bpm");
+                if (bpmIt != outputs.end()) {
+                    float detectedBPM = bpmIt->second->getValue();
+                    if (detectedBPM > 20.0f) mBPM = detectedBPM;
+                }
+                break;
+            }
+        }
+    }
+
+    if (!foundAnalyzer) {
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        ImVec2 pos2 = ImGui::GetWindowPos();
+        ImVec2 sz2  = ImGui::GetWindowSize();
+        draw->AddText({pos2.x + 10.0f, pos2.y + sz2.y - 80.0f},
+                      IM_COL32(120, 120, 120, 200), "No Audio");
+    }
+
     // VU meters shown as colored bars in the bottom-left of the viewport window
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 pos       = ImGui::GetWindowPos();

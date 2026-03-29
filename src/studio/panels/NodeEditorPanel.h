@@ -32,6 +32,10 @@ public:
     /// Returns the name of the currently selected node, or "".
     const std::string& getSelectedNodeName() const { return mSelectedNode; }
 
+    struct NodePosition { std::string name; float x, y; };
+    std::vector<NodePosition> getNodePositions() const;
+    void setNodePositions(const std::vector<NodePosition>& positions);
+
 private:
     void syncFromDAG();
     void syncLinksFromDAG();
@@ -83,6 +87,13 @@ private:
 
     bool mShowSavePresetDialog = false;
     char mPresetNameBuf[128] = {};
+
+    std::vector<NodePosition> mPendingPositions;
+
+    ImVec2 mBookmarks[9] = {};
+    float mBookmarkZooms[9] = {};
+    float mBookmarkRects[9][4] = {}; // {minX, minY, maxX, maxY}
+    bool mBookmarkSet[9] = {};
 };
 
 } // namespace bbfx

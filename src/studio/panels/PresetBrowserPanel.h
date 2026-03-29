@@ -3,13 +3,14 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <sol/forward.hpp>
 
 namespace bbfx {
 
 /// Browse presets (via Lua Preset:list()), drag-to-graph instantiation, effect rack, quick access bar.
 class PresetBrowserPanel {
 public:
-    explicit PresetBrowserPanel(NodeEditorPanel* nodeEditor);
+    PresetBrowserPanel(NodeEditorPanel* nodeEditor, sol::state& lua);
 
     void render();
 
@@ -19,6 +20,7 @@ private:
     void renderQuickAccessBar();
 
     NodeEditorPanel* mNodeEditor;
+    sol::state& mLua;
     std::string mSelectedPreset;
 
     struct QuickSlot {

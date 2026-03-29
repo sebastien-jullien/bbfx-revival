@@ -11,11 +11,15 @@ namespace bbfx {
 
 void ExportDialog::open() {
     mOpen = true;
-    ImGui::OpenPopup("Export Session");
 }
 
 void ExportDialog::render(StudioEngine* engine) {
     if (!mOpen) return;
+
+    // OpenPopup must be called during ImGui frame, not from event handlers
+    if (!ImGui::IsPopupOpen("Export Session")) {
+        ImGui::OpenPopup("Export Session");
+    }
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
@@ -107,10 +111,7 @@ void ExportDialog::tickExport(StudioEngine* engine) {
     snprintf(filename, sizeof(filename), "%s/frame_%06d.png",
              mOutputDir, mFramesCaptured + 1);
 
-    // Note: capture via OGRE RenderTexture::writeContentsToFile()
-    // This requires access to mRenderTarget — handled inside StudioEngine::captureFrame()
-    // For now, log the capture (full implementation in I-251)
-    std::cout << "[ExportDialog] Frame " << (mFramesCaptured + 1) << " → " << filename << std::endl;
+    engine->captureFrame(std::string(filename));
 
     ++mFramesCaptured;
 }
@@ -119,7 +120,9 @@ void ExportDialog::finishExport(StudioEngine* engine) {
     mExporting = false;
     if (engine) {
         engine->setOnlineMode();
-        // Restore original viewport size (ViewportPanel will handle this on next render)
+        // Restore viewport to a reasonable default resolution
+        // (ViewportPanel will resize to actual window size on next render)
+        engine->resizeRenderTexture(1280, 720);
     }
     std::cout << "[ExportDialog] Export complete: " << mFramesCaptured << " frames → "
               << mOutputDir << "/" << std::endl;

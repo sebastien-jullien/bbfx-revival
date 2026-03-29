@@ -2,6 +2,48 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [3.1.0] - 2026-03-28 — BBFx Studio++
+
+### Added
+- **NodeTypeRegistry**: extensible node type registry with categorized context menu (17+ types in 7 categories)
+- **CommandManager**: undo/redo system (Command pattern, stack 100) with Ctrl+Z/Ctrl+Y
+- **Commands**: CreateNode, DeleteNode, CreateLink, DeleteLink, EditPortValue, RenameNode, AddChord, DeleteChord, RenameChord, ResizeChord
+- **ConsolePanel**: integrated Lua REPL with autocompletion, command history, error display
+- **SettingsManager**: persistent settings (auto-save interval, BPM, viewport scale, font size) in %APPDATA%/BBFx/settings.json
+- **StudioEngine::captureFrame()**: PNG frame capture via OGRE RenderTexture::writeContentsToFile()
+- **LuaAnimationNode::setUpdateFunction()**: hot-swap Lua callback at runtime
+- **Animator::renameNode()**: rename nodes with automatic port fullname updates
+- **Timeline zoom/scroll/seek**: mouse wheel zoom (10-200 px/beat), Ctrl+drag scroll, click-to-seek
+- **Chord editing**: add (+), rename, recolor (ColorPicker), delete, resize by edge drag with beat snap
+- **Node duplication**: Ctrl+D single/multi with internal link preservation
+- **Flow animation**: animated dots on links via ned::Flow()
+- **Bookmarks**: Ctrl+1..9 save / 1..9 restore canvas position/zoom
+- **Drag & drop**: SDL_EVENT_DROP_FILE for .bbfx-project, .lua, .glsl, .ogg files
+- **Help > About**: version, credits dialog
+- **Help > Keyboard Shortcuts**: complete shortcut reference
+- **Status bar**: FPS, node count, link count, audio status, dirty indicator
+- **lua/studio_chord.lua**: name-based chord activation API for Studio GUI
+- Lua-only node types in registry (LFONode, RampNode, DelayNode, EnvelopeFollowerNode, BandSplitNode, SubgraphNode)
+
+### Changed
+- **ExportDialog**: now calls captureFrame() instead of logging — export actually produces PNG files
+- **InspectorPanel**: Lua editor "Apply" button compiles and hot-swaps callback; rename field calls Animator::renameNode()
+- **PerformanceModePanel**: triggers connected to ChordSystem, faders connected to DAG ports, VU meters read AudioAnalyzerNode
+- **PresetBrowserPanel**: Quick Access buttons activate chords or instantiate presets
+- **NodeEditorPanel**: context menu uses NodeTypeRegistry categories, all mutations via CommandManager
+- **ProjectSerializer**: format v3.1 with node positions, chords, timeline, performance config, media; backward compatible with v3.0
+- **CMakeLists.txt**: version 3.1.0, 8 new source files
+
+### Fixed
+- **Export stub**: ExportDialog::tickExport() was logging instead of capturing frames
+- **Lua editor stub**: InspectorPanel "Apply" button was not connected to sol2 compilation
+- **Rename stub**: InspectorPanel rename field was only updating UI, not the DAG
+- **Performance triggers stub**: buttons were logging instead of activating chord states
+- **VU meters stub**: were displaying static data instead of reading AudioAnalyzerNode
+- **Quick Access stub**: buttons were logging instead of triggering actions
+- **Node positions lost**: positions now saved/loaded in .bbfx-project via GetNodePosition/SetNodePosition
+- **Limited node creation**: menu now offers 17+ types instead of 2
+
 ## [3.0.0] - 2026-03-28 — BBFx Studio
 
 ### Added

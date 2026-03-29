@@ -2,14 +2,20 @@
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
+#include "../../core/PrimitiveNodes.h"
+#include "../commands/CommandManager.h"
+#include "../commands/EditCommands.h"
 
 #include <imgui.h>
+#include <sol/sol.hpp>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <iostream>
 
 namespace bbfx {
+
+InspectorPanel::InspectorPanel(sol::state& lua) : mLua(lua) {}
 
 void InspectorPanel::render() {
     ImGui::Begin("Inspector");
@@ -63,6 +69,22 @@ void InspectorPanel::renderFloatPorts() {
         ImGui::SetNextItemWidth(150.0f);
         if (ImGui::SliderFloat(label.c_str(), &val, -10.0f, 10.0f)) {
             port->setValue(val);
+        }
+        // Coalescing: save old value when drag starts
+        if (ImGui::IsItemActivated()) {
+            mCoalescing.active = true;
+            mCoalescing.nodeName = mSelectedNode;
+            mCoalescing.portName = portName;
+            mCoalescing.oldValue = port->getValue();
+        }
+        // Commit undo command when drag ends
+        if (ImGui::IsItemDeactivatedAfterEdit() && mCoalescing.active
+            && mCoalescing.nodeName == mSelectedNode && mCoalescing.portName == portName) {
+            CommandManager::instance().execute(
+                std::make_unique<EditPortValueCommand>(
+                    mCoalescing.nodeName, mCoalescing.portName,
+                    mCoalescing.oldValue, val));
+            mCoalescing.active = false;
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(70.0f);
@@ -132,6 +154,18 @@ void InspectorPanel::renderLuaEditor() {
     if (!node) return;
 
     if (node->getTypeName() != "LuaAnimationNode") return;
+    auto* luaNode = dynamic_cast<LuaAnimationNode*>(node);
+
+    // Load source from node into buffer when selecting a different node
+    static std::string lastLoadedNode;
+    if (luaNode && mSelectedNode != lastLoadedNode) {
+        const auto& src = luaNode->getSource();
+        std::strncpy(mLuaSourceBuf, src.c_str(), sizeof(mLuaSourceBuf) - 1);
+        mLuaSourceBuf[sizeof(mLuaSourceBuf) - 1] = '\0';
+        mLuaModified = false;
+        mLuaError.clear();
+        lastLoadedNode = mSelectedNode;
+    }
 
     ImGui::TextDisabled("Lua Source");
     if (mLuaModified) {
@@ -145,14 +179,25 @@ void InspectorPanel::renderLuaEditor() {
     if (ImGui::IsItemEdited()) mLuaModified = true;
 
     if (ImGui::Button("Apply") && mLuaModified) {
-        // Reload the Lua node with the new source (requires setSource() in LuaAnimationNode)
-        std::cout << "[Inspector] Apply Lua source for '" << mSelectedNode << "'" << std::endl;
+        std::string src(mLuaSourceBuf);
+        auto loadResult = mLua.load("return function(node) " + src + " end");
+        if (loadResult.valid()) {
+            sol::protected_function factory = loadResult;
+            auto callResult = factory();
+            if (callResult.valid()) {
+                sol::function updateFn = callResult;
+                auto* luaNode = dynamic_cast<LuaAnimationNode*>(node);
+                if (luaNode) {
+                    luaNode->setUpdateFunction(updateFn);
+                    luaNode->setSource(src);
+                    mLuaError.clear();
+                }
+            }
+        } else {
+            sol::error err = loadResult;
+            mLuaError = err.what();
+        }
         mLuaModified = false;
-        mLuaError.clear();
-
-        // Attempt to compile the Lua source to catch syntax errors
-        // TODO: use sol2 load() for real compilation once LuaAnimationNode::setSource() exists
-        std::cout << "[Inspector] Lua compile check not yet wired (needs sol2 state access)" << std::endl;
     }
     if (!mLuaError.empty()) {
         ImGui::TextColored({1, 0, 0, 1}, "%s", mLuaError.c_str());
@@ -187,9 +232,12 @@ void InspectorPanel::renderRenameDelete() {
     ImGui::SetNextItemWidth(180.0f);
     if (ImGui::InputText("Name##rename", nameBuf, sizeof(nameBuf),
             ImGuiInputTextFlags_EnterReturnsTrue)) {
-        // Rename (requires Animator::renameNode — not yet in API, logged for now)
-        std::cout << "[Inspector] Rename '" << mSelectedNode << "' → '" << nameBuf << "'" << std::endl;
-        mSelectedNode = nameBuf;
+        std::string newName(nameBuf);
+        if (!newName.empty() && newName != mSelectedNode) {
+            CommandManager::instance().execute(
+                std::make_unique<RenameNodeCommand>(mSelectedNode, newName));
+            mSelectedNode = newName;
+        }
     }
 
     ImGui::SameLine();

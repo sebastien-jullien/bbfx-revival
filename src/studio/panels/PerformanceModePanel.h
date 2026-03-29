@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <sol/forward.hpp>
 
 namespace bbfx { class StudioEngine; }
 
@@ -8,7 +9,7 @@ namespace bbfx {
 /// Performance Mode (F5): fullscreen viewport, trigger grid, faders, VU meters, BPM overlay, panic.
 class PerformanceModePanel {
 public:
-    PerformanceModePanel() = default;
+    explicit PerformanceModePanel(sol::state& lua);
 
     void render(StudioEngine* engine);
 
@@ -18,6 +19,8 @@ private:
     void renderVUMeters();
     void renderBPMOverlay();
     void renderPanicButton();
+
+    sol::state& mLua;
 
     struct FaderSlot {
         std::string nodeName;
@@ -29,6 +32,9 @@ private:
     float mBPM = 120.0f;
     float mRMS = 0.0f;
     float mBands[3] = {}; // low, mid, high
+
+    bool mTriggerStates[16] = {};
+    std::string mTriggerChords[16];
 };
 
 } // namespace bbfx

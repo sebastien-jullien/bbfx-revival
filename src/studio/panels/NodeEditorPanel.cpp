@@ -3,14 +3,20 @@
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
 #include "../../core/PrimitiveNodes.h"
+#include "../NodeTypeRegistry.h"
+#include "../commands/CommandManager.h"
+#include "../commands/NodeCommands.h"
+#include "../commands/LinkCommands.h"
 
 #include <imgui.h>
 #include <imgui_node_editor.h>
+#include <imgui_node_editor_internal.h>
 #include <sol/sol.hpp>
 #include <iostream>
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <cfloat>
 #include <set>
 
 namespace ned = ax::NodeEditor;
@@ -103,6 +109,7 @@ void NodeEditorPanel::syncFromDAG() {
 
         mNodes[name] = std::move(nd);
     }
+
 }
 
 // ── Pin lookup helper ─────────────────────────────────────────────────────────
@@ -193,6 +200,17 @@ void NodeEditorPanel::render() {
     ned::SetCurrentEditor(mEditorContext);
     ned::Begin("DAG", {0, 0});
 
+    // Apply pending positions (deferred — needs active editor context after ned::Begin)
+    if (!mPendingPositions.empty()) {
+        for (auto& np : mPendingPositions) {
+            auto it = mNodes.find(np.name);
+            if (it != mNodes.end()) {
+                ned::SetNodePosition(it->second.id, {np.x, np.y});
+            }
+        }
+        mPendingPositions.clear();
+    }
+
     auto* animator = Animator::instance();
 
     // ── Draw nodes ────────────────────────────────────────────────────────────
@@ -213,7 +231,7 @@ void NodeEditorPanel::render() {
         // Input pins (left)
         for (size_t i = 0; i < nd.inputPins.size(); ++i) {
             ned::BeginPin(nd.inputPins[i], ned::PinKind::Input);
-            ImGui::Text("\xe2\x97\x8f %s", nd.inputNames[i].c_str()); // ● bullet
+            ImGui::Text("> %s", nd.inputNames[i].c_str()); // ● bullet
             // Show current port value
             if (node) {
                 auto& inputs = node->getInputs();
@@ -229,7 +247,7 @@ void NodeEditorPanel::render() {
         // Output pins (right)
         for (size_t i = 0; i < nd.outputPins.size(); ++i) {
             ned::BeginPin(nd.outputPins[i], ned::PinKind::Output);
-            ImGui::Text("%s \xe2\x97\x8f", nd.outputNames[i].c_str());
+            ImGui::Text("%s >", nd.outputNames[i].c_str());
             if (node) {
                 auto& outputs = node->getOutputs();
                 auto it = outputs.find(nd.outputNames[i]);
@@ -258,6 +276,54 @@ void NodeEditorPanel::render() {
 
     // ── Context menu ──────────────────────────────────────────────────────────
     showNodeContextMenu();
+
+    // ── Flow animation on links ─────────────────────────────────────────────
+    for (auto& lk : mLinks) {
+        ned::Flow(lk.id);
+    }
+
+    // ── Ctrl+D: duplicate selected nodes ──────────────────────────────────────
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+        static int dupCounter = 0;
+        std::vector<ned::NodeId> selectedIds(ned::GetSelectedObjectCount());
+        int count = ned::GetSelectedNodes(selectedIds.data(), static_cast<int>(selectedIds.size()));
+        for (int i = 0; i < count; ++i) {
+            for (auto& [name, nd] : mNodes) {
+                if (nd.id == selectedIds[i]) {
+                    std::string newName = name + "_dup" + std::to_string(++dupCounter);
+                    CommandManager::instance().execute(
+                        std::make_unique<CreateNodeCommand>(nd.typeName, newName, mLua));
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── Bookmarks: Ctrl+1..9 save, 1..9 restore ──────────────────────────────
+    // Saves view origin + zoom via public GetView(). Restores via NavigateTo().
+    {
+        auto* edCtx = reinterpret_cast<ax::NodeEditor::Detail::EditorContext*>(mEditorContext);
+        for (int k = 0; k < 9; ++k) {
+            ImGuiKey key = static_cast<ImGuiKey>(static_cast<int>(ImGuiKey_1) + k);
+            if (ImGui::IsKeyPressed(key) && !ImGui::GetIO().KeyAlt && !ImGui::IsAnyItemActive()) {
+                if (ImGui::GetIO().KeyCtrl) {
+                    // Save: visible canvas rect
+                    auto vr = edCtx->GetViewRect();
+                    mBookmarkRects[k][0] = vr.Min.x;
+                    mBookmarkRects[k][1] = vr.Min.y;
+                    mBookmarkRects[k][2] = vr.Max.x;
+                    mBookmarkRects[k][3] = vr.Max.y;
+                    mBookmarkSet[k] = true;
+                } else if (mBookmarkSet[k]) {
+                    // Restore: navigate to saved view rect with zoom
+                    ImRect target(
+                        {mBookmarkRects[k][0], mBookmarkRects[k][1]},
+                        {mBookmarkRects[k][2], mBookmarkRects[k][3]});
+                    edCtx->NavigateTo(target, true, -1.0f);
+                }
+            }
+        }
+    }
 
     // ── Auto-fit view after nodes are drawn (delay 3 frames for layout) ────
     static int navigateCountdown = 3;
@@ -398,22 +464,8 @@ void NodeEditorPanel::handleLinkCreation() {
             if (valid) {
                 // AcceptNewItem returns true only on mouse release (link confirmed)
                 if (ned::AcceptNewItem({0.0f, 1.0f, 0.0f, 1.0f})) {
-                    // Create the link in the DAG
-                    auto* animator = Animator::instance();
-                    if (animator) {
-                        auto* from = animator->getRegisteredNode(fromNode);
-                        auto* to   = animator->getRegisteredNode(toNode);
-                        if (from && to) {
-                            auto& outs = from->getOutputs();
-                            auto& ins  = to->getInputs();
-                            auto oit = outs.find(fromPort);
-                            auto iit = ins.find(toPort);
-                            if (oit != outs.end() && iit != ins.end()) {
-                                animator->link(oit->second, iit->second);
-                                // syncLinksFromDAG will pick up the new link next frame
-                            }
-                        }
-                    }
+                    CommandManager::instance().execute(
+                        std::make_unique<CreateLinkCommand>(fromNode, fromPort, toNode, toPort));
                 }
             } else {
                 ned::RejectNewItem({1.0f, 0.0f, 0.0f, 1.0f}); // red = reject
@@ -434,20 +486,9 @@ void NodeEditorPanel::handleDeletion() {
         if (ned::AcceptDeletedItem()) {
             for (auto it = mLinks.begin(); it != mLinks.end(); ++it) {
                 if (it->id == deletedLinkId) {
-                    auto* animator = Animator::instance();
-                    if (animator) {
-                        auto* from = animator->getRegisteredNode(it->fromNode);
-                        auto* to   = animator->getRegisteredNode(it->toNode);
-                        if (from && to) {
-                            auto& outs = from->getOutputs();
-                            auto& ins  = to->getInputs();
-                            auto oit = outs.find(it->fromPort);
-                            auto iit = ins.find(it->toPort);
-                            if (oit != outs.end() && iit != ins.end()) {
-                                animator->unlink(oit->second, iit->second);
-                            }
-                        }
-                    }
+                    CommandManager::instance().execute(
+                        std::make_unique<DeleteLinkCommand>(
+                            it->fromNode, it->fromPort, it->toNode, it->toPort));
                     mLinks.erase(it);
                     break;
                 }
@@ -463,11 +504,8 @@ void NodeEditorPanel::handleDeletion() {
             if (nd.id == deletedNodeId) { nodeName = name; break; }
         }
         if (!nodeName.empty() && ned::AcceptDeletedItem()) {
-            auto* animator = Animator::instance();
-            if (animator) {
-                auto* node = animator->getRegisteredNode(nodeName);
-                if (node) animator->removeNode(node);
-            }
+            CommandManager::instance().execute(
+                std::make_unique<DeleteNodeCommand>(nodeName, mLua));
             mNodes.erase(nodeName);
         }
     }
@@ -485,24 +523,18 @@ void NodeEditorPanel::showNodeContextMenu() {
         ImGui::TextDisabled("Create Node");
         ImGui::Separator();
 
-        auto* animator = Animator::instance();
         static int counter = 0;
-
-        if (ImGui::MenuItem("LuaAnimationNode")) {
-            std::string name = "lua_node_" + std::to_string(++counter);
-            if (animator) {
-                // Create a LuaAnimationNode with a no-op callback
-                sol::function noop = mLua.load("return function(node) end")().get<sol::function>();
-                auto* node = new LuaAnimationNode(name, noop);
-                node->addInput("in");
-                node->addOutput("out");
-                animator->registerNode(node);
-            }
-        }
-        if (ImGui::MenuItem("AccumulatorNode")) {
-            if (animator) {
-                auto* node = new AccumulatorNode();
-                animator->registerNode(node);
+        auto byCategory = NodeTypeRegistry::instance().getByCategory();
+        for (auto& [category, types] : byCategory) {
+            if (ImGui::BeginMenu(category.c_str())) {
+                for (auto* info : types) {
+                    if (ImGui::MenuItem(info->typeName.c_str())) {
+                        std::string name = info->typeName + "_" + std::to_string(++counter);
+                        CommandManager::instance().execute(
+                            std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
+                    }
+                }
+                ImGui::EndMenu();
             }
         }
 
@@ -519,20 +551,9 @@ void NodeEditorPanel::showNodeContextMenu() {
         if (ImGui::MenuItem("Delete Link")) {
             for (auto it = mLinks.begin(); it != mLinks.end(); ++it) {
                 if (it->id == mContextLinkId) {
-                    auto* animator = Animator::instance();
-                    if (animator) {
-                        auto* from = animator->getRegisteredNode(it->fromNode);
-                        auto* to   = animator->getRegisteredNode(it->toNode);
-                        if (from && to) {
-                            auto& outs = from->getOutputs();
-                            auto& ins  = to->getInputs();
-                            auto oit = outs.find(it->fromPort);
-                            auto iit = ins.find(it->toPort);
-                            if (oit != outs.end() && iit != ins.end()) {
-                                animator->unlink(oit->second, iit->second);
-                            }
-                        }
-                    }
+                    CommandManager::instance().execute(
+                        std::make_unique<DeleteLinkCommand>(
+                            it->fromNode, it->fromPort, it->toNode, it->toPort));
                     mLinks.erase(it);
                     break;
                 }
@@ -558,6 +579,32 @@ void NodeEditorPanel::showNodeContextMenu() {
     }
 
     ned::Resume();
+}
+
+std::vector<NodeEditorPanel::NodePosition> NodeEditorPanel::getNodePositions() const {
+    std::vector<NodePosition> positions;
+    ned::SetCurrentEditor(mEditorContext);
+    for (auto& [name, nd] : mNodes) {
+        auto pos = ned::GetNodePosition(nd.id);
+        positions.push_back({name, pos.x, pos.y});
+    }
+    ned::SetCurrentEditor(nullptr);
+    return positions;
+}
+
+void NodeEditorPanel::setNodePositions(const std::vector<NodePosition>& positions) {
+    // Store positions to apply — some nodes may not be in mNodes yet
+    // (syncFromDAG hasn't run). Apply what we can now, defer the rest.
+    mPendingPositions = positions;
+
+    ned::SetCurrentEditor(mEditorContext);
+    for (auto& np : positions) {
+        auto it = mNodes.find(np.name);
+        if (it != mNodes.end()) {
+            ned::SetNodePosition(it->second.id, {np.x, np.y});
+        }
+    }
+    ned::SetCurrentEditor(nullptr);
 }
 
 } // namespace bbfx

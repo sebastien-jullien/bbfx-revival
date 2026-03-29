@@ -1,8 +1,10 @@
 #include "PresetBrowserPanel.h"
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
+#include "../../core/PrimitiveNodes.h"
 
 #include <imgui.h>
+#include <sol/sol.hpp>
 #include <iostream>
 #include <cstring>
 #include <filesystem>
@@ -10,8 +12,8 @@
 
 namespace bbfx {
 
-PresetBrowserPanel::PresetBrowserPanel(NodeEditorPanel* nodeEditor)
-    : mNodeEditor(nodeEditor)
+PresetBrowserPanel::PresetBrowserPanel(NodeEditorPanel* nodeEditor, sol::state& lua)
+    : mNodeEditor(nodeEditor), mLua(lua)
 {
     // Initialize quick access slots as empty
     for (auto& slot : mQuickSlots) {
@@ -117,8 +119,44 @@ void PresetBrowserPanel::renderQuickAccessBar() {
 
         if (ImGui::Button(label.c_str(), {btnSize, btnSize})) {
             if (hasTarget) {
-                std::cout << "[QuickAccess] Trigger: " << mQuickSlots[i].target << std::endl;
-                // TODO: trigger chord state or instantiate preset
+                // Try to activate chord via Lua ChordSystem
+                bool chordHandled = false;
+                try {
+                    sol::object obj = mLua["ChordSystem"];
+                    if (obj.valid() && obj.get_type() == sol::type::table) {
+                        sol::table chordSys = obj.as<sol::table>();
+                        sol::function activateFn = chordSys["activate"];
+                        if (activateFn.valid()) {
+                            activateFn(chordSys, mQuickSlots[i].target);
+                            chordHandled = true;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[QuickAccess] Chord error: " << e.what() << std::endl;
+                }
+                if (!chordHandled) {
+                    // Fall back: try to instantiate as preset
+                    std::string presetPath = "lua/presets/" + mQuickSlots[i].target + ".lua";
+                    auto result = mLua.safe_script_file(presetPath, sol::script_pass_on_error);
+                    if (result.valid()) {
+                        sol::table preset = result;
+                        sol::table nodes = preset.get_or<sol::table>("nodes", sol::nil);
+                        if (nodes.valid()) {
+                            auto* animator = Animator::instance();
+                            if (animator) {
+                                for (auto& [k, v] : nodes) {
+                                    sol::table nodeDesc = v.as<sol::table>();
+                                    std::string nodeName = nodeDesc.get_or<std::string>("name", mQuickSlots[i].target);
+                                    sol::function noop = mLua.load("return function(node) end")().get<sol::function>();
+                                    auto* node = new LuaAnimationNode(nodeName, noop);
+                                    node->addInput("in");
+                                    node->addOutput("out");
+                                    animator->registerNode(node);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

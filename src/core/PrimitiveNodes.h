@@ -23,9 +23,13 @@ public:
     void addInput(const string& name);
     void addOutput(const string& name);
     void update() override;
+    void setUpdateFunction(sol::function fn) { mUpdateHook = std::move(fn); }
+    void setSource(const std::string& src) { mSource = src; }
+    const std::string& getSource() const { return mSource; }
     std::string getTypeName() const override { return "LuaAnimationNode"; }
 protected:
     sol::function mUpdateHook;
+    std::string mSource; // Lua source code (for serialization)
 };
 
 class AnimableValuePort : public AnimationPort {
@@ -62,11 +66,16 @@ public:
     void update() override;
     void reset();
     Ogre::Real getTotalTime() const;
+    void setBPM(float bpm);
+    float getBPM() const;
     std::string getTypeName() const override { return "RootTimeNode"; }
 protected:
     static RootTimeNode* sInstance;
     AnimationPort* mFrameTimePort;
     AnimationPort* mTotalTimePort;
+    AnimationPort* mBeatPort;      // current beat number (total * bpm / 60)
+    AnimationPort* mBPMPort;       // BPM value (input — set from Timeline)
+    AnimationPort* mBeatFracPort;  // fractional beat (0..1 sawtooth synced to beat)
     Ogre::Real mTotalTime = 0.0f;
     std::chrono::steady_clock::time_point mLastTime;
 };

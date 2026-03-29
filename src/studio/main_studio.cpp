@@ -1,4 +1,5 @@
 #include "StudioApp.h"
+#include "SettingsManager.h"
 #include "../platform.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
@@ -6,8 +7,10 @@
 #include <ogre_lua/ogre_lua.h>
 
 #include <sol/sol.hpp>
+#include <SDL3/SDL.h>
 #include <iostream>
 #include <filesystem>
+#include <cstdlib>
 
 namespace {
 std::filesystem::path findProjectRoot(const std::filesystem::path& start) {
@@ -62,14 +65,62 @@ int main(int argc, char* argv[]) {
         timeNode.setListener(&animator);
         animator.registerNode(&timeNode);
 
-        // Optional initial Lua script (e.g. to pre-populate DAG)
+        // Parse arguments
         std::string initialScript;
-        if (argc > 1) {
-            initialScript = argv[1];
+        bool forceDefault = false;
+        bool forceReset = false;
+        bool fullscreen = false;
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--default") {
+                forceDefault = true;
+            } else if (arg == "--reset") {
+                forceReset = true;
+            } else if (arg == "--clear") {
+                // Factory reset: delete settings + layout from disk
+                auto& settings = bbfx::SettingsManager::instance();
+                settings.set(bbfx::Settings{}); // defaults
+                settings.save();
+                std::filesystem::remove("imgui.ini");
+                std::cout << "[Studio] --clear: factory reset (settings + layout deleted)" << std::endl;
+                forceDefault = true;
+            } else if (arg == "--build") {
+                std::cout << "[Studio] --build: rebuilding..." << std::endl;
+                int rc = std::system("cmake --build ../.. --config Debug --target bbfx-studio");
+                if (rc != 0) {
+                    std::cerr << "[Studio] Build failed (exit " << rc << ")" << std::endl;
+                    return 1;
+                }
+                std::cout << "[Studio] Build OK, continuing..." << std::endl;
+            } else if (arg == "--fullscreen" || arg == "-f") {
+                fullscreen = true;
+            } else if (arg[0] != '-') {
+                initialScript = arg;
+            }
+        }
+
+        // --reset: bypass saved project + layout for this session (like first launch)
+        // Does NOT modify settings on disk.
+        if (forceReset) {
+            auto cwd = std::filesystem::current_path();
+            std::cout << "[Studio] --reset: cwd=" << cwd.string() << std::endl;
+            bool r1 = std::filesystem::remove("imgui.ini");
+            bool r2 = std::filesystem::remove("node_editor.json");
+            std::cout << "[Studio] --reset: removed imgui.ini=" << r1
+                      << " node_editor.json=" << r2 << std::endl;
+            forceDefault = true;
+            std::cout << "[Studio] --reset: fresh session (default template + reset layout)" << std::endl;
+        }
+
+        if (forceDefault) {
+            std::cout << "[Studio] --default: will load default template" << std::endl;
         }
 
         // Run the Studio application
-        bbfx::StudioApp app(lua, initialScript);
+        bbfx::StudioApp app(lua, initialScript, forceDefault, forceReset);
+        if (fullscreen) {
+            SDL_SetWindowFullscreen(app.getEngine()->getSDLWindow(), true);
+        }
         app.run();
 
     } catch (const Ogre::Exception& e) {

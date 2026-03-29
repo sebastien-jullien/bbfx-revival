@@ -50,16 +50,20 @@ StudioEngine::StudioEngine(sol::state& lua)
     // Phase 2: OGRE init using the existing SDL3 GL context.
     initOGRE(true /* externalGLContext */);
 
-    // Disable auto-update on the main render window — we render to a RenderTexture.
+    // The main render window is not used for rendering in Studio mode —
+    // OGRE renders to a RenderTexture displayed via ImGui::Image().
+    // Remove the Engine-created viewport from the RenderWindow so the camera
+    // has only ONE viewport (the RenderTexture one), preventing aspect ratio conflicts.
     if (mRenderWindow) {
         mRenderWindow->setAutoUpdated(false);
+        mRenderWindow->removeAllViewports();
     }
 
     // Create the initial RenderTexture at default resolution.
     initRenderTexture(mRTWidth, mRTHeight);
 
     // Set window title and resize to a comfortable default for the Studio.
-    SDL_SetWindowTitle(mWindow, "BBFx Studio v3.0");
+    SDL_SetWindowTitle(mWindow, "BBFx Studio v3.1");
     SDL_SetWindowSize(mWindow, 1400, 900);
     SDL_SetWindowPosition(mWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
@@ -113,18 +117,61 @@ void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
         auto* vp = mRenderTarget->addViewport(cam);
         vp->setBackgroundColour(Ogre::ColourValue(0.12f, 0.12f, 0.12f));
         vp->setOverlaysEnabled(true);
+        // Disable auto-aspect (it reads from the wrong viewport — the RenderWindow one)
+        // and force the correct aspect ratio for this RenderTexture.
+        cam->setAutoAspectRatio(false);
+        Ogre::Real ar = static_cast<Ogre::Real>(width) / static_cast<Ogre::Real>(height);
+        cam->setAspectRatio(ar);
+        std::cout << "[StudioEngine] initRenderTexture " << width << "x" << height
+                  << " aspect=" << ar << " cam=" << cam->getName()
+                  << " vp=" << vp->getActualWidth() << "x" << vp->getActualHeight()
+                  << std::endl;
     }
 }
 
 void StudioEngine::resizeRenderTexture(uint32_t width, uint32_t height) {
     if (width == mRTWidth && height == mRTHeight) return;
     initRenderTexture(width, height);
+    mCachedFBO = -1; // new FBO — must re-discover ID
 }
 
 void StudioEngine::updateRenderTarget() {
-    if (mRenderTarget && mRenderTarget->getNumViewports() > 0) {
+    if (!mRenderTarget || mRenderTarget->getNumViewports() == 0) return;
+
+    // Force correct aspect ratio every frame.
+    auto* vp = mRenderTarget->getViewport(0);
+    if (vp && vp->getCamera()) {
+        vp->getCamera()->setAspectRatio(
+            static_cast<Ogre::Real>(mRTWidth) / static_cast<Ogre::Real>(mRTHeight));
+    }
+
+    // OGRE GL3Plus caches both mActiveRenderTarget and the GL viewport/FBO state.
+    // Between frames, ImGui renders to framebuffer 0 with the full window viewport.
+    // We must force-bind the correct FBO AND reset glViewport before OGRE renders.
+#ifdef _WIN32
+    if (mCachedFBO < 0) {
+        // First render after creation/resize: let OGRE bind normally, then capture FBO ID.
+        mRenderTarget->update();
+        glGetIntegerv(0x8CA6 /*GL_FRAMEBUFFER_BINDING*/, &mCachedFBO);
+    } else {
+        // Subsequent renders: force-bind the FBO and viewport that ImGui clobbered.
+        using BindFBOFunc = void(APIENTRY*)(unsigned int, unsigned int);
+        static auto sBindFBO = reinterpret_cast<BindFBOFunc>(wglGetProcAddress("glBindFramebuffer"));
+        if (sBindFBO)
+            sBindFBO(0x8D40 /*GL_FRAMEBUFFER*/, static_cast<unsigned int>(mCachedFBO));
+        glViewport(0, 0, static_cast<int>(mRTWidth), static_cast<int>(mRTHeight));
         mRenderTarget->update();
     }
+#else
+    mRenderTarget->update();
+#endif
+}
+
+bool StudioEngine::captureFrame(const std::string& path) {
+    if (!mRenderTarget) return false;
+    mRenderTarget->update();
+    mRenderTarget->writeContentsToFile(path);
+    return true;
 }
 
 ImTextureID StudioEngine::getRenderTextureID() const {

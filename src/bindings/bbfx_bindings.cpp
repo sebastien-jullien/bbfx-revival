@@ -109,6 +109,7 @@ void register_bbfx_bindings(sol::state& lua) {
         "getNodeByName", [](Animator& self, const std::string& name) -> AnimationNode* {
             return self.getRegisteredNode(name);
         },
+        "renameNode", &Animator::renameNode,
         "exportDOT", &Animator::exportDOT,
         "renderOneFrame", &Animator::renderOneFrame,
         "setPreOp", [](Animator& self, bool isLink, AnimationPort* from, AnimationPort* to, float time) {
@@ -165,6 +166,8 @@ void register_bbfx_bindings(sol::state& lua) {
         "instance", []() -> RootTimeNode* { return RootTimeNode::instance(); },
         "reset", &RootTimeNode::reset,
         "getTotalTime", &RootTimeNode::getTotalTime,
+        "setBPM", &RootTimeNode::setBPM,
+        "getBPM", &RootTimeNode::getBPM,
         "update", &RootTimeNode::update,
         sol::base_classes, sol::bases<AnimationNode>()
     );
@@ -179,6 +182,7 @@ void register_bbfx_bindings(sol::state& lua) {
         "addInput", &LuaAnimationNode::addInput,
         "addOutput", &LuaAnimationNode::addOutput,
         "update", &LuaAnimationNode::update,
+        "setUpdateFunction", &LuaAnimationNode::setUpdateFunction,
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["LuaAnimationNode"] = lua["bbfx_LuaAnimationNode"];

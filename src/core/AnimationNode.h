@@ -40,6 +40,8 @@ protected:
     AnimationPort* addOutput(AnimationPort* port);
     void fireUpdate();
 
+    friend class Animator; // for renameNode() access to mName
+
 private:
     AnimationNodeListener* mListener = nullptr;
     void addPort(AnimationPort* port, Ports& ports);
