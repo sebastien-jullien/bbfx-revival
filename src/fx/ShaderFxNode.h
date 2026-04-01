@@ -32,6 +32,7 @@ public:
 
     ~ShaderFxNode() override = default;
     void update() override;
+    void cleanup() override;
     std::string getTypeName() const override { return "ShaderFxNode"; }
 
     Ogre::MaterialPtr getMaterial() const { return mMaterial; }
@@ -53,6 +54,7 @@ private:
     std::vector<UniformInfo> mUniforms;
 
     float mTime = 0.0f;
+    std::vector<std::string> mOriginalMaterials; // per sub-entity
 };
 
 } // namespace bbfx

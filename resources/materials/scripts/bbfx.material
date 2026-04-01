@@ -16,6 +16,51 @@ material bbfx/test
 	}
 }
 
+// Materials referenced by legacy meshes (3DS Max export names)
+material Ground_Grass_sub2
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.8 0.8 0.8
+			diffuse 0.9 0.9 0.9
+			specular 0.3 0.3 0.3 20
+			lighting on
+		}
+	}
+}
+
+// Default material for cube.mesh, knot.mesh, athene.mesh
+material Default
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.8 0.8 0.8
+			diffuse 0.9 0.9 0.9
+			specular 0.4 0.4 0.4 30
+			lighting on
+		}
+	}
+}
+
+// Material for razor.mesh (legacy 3DS Max export)
+material Material__25
+{
+	technique
+	{
+		pass
+		{
+			ambient 0.6 0.6 0.6
+			diffuse 0.8 0.8 0.8
+			specular 0.5 0.5 0.5 40
+			lighting on
+		}
+	}
+}
+
 material bbfx/blitter
 {
 	technique

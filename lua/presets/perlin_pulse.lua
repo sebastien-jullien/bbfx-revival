@@ -1,10 +1,17 @@
--- perlin_pulse.lua — BBFx Preset
--- A pulsating perlin noise effect driven by beat detection
-
+-- perlin_pulse — Pulsating Perlin noise synced to beats
+local ParamSpec = require 'paramspec'
 return {
     name = "perlin_pulse",
-    description = "Pulsating perlin noise synced to beats",
-    nodes = {
-        { type = "PerlinFxNode", name = "perlin", params = { displacement = 2.0 } },
-    }
+    version = 2,
+    category = "Geometry",
+    description = "Geosphere with Perlin displacement pulsing to the beat",
+    tags = {"perlin", "beat", "sphere", "deformation"},
+    params = ParamSpec.declare({
+        ParamSpec.mesh("mesh", "geosphere4500.mesh", {label="Mesh"}),
+        ParamSpec.float("displacement", 0.15, {min=0, max=20, label="Displacement"}),
+        ParamSpec.float("density", 4.0, {min=0.1, max=10, label="Noise Scale"}),
+        ParamSpec.float("timeDensity", 5.0, {min=0, max=20, label="Speed"}),
+        ParamSpec.bool("beat_sync", true, {label="Sync to Beat"}),
+    }),
+    build = function(params) return {type="PerlinFxNode", params=params} end
 }

@@ -37,6 +37,7 @@ protected:
     String mMeshName;
     MeshPtr originalMesh;
     MeshPtr clonedMesh;
+    bool mCloneReady = false; // deferred: clone prepared at first frameStarted()
 
     // CPU copies of original vertex data per submesh (+ shared)
     CpuMeshData mSharedCpuData;

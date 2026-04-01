@@ -14,6 +14,12 @@ public:
     virtual ~WaveVertexShader();
     void renderOneFrame(Real dt) override;
     void update() override;
+    void cleanup() override;
+
+    void setStudioNames(const std::string& entName, const std::string& snName) {
+        mStudioEntityName = entName;
+        mStudioSceneNodeName = snName;
+    }
 
     float getAmplitude() const { return amplitude; }
     void setAmplitude(float v) { amplitude = v; }
@@ -34,6 +40,14 @@ protected:
     // Pre-allocated buffers
     std::vector<float> mDstPos;
     std::vector<float> mNormals;
+
+    // Deferred entity creation (same pattern as PerlinFxNode)
+    std::string mStudioEntityName;
+    std::string mStudioSceneNodeName;
+    std::string mCloneMeshName;
+    bool mEntityCreated = false;
+
+    void createDeferredEntity();
 
     void _applyWave(VertexData* data, const CpuMeshData& cpuData);
 };

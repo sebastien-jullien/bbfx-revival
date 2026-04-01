@@ -68,6 +68,7 @@ public:
 
     void removeNode(AnimationNode* node);
     void registerNode(AnimationNode* node);
+    void unregisterNode(const std::string& name); // remove from name map only, don't touch graph
     bool renameNode(const std::string& oldName, const std::string& newName);
     std::vector<std::string> getRegisteredNodeNames() const;
     AnimationNode* getRegisteredNode(const std::string& name) const;

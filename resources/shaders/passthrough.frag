@@ -7,14 +7,14 @@ uniform vec4 lightDiffuse;
 uniform vec4 ambientLight;
 uniform vec4 materialDiffuse;
 
-in vec3 vNormal;
-in vec2 vTexCoord;
+in vec3 oNormal;
+in vec2 oUv0;
 in vec3 vWorldPos;
 
 out vec4 fragColor;
 
 void main() {
-    vec3 n = normalize(vNormal);
+    vec3 n = normalize(oNormal);
     // Simple directional light from above-right
     vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
     float diff = max(dot(n, lightDir), 0.0);

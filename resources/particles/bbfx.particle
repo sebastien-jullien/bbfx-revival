@@ -1,0 +1,91 @@
+// BBFx Custom Particle Templates
+// Designed for Studio viewport: camera at ~20 units from origin, looking at (0,0,0)
+
+particle_system BBFx/StarField
+{
+    material        Examples/Flare
+    particle_width  3
+    particle_height 3
+    cull_each       false
+    quota           2000
+    billboard_type  point
+
+    emitter Box
+    {
+        angle           180
+        emission_rate   100
+        time_to_live    20
+        direction       0 0 -1
+        velocity        5
+        width           80
+        height          80
+        depth           80
+        colour_range_start  0.7 0.7 1.0
+        colour_range_end    1.0 1.0 0.8
+    }
+}
+
+particle_system BBFx/SparkBurst
+{
+    material        Examples/Flare2
+    particle_width  8
+    particle_height 16
+    cull_each       false
+    quota           500
+    billboard_type  oriented_self
+
+    emitter Point
+    {
+        angle           180
+        emission_rate   200
+        time_to_live    0.8
+        direction       0 1 0
+        velocity_min    50
+        velocity_max    150
+        colour_range_start  1 1 0.3
+        colour_range_end    1 0.3 0
+    }
+
+    affector LinearForce
+    {
+        force_vector      0 -100 0
+        force_application add
+    }
+
+    affector ColourFader
+    {
+        red -0.5
+        green -1
+        blue -0.5
+    }
+}
+
+particle_system BBFx/Snowfall
+{
+    material        Examples/Flare
+    particle_width  3
+    particle_height 3
+    cull_each       false
+    quota           1000
+    billboard_type  point
+
+    emitter Box
+    {
+        angle           0
+        emission_rate   80
+        time_to_live    8
+        direction       0 -1 0
+        velocity        8
+        position        0 40 0
+        width           60
+        height          1
+        depth           60
+        colour_range_start  0.9 0.9 1.0
+        colour_range_end    1.0 1.0 1.0
+    }
+
+    affector DirectionRandomiser
+    {
+        randomness      5
+    }
+}

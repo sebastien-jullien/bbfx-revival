@@ -1,12 +1,13 @@
 #include "ColorShiftNode.h"
+#include <OgreRTShaderSystem.h>
 #include <cmath>
 
 namespace bbfx {
 
 ColorShiftNode::ColorShiftNode(const string& materialName)
     : AnimationNode("ColorShiftNode")
-    , mMaterialName(materialName)
 {
+    mMaterialNames.push_back(materialName);
     addInput(new AnimationPort("hue_shift", 0.0f));
     addInput(new AnimationPort("saturation", 1.0f));
     addInput(new AnimationPort("brightness", 1.0f));
@@ -40,13 +41,43 @@ void ColorShiftNode::update() {
     float sat = inputs.at("saturation")->getValue();
     float bright = inputs.at("brightness")->getValue();
 
-    auto mat = Ogre::MaterialManager::getSingleton().getByName(mMaterialName);
-    if (mat) {
-        Ogre::ColourValue col = hsvToRgb(hue, sat, bright);
-        mat->getTechnique(0)->getPass(0)->setDiffuse(col);
+    Ogre::ColourValue col = hsvToRgb(hue, sat, bright);
+    for (size_t i = 0; i < mMaterialNames.size(); i++) {
+        auto mat = Ogre::MaterialManager::getSingleton().getByName(mMaterialNames[i]);
+        if (!mat || mat->getNumTechniques() == 0) continue;
+        auto* pass = mat->getTechnique(0)->getPass(0);
+        if (!mSavedOriginal) {
+            mOriginalColors.push_back({pass->getEmissive(), pass->getDiffuse(), pass->getAmbient()});
+        }
+        pass->setEmissive(col);
+        pass->setDiffuse(col);
+        pass->setAmbient(col);
+        // Force RTSS to regenerate shaders with new material properties
+        try {
+            auto* sg = Ogre::RTShader::ShaderGenerator::getSingletonPtr();
+            if (sg) sg->invalidateMaterial(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME, mMaterialNames[i]);
+        } catch (...) {}
     }
+    if (!mSavedOriginal && !mMaterialNames.empty()) mSavedOriginal = true;
 
     fireUpdate();
+}
+
+void ColorShiftNode::cleanup() {
+    if (mSavedOriginal) {
+        for (size_t i = 0; i < mMaterialNames.size() && i < mOriginalColors.size(); i++) {
+            auto mat = Ogre::MaterialManager::getSingleton().getByName(mMaterialNames[i]);
+            if (!mat || mat->getNumTechniques() == 0) continue;
+            try {
+                auto* pass = mat->getTechnique(0)->getPass(0);
+                pass->setEmissive(mOriginalColors[i].emissive);
+                pass->setDiffuse(mOriginalColors[i].diffuse);
+                pass->setAmbient(mOriginalColors[i].ambient);
+                auto* sg = Ogre::RTShader::ShaderGenerator::getSingletonPtr();
+                if (sg) sg->invalidateMaterial(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME, mMaterialNames[i]);
+            } catch (...) {}
+        }
+    }
 }
 
 } // namespace bbfx

@@ -2,6 +2,7 @@
 
 #include "../bbfx.h"
 #include "AnimationPort.h"
+#include "ParamSpec.h"
 #include <map>
 
 namespace bbfx {
@@ -29,16 +30,31 @@ public:
 
     virtual void update();
 
+    /// Enable/disable the node. Disabled nodes skip update() and appear grayed out in the editor.
+    bool isEnabled() const { return mEnabled; }
+    virtual void setEnabled(bool en) { mEnabled = en; }
+
+    /// Called before deletion to destroy OGRE objects (Entity, SceneNode, Material, etc.)
+    /// Override in FX nodes that create OGRE resources.
+    virtual void cleanup() {}
+
     void setListener(AnimationNodeListener* listener);
+
+    /// Optional typed parameter spec. If set, Inspector generates widgets automatically.
+    void setParamSpec(ParamSpec* spec) { mParamSpec = spec; }
+    ParamSpec* getParamSpec() const { return mParamSpec; }
 
 protected:
     string mName;
     Ports mInputs;
     Ports mOutputs;
+    bool mEnabled = true;
 
     AnimationPort* addInput(AnimationPort* port);
     AnimationPort* addOutput(AnimationPort* port);
     void fireUpdate();
+
+    ParamSpec* mParamSpec = nullptr;
 
     friend class Animator; // for renameNode() access to mName
 

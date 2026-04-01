@@ -32,12 +32,20 @@ public:
     /// Returns the name of the currently selected node, or "".
     const std::string& getSelectedNodeName() const { return mSelectedNode; }
 
+    /// Programmatically select a node (triggers selection callback for Inspector)
+    void selectNode(const std::string& name) {
+        mSelectedNode = name;
+        if (mSelectionCallback) mSelectionCallback(name);
+    }
+
     struct NodePosition { std::string name; float x, y; };
     std::vector<NodePosition> getNodePositions() const;
     void setNodePositions(const std::vector<NodePosition>& positions);
 
-private:
+    /// Re-sync node/link data from the Animator DAG. Call after deferred deletes.
     void syncFromDAG();
+
+private:
     void syncLinksFromDAG();
     void handleLinkCreation();
     void handleDeletion(); // handles both link and node deletion in one BeginDelete scope
@@ -89,6 +97,14 @@ private:
     char mPresetNameBuf[128] = {};
 
     std::vector<NodePosition> mPendingPositions;
+
+    // Deferred drop position (screen coords, converted to canvas in next ned::Begin scope)
+    ImVec2 mDropScreenPos = {0, 0};
+    std::string mDropPresetName;
+
+    // Stale IDs from deferred-deleted nodes — cleaned up in ned after Begin()
+    std::vector<ax::NodeEditor::NodeId> mStaleNodeIds;
+    std::vector<ax::NodeEditor::PinId> mStalePinIds;
 
     ImVec2 mBookmarks[9] = {};
     float mBookmarkZooms[9] = {};

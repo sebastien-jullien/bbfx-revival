@@ -25,6 +25,7 @@
 #include "../audio/AudioCapture.h"
 #include "../audio/AudioAnalyzer.h"
 #include "../audio/BeatDetector.h"
+#include "../core/ParamSpec.h"
 #include <OgreOverlayManager.h>
 #include <OgreOverlay.h>
 #include <OgreOverlayContainer.h>
@@ -648,6 +649,81 @@ void register_bbfx_bindings(sol::state& lua) {
         "getFrameCount", &VideoExporter::getFrameCount
     );
     bbfx["VideoExporter"] = lua["bbfx_VideoExporter"];
+
+    // ── v3.2: ParamSpec bindings ─────────────────────────────────────────
+    {
+        auto paramSpecType = lua.new_usertype<ParamSpec>("bbfx_ParamSpec",
+            sol::constructors<ParamSpec()>());
+        paramSpecType["addParam"] = [](ParamSpec& self, const sol::table& t) {
+            ParamDef def;
+            sol::optional<std::string> nameOpt = t["name"];
+            def.name = nameOpt.value_or("");
+            sol::optional<std::string> labelOpt = t["label"];
+            def.label = labelOpt.value_or(def.name);
+            sol::optional<std::string> typeOpt = t["type"];
+            std::string typeStr = typeOpt.value_or("float");
+
+            if (typeStr == "float") {
+                def.type = ParamType::FLOAT;
+                sol::optional<float> v = t["default"]; def.floatVal = v.value_or(0.0f);
+            } else if (typeStr == "int") {
+                def.type = ParamType::INT;
+                sol::optional<int> v = t["default"]; def.intVal = v.value_or(0);
+            } else if (typeStr == "bool") {
+                def.type = ParamType::BOOL;
+                sol::optional<bool> v = t["default"]; def.boolVal = v.value_or(false);
+            } else if (typeStr == "enum") {
+                def.type = ParamType::ENUM;
+                sol::optional<std::string> v = t["default"]; def.stringVal = v.value_or("");
+            } else if (typeStr == "color") {
+                def.type = ParamType::COLOR;
+                sol::optional<sol::table> cv = t["default"];
+                if (cv) { def.colorVal[0] = (*cv)[1]; def.colorVal[1] = (*cv)[2]; def.colorVal[2] = (*cv)[3]; }
+            } else if (typeStr == "vec3") {
+                def.type = ParamType::VEC3;
+                sol::optional<sol::table> vv = t["default"];
+                if (vv) { def.vec3Val[0] = (*vv)[1]; def.vec3Val[1] = (*vv)[2]; def.vec3Val[2] = (*vv)[3]; }
+            } else {
+                // String-valued types: string, mesh, texture, material, shader, particle, compositor
+                if (typeStr == "mesh")            def.type = ParamType::MESH;
+                else if (typeStr == "texture")    def.type = ParamType::TEXTURE;
+                else if (typeStr == "material")   def.type = ParamType::MATERIAL;
+                else if (typeStr == "shader")     def.type = ParamType::SHADER;
+                else if (typeStr == "particle")   def.type = ParamType::PARTICLE;
+                else if (typeStr == "compositor") def.type = ParamType::COMPOSITOR;
+                else                              def.type = ParamType::STRING;
+                sol::optional<std::string> v = t["default"]; def.stringVal = v.value_or("");
+            }
+
+            sol::optional<float> minOpt = t["min"]; def.minVal = minOpt.value_or(0.0f);
+            sol::optional<float> maxOpt = t["max"]; def.maxVal = maxOpt.value_or(10.0f);
+            sol::optional<float> stepOpt = t["step"]; def.stepVal = stepOpt.value_or(0.01f);
+
+            sol::optional<sol::table> choices = t["choices"];
+            if (choices) {
+                for (auto& kv : *choices) def.choices.push_back(kv.second.as<std::string>());
+            }
+            self.addParam(def);
+        };
+        paramSpecType["getFloat"] = [](ParamSpec& self, const std::string& name) -> float {
+            auto* p = self.getParam(name);
+            return p ? p->floatVal : 0.0f;
+        };
+        paramSpecType["getInt"] = [](ParamSpec& self, const std::string& name) -> int {
+            auto* p = self.getParam(name);
+            return p ? p->intVal : 0;
+        };
+        paramSpecType["getBool"] = [](ParamSpec& self, const std::string& name) -> bool {
+            auto* p = self.getParam(name);
+            return p ? p->boolVal : false;
+        };
+        paramSpecType["getString"] = [](ParamSpec& self, const std::string& name) -> std::string {
+            auto* p = self.getParam(name);
+            return p ? p->stringVal : "";
+        };
+        paramSpecType["empty"] = &ParamSpec::empty;
+        bbfx["ParamSpec"] = lua["bbfx_ParamSpec"];
+    }
 
     // ── v2.6: fileModTime binding ───────────────────────────────────────
     bbfx["fileModTime"] = [](const std::string& path) -> double {

@@ -48,7 +48,7 @@ void ViewportPanel::render() {
 
     ImTextureID texId = mEngine->getRenderTextureID();
     if (texId) {
-        ImGui::Image(texId, panelSize, {0.0f, 1.0f}, {1.0f, 0.0f});
+        ImGui::Image(texId, panelSize, {0.0f, 0.0f}, {1.0f, 1.0f});
     } else {
         ImGui::TextDisabled("(OGRE RenderTexture not ready)");
     }

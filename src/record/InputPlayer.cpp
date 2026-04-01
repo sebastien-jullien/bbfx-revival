@@ -54,6 +54,12 @@ void InputPlayer::play(const std::string& filename) {
         e.state = extractString(line, "state");
         e.value = extractFloat(line, "value");
         if (e.type == "axis") e.code = extractInt(line, "axis");
+        // v3.2 Studio events
+        e.name = extractString(line, "name");
+        e.node = extractString(line, "node");
+        e.port = extractString(line, "port");
+        e.index = extractInt(line, "index");
+        if (e.type == "bpm") e.value = extractFloat(line, "bpm");
         mEvents.push_back(e);
     }
 

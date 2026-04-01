@@ -1,0 +1,381 @@
+// BBFx Compositor Materials — fragment programs + materials for each compositor
+
+// === Fragment Programs ===
+
+fragment_program BBFx/Vignette_fp glsl
+{
+    source vignette.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named strength float 0.8
+    }
+}
+
+fragment_program BBFx/FilmGrain_fp glsl
+{
+    source filmgrain.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named intensity float 0.3
+    }
+}
+
+fragment_program BBFx/Invert_fp glsl
+{
+    source invert.frag
+    default_params
+    {
+        param_named tex0 int 0
+    }
+}
+
+fragment_program BBFx/Posterize_fp glsl
+{
+    source posterize.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named levels float 6.0
+    }
+}
+
+fragment_program BBFx/EdgeDetect_fp glsl
+{
+    source edge_detect.frag
+    default_params
+    {
+        param_named tex0 int 0
+    }
+}
+
+fragment_program BBFx/Pixelate_fp glsl
+{
+    source pixelate.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named pixel_size float 8.0
+    }
+}
+
+fragment_program BBFx/Barrel_fp glsl
+{
+    source barrel.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named distortion float 0.3
+    }
+}
+
+fragment_program BBFx/Kaleidoscope_fp glsl
+{
+    source kaleidoscope.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named segments float 6.0
+        param_named rotation float 0
+        param_named zoom float 1.0
+    }
+}
+
+fragment_program BBFx/ChromaticAberration_fp glsl
+{
+    source chromatic_aberration.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named intensity float 5.0
+        param_named falloff float 2.0
+    }
+}
+
+fragment_program BBFx/VHS_fp glsl
+{
+    source vhs.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named tracking float 1.0
+        param_named noise_amount float 0.1
+        param_named color_bleed float 1.0
+        param_named scanline float 1.0
+    }
+}
+
+fragment_program BBFx/HeatDistort_fp glsl
+{
+    source wave_deform.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named amplitude float 0.01
+        param_named frequency float 10.0
+    }
+}
+
+fragment_program BBFx/ASCII_fp glsl
+{
+    source ascii_art.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named char_size float 8.0
+        param_named brightness float 1.0
+    }
+}
+
+// MotionTrail uses filmgrain shader as approximation (blur effect)
+fragment_program BBFx/MotionTrail_fp glsl
+{
+    source filmgrain.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named intensity float 0.05
+    }
+}
+
+// === Materials ===
+
+material BBFx/Vignette
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Vignette_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/FilmGrain
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/FilmGrain_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Invert
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Invert_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Posterize
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Posterize_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/EdgeDetect
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/EdgeDetect_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Pixelate
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Pixelate_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Barrel
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Barrel_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Kaleidoscope
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Kaleidoscope_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/ChromaticAberration
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/ChromaticAberration_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/VHS
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/VHS_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/HeatDistort
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/HeatDistort_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/ASCII
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/ASCII_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/MotionTrail
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/MotionTrail_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}

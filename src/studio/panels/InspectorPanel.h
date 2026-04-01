@@ -14,6 +14,7 @@ public:
     void setSelectedNode(const std::string& name) { mSelectedNode = name; }
 
 private:
+    void renderParamSpec();
     void renderFloatPorts();
     void renderEnumPorts();
     void renderLuaEditor();

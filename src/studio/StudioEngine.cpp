@@ -27,6 +27,33 @@
 
 namespace bbfx {
 
+// ── GLStateGuard RAII ──────────────────────────────────────────────────────
+
+#ifdef _WIN32
+using PFN_glBindFramebuffer = void(APIENTRY*)(unsigned int, unsigned int);
+static PFN_glBindFramebuffer sGLBindFBO = nullptr;
+static void ensureGLStateGuardFuncs() {
+    if (!sGLBindFBO)
+        sGLBindFBO = reinterpret_cast<PFN_glBindFramebuffer>(wglGetProcAddress("glBindFramebuffer"));
+}
+#endif
+
+GLStateGuard::GLStateGuard() {
+#ifdef _WIN32
+    ensureGLStateGuardFuncs();
+    glGetIntegerv(0x8CA6 /*GL_FRAMEBUFFER_BINDING*/, &mSavedFBO);
+    glGetIntegerv(GL_VIEWPORT, mSavedViewport);
+#endif
+}
+
+GLStateGuard::~GLStateGuard() {
+#ifdef _WIN32
+    if (sGLBindFBO)
+        sGLBindFBO(0x8D40 /*GL_FRAMEBUFFER*/, static_cast<unsigned int>(mSavedFBO));
+    glViewport(mSavedViewport[0], mSavedViewport[1], mSavedViewport[2], mSavedViewport[3]);
+#endif
+}
+
 StudioEngine::StudioEngine(sol::state& lua)
     // Phase 1: SDL3 init + window with OpenGL flag, defer OGRE init.
     : Engine(lua, SDL_WINDOW_OPENGL, true)

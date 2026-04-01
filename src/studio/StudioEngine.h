@@ -8,6 +8,17 @@
 
 namespace bbfx {
 
+/// RAII guard that saves and restores GL state (FBO, viewport) around OGRE renders.
+/// Prevents ImGui/OGRE GL state conflicts.
+class GLStateGuard {
+public:
+    GLStateGuard();
+    ~GLStateGuard();
+private:
+    int mSavedFBO = 0;
+    int mSavedViewport[4] = {};
+};
+
 /// Engine subclass for bbfx-studio.
 ///
 /// Differences from headless Engine:

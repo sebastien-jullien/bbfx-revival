@@ -1,27 +1,40 @@
 {
-  "version": "3.1",
-  "created": "2026-03-29T00:00:00Z",
+  "version": "3.2",
+  "created": "2026-03-31T00:00:00Z",
   "graph": {
     "nodes": [
       {
         "id": "time",
         "type": "RootTimeNode",
-        "position": { "x": 50, "y": 250 },
+        "position": { "x": 50, "y": 50 },
         "ports": { "bpm": 120.0 }
+      },
+      {
+        "id": "studio_head",
+        "type": "SceneObjectNode",
+        "position": { "x": 550, "y": 50 },
+        "ports": { "visible": 1.0 },
+        "params": { "mesh_file": "ogrehead.mesh" }
+      },
+      {
+        "id": "studio_light",
+        "type": "LightNode",
+        "position": { "x": 550, "y": 350 },
+        "ports": { "power": 1.0, "position.x": 50.0, "position.y": 80.0, "position.z": 120.0, "diffuse.r": 0.9, "diffuse.g": 0.85, "diffuse.b": 0.8 }
       },
       {
         "id": "rotate_head",
         "type": "LuaAnimationNode",
-        "position": { "x": 50, "y": 500 },
+        "position": { "x": 300, "y": 50 },
         "inputNames": ["time", "speed"],
         "outputNames": ["angle"],
-        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal s = node:getInput('speed') and node:getInput('speed'):getValue() or 1.0\nlocal angle = t * s\nif headNode then headNode:setOrientation(Quaternion(Radian(angle), Vector3(0, 1, 0))) end\nlocal out = node:getOutput('angle')\nif out then out:setValue(angle) end",
+        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal s = node:getInput('speed') and node:getInput('speed'):getValue() or 1.0\nlocal angle = t * s\nif not _rotateTarget then\n  if _sceneNodes and _sceneNodes['studio_head'] then\n    _rotateTarget = _sceneNodes['studio_head']\n  end\nend\nif _rotateTarget then _rotateTarget:setOrientation(Quaternion(Radian(angle), Vector3(0, 1, 0))) end\nlocal out = node:getOutput('angle')\nif out then out:setValue(angle) end",
         "ports": { "time": 0, "speed": 1.0 }
       },
       {
         "id": "oscillator",
         "type": "LuaAnimationNode",
-        "position": { "x": 400, "y": 200 },
+        "position": { "x": 300, "y": 350 },
         "inputNames": ["time", "frequency", "min", "max"],
         "outputNames": ["value"],
         "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal f = node:getInput('frequency') and node:getInput('frequency'):getValue() or 0.5\nlocal lo = node:getInput('min') and node:getInput('min'):getValue() or 0\nlocal hi = node:getInput('max') and node:getInput('max'):getValue() or 1\nlocal norm = math.sin(t * f * 2 * math.pi) * 0.5 + 0.5\nlocal value = lo + (hi - lo) * norm\nlocal outPort = node:getOutput('value')\nif outPort then outPort:setValue(value) end",

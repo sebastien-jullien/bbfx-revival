@@ -3,6 +3,7 @@
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
+#include "../../core/PrimitiveNodes.h"
 #include "../../audio/AudioAnalyzer.h"
 #include "../../audio/BeatDetector.h"
 
@@ -55,7 +56,7 @@ void PerformanceModePanel::render(StudioEngine* engine) {
     if (engine) {
         ImTextureID texId = engine->getRenderTextureID();
         if (texId) {
-            ImGui::Image(texId, {viewW, viewH}, {0.0f, 1.0f}, {1.0f, 0.0f});
+            ImGui::Image(texId, {viewW, viewH}, {0.0f, 0.0f}, {1.0f, 1.0f});
         }
     }
 
@@ -79,9 +80,39 @@ void PerformanceModePanel::render(StudioEngine* engine) {
     ImGui::SetCursorPos({viewW / 2 - 60, viewH - 50});
     renderPanicButton();
 
-    // Tab focuses the trigger grid
-    if (ImGui::IsKeyPressed(ImGuiKey_Tab)) {
-        ImGui::SetKeyboardFocusHere(-16); // Focus back to first trigger button
+    // Keyboard shortcuts for triggers: 1-9 = triggers 0-8, Q-W-E-R-T = triggers 9-13
+    {
+        ImGuiKey numKeys[] = {ImGuiKey_1,ImGuiKey_2,ImGuiKey_3,ImGuiKey_4,ImGuiKey_5,ImGuiKey_6,ImGuiKey_7,ImGuiKey_8,ImGuiKey_9};
+        for (int i = 0; i < 9; ++i) {
+            if (ImGui::IsKeyPressed(numKeys[i])) {
+                mTriggerStates[i] = !mTriggerStates[i];
+                try {
+                    sol::object obj = mLua["ChordSystem"];
+                    if (obj.valid()) {
+                        sol::table cs = obj.as<sol::table>();
+                        sol::function fn = cs["toggle"];
+                        if (fn.valid()) fn(cs, mTriggerChords[i]);
+                    }
+                } catch (...) {}
+            }
+        }
+        ImGuiKey qwerKeys[] = {ImGuiKey_Q,ImGuiKey_W,ImGuiKey_E,ImGuiKey_R,ImGuiKey_T};
+        for (int i = 0; i < 5; ++i) {
+            if (ImGui::IsKeyPressed(qwerKeys[i])) {
+                int idx = 9 + i;
+                if (idx < 16) {
+                    mTriggerStates[idx] = !mTriggerStates[idx];
+                    try {
+                        sol::object obj = mLua["ChordSystem"];
+                        if (obj.valid()) {
+                            sol::table cs = obj.as<sol::table>();
+                            sol::function fn = cs["toggle"];
+                            if (fn.valid()) fn(cs, mTriggerChords[idx]);
+                        }
+                    } catch (...) {}
+                }
+            }
+        }
     }
 
     ImGui::End();
@@ -98,9 +129,20 @@ void PerformanceModePanel::renderTriggerGrid() {
     for (int i = 0; i < 16; ++i) {
         if (i % 4 != 0) ImGui::SameLine();
 
-        // Color based on active state
+        // Color based on active state — active triggers pulse with beat
         if (mTriggerStates[i]) {
-            ImGui::PushStyleColor(ImGuiCol_Button, {1.0f, 1.0f, 1.0f, 0.9f});
+            // Glow pulse: read beatFrac from RootTimeNode for smooth animation
+            float glow = 0.7f;
+            auto* rootTime = RootTimeNode::instance();
+            if (rootTime) {
+                auto& outs = rootTime->getOutputs();
+                auto bfIt = outs.find("beatFrac");
+                if (bfIt != outs.end()) {
+                    float bf = bfIt->second->getValue();
+                    glow = 0.6f + 0.4f * (1.0f - bf); // bright on beat, dim between
+                }
+            }
+            ImGui::PushStyleColor(ImGuiCol_Button, {glow, glow, glow, 0.95f});
         } else {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(
                 ((btnColors[i/4] >> 0)  & 0xFF) / 255.0f,
@@ -162,8 +204,9 @@ void PerformanceModePanel::renderFaders() {
             }
         }
 
-        std::string caption = slot.portName.empty() ? "---" : slot.portName;
-        ImGui::TextDisabled("%s", caption.substr(0, 4).c_str());
+        std::string caption = slot.portName.empty() ? "---" :
+            (slot.nodeName.substr(0, std::min((size_t)6, slot.nodeName.size())) + "." + slot.portName);
+        ImGui::TextDisabled("%s", caption.c_str());
         ImGui::EndGroup();
 
         // Right-click context menu for port assignment
@@ -248,24 +291,36 @@ void PerformanceModePanel::renderVUMeters() {
     ImVec2 pos       = ImGui::GetWindowPos();
     ImVec2 sz        = ImGui::GetWindowSize();
 
-    static const ImU32 cols[3] = {
-        IM_COL32(0,200,255,200),   // low: cyan
-        IM_COL32(200,0,255,200),   // mid: magenta
-        IM_COL32(255,200,0,200),   // high: yellow
+    static const ImU32 cols[5] = {
+        IM_COL32(200,50,50,200),   // Sub: red
+        IM_COL32(0,200,255,200),   // Low: cyan
+        IM_COL32(200,0,255,200),   // Mid: magenta
+        IM_COL32(255,200,0,200),   // High: yellow
+        IM_COL32(200,200,200,200), // Air: white
     };
-    static const char* labels[3] = {"LO","MID","HI"};
+    static const char* labels[5] = {"Sub","Low","Mid","High","Air"};
 
-    float barW = 16.0f, maxH = 60.0f;
+    // Distribute 8 bands into 5 VU groups
+    float vuBands[5] = {0};
+    if (mBands[0] > 0 || mBands[1] > 0 || mBands[2] > 0) {
+        vuBands[0] = mBands[0] * 0.7f;  // Sub (low freq emphasis)
+        vuBands[1] = mBands[0];          // Low
+        vuBands[2] = mBands[1];          // Mid
+        vuBands[3] = mBands[2];          // High
+        vuBands[4] = mBands[2] * 0.5f;  // Air (high freq tail)
+    }
+
+    float barW = 14.0f, maxH = 60.0f;
     float x0 = pos.x + 10.0f;
     float yBase = pos.y + sz.y - 20.0f;
 
-    for (int b = 0; b < 3; ++b) {
-        float h = mBands[b] * maxH;
+    for (int b = 0; b < 5; ++b) {
+        float h = vuBands[b] * maxH;
         draw->AddRectFilled(
-            {x0 + b*20, yBase - h},
-            {x0 + b*20 + barW, yBase},
+            {x0 + b*18, yBase - h},
+            {x0 + b*18 + barW, yBase},
             cols[b], 2.0f);
-        draw->AddText({x0 + b*20 + 2, yBase + 2},
+        draw->AddText({x0 + b*18, yBase + 2},
                       IM_COL32(180,180,180,200), labels[b]);
     }
 }

@@ -3,6 +3,8 @@
 #include "../../core/AnimationNode.h"
 #include "../../core/PrimitiveNodes.h"
 
+#include "../ResourceEnumerator.h"
+
 #include <imgui.h>
 #include <sol/sol.hpp>
 #include <iostream>
@@ -27,6 +29,8 @@ void PresetBrowserPanel::render() {
 
     renderPresetTree();
     ImGui::Separator();
+    renderAssetBrowser();
+    ImGui::Separator();
     renderEffectRack();
     ImGui::Separator();
     renderQuickAccessBar();
@@ -37,38 +41,137 @@ void PresetBrowserPanel::render() {
 void PresetBrowserPanel::renderPresetTree() {
     ImGui::TextDisabled("Available Presets");
 
-    // Scan lua/presets/ directory for .lua files
-    std::vector<std::string> presets;
+    // Scan lua/presets/ directory for .lua files and read their category
+    struct PresetInfo { std::string name; std::string category; };
+    std::vector<PresetInfo> presets;
     const std::string presetsDir = "lua/presets";
     std::error_code ec;
     if (std::filesystem::is_directory(presetsDir, ec)) {
         for (auto& entry : std::filesystem::directory_iterator(presetsDir, ec)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lua") {
-                presets.push_back(entry.path().stem().string());
+            if (!entry.is_regular_file() || entry.path().extension() != ".lua") continue;
+            std::string name = entry.path().stem().string();
+            if (name.empty() || name[0] == '_') continue; // skip test presets
+
+            // Read category from the preset file (cached after first scan)
+            std::string category = "Other";
+            auto cacheIt = mPresetCategories.find(name);
+            if (cacheIt != mPresetCategories.end()) {
+                category = cacheIt->second;
+            } else {
+                // Quick parse: look for category = "..." in the first few lines
+                auto result = mLua.safe_script_file(presetsDir + "/" + name + ".lua", sol::script_pass_on_error);
+                if (result.valid()) {
+                    sol::table t = result;
+                    sol::optional<std::string> cat = t["category"];
+                    if (cat) category = *cat;
+                }
+                mPresetCategories[name] = category;
             }
+            presets.push_back({name, category});
         }
-        std::sort(presets.begin(), presets.end());
     }
 
     if (presets.empty()) {
         ImGui::TextDisabled("(no presets found in lua/presets/)");
+        return;
     }
 
+    // Group by category
+    std::map<std::string, std::vector<std::string>> byCategory;
     for (auto& p : presets) {
-        bool selected = (mSelectedPreset == p);
-        if (ImGui::Selectable(p.c_str(), selected)) {
-            mSelectedPreset = p;
-        }
-
-        // Drag source: drag preset name to node editor
-        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-            ImGui::SetDragDropPayload("PRESET_NAME", p.c_str(), p.size() + 1);
-            ImGui::Text("Instantiate: %s", p.c_str());
-            ImGui::EndDragDropSource();
-        }
+        byCategory[p.category].push_back(p.name);
+    }
+    for (auto& [cat, names] : byCategory) {
+        std::sort(names.begin(), names.end());
     }
 
-    // Drop target on node editor handled in NodeEditorPanel (I-236)
+    // Render as collapsible accordion sections
+    for (auto& [cat, names] : byCategory) {
+        // CollapsingHeader with preset count
+        char header[128];
+        std::snprintf(header, sizeof(header), "%s (%zu)", cat.c_str(), names.size());
+        if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (auto& name : names) {
+                bool selected = (mSelectedPreset == name);
+                if (ImGui::Selectable(name.c_str(), selected)) {
+                    mSelectedPreset = name;
+                }
+                // Drag source: drag preset name to node editor
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("PRESET_NAME", name.c_str(), name.size() + 1);
+                    ImGui::Text("Instantiate: %s", name.c_str());
+                    ImGui::EndDragDropSource();
+                }
+            }
+        }
+    }
+}
+
+void PresetBrowserPanel::renderAssetBrowser() {
+    ImGui::TextDisabled("Assets");
+
+    // Meshes
+    if (ImGui::TreeNode("Meshes")) {
+        auto meshes = ResourceEnumerator::listMeshes();
+        for (auto& m : meshes) {
+            ImGui::Selectable(m.c_str());
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                ImGui::SetDragDropPayload("MESH_NAME", m.c_str(), m.size() + 1);
+                ImGui::Text("Mesh: %s", m.c_str());
+                ImGui::EndDragDropSource();
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // Textures
+    if (ImGui::TreeNode("Textures")) {
+        auto textures = ResourceEnumerator::listTextures();
+        for (auto& t : textures) {
+            ImGui::Selectable(t.c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Texture: %s", t.c_str());
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // Particles
+    if (ImGui::TreeNode("Particles")) {
+        auto particles = ResourceEnumerator::listParticleTemplates();
+        for (auto& p : particles) {
+            ImGui::Selectable(p.c_str());
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                ImGui::SetDragDropPayload("PARTICLE_NAME", p.c_str(), p.size() + 1);
+                ImGui::Text("Particle: %s", p.c_str());
+                ImGui::EndDragDropSource();
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    // Compositors
+    if (ImGui::TreeNode("Compositors")) {
+        auto comps = ResourceEnumerator::listCompositors();
+        for (auto& c : comps) {
+            ImGui::Selectable(c.c_str());
+        }
+        ImGui::TreePop();
+    }
+
+    // Shaders
+    if (ImGui::TreeNode("Shaders")) {
+        auto shaders = ResourceEnumerator::listShaders();
+        for (auto& s : shaders) {
+            ImGui::Selectable(s.c_str());
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
+                ImGui::Text("Shader: %s", s.c_str());
+                ImGui::EndDragDropSource();
+            }
+        }
+        ImGui::TreePop();
+    }
 }
 
 void PresetBrowserPanel::renderEffectRack() {

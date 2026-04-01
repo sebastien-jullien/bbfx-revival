@@ -1,4 +1,5 @@
 #include "ProjectSerializer.h"
+#include "../NodeTypeRegistry.h"
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
@@ -81,6 +82,11 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
         json outputNames = json::array();
         for (auto& [pname, port] : node->getOutputs()) outputNames.push_back(pname);
         n["outputNames"] = outputNames;
+
+        // Serialize ParamSpec values if present
+        if (node->getParamSpec() && !node->getParamSpec()->empty()) {
+            n["params"] = node->getParamSpec()->toJson();
+        }
 
         nodes.push_back(n);
     }
@@ -229,8 +235,15 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     } else if (type == "RootTimeNode") {
                         node = animator->getRegisteredNode(name);
                     } else {
-                        std::cout << "[ProjectSerializer] Unknown node type '" << type
-                                  << "', skipping '" << name << "'" << std::endl;
+                        // v3.2: try NodeTypeRegistry for FX/Scene/Audio/etc. nodes
+                        auto* created = NodeTypeRegistry::instance().create(type, name, lua);
+                        if (created) {
+                            node = created;
+                            std::cout << "[ProjectSerializer] Created " << type << " '" << name << "' via registry" << std::endl;
+                        } else {
+                            std::cout << "[ProjectSerializer] Unknown node type '" << type
+                                      << "', skipping '" << name << "'" << std::endl;
+                        }
                     }
                 }
 
@@ -268,6 +281,11 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                             it->second->setValue(val.get<float>());
                         }
                     }
+                }
+
+                // Restore ParamSpec values if present
+                if (node && node->getParamSpec() && n.contains("params")) {
+                    node->getParamSpec()->fromJson(n["params"]);
                 }
 
                 // Restore position if outState is provided
