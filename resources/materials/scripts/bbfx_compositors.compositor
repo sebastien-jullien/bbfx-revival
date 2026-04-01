@@ -1,0 +1,245 @@
+// BBFx Compositor Definitions — wrapping existing GLSL shaders
+// These use StdQuad_vp_glsl as vertex program and reference shaders in ../shaders/
+
+// --- Batch 1: Simple single-pass compositors ---
+
+compositor Vignette
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Vignette
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor FilmGrain
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/FilmGrain
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor Invert
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Invert
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor Posterize
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Posterize
+                input 0 rt0
+            }
+        }
+    }
+}
+
+// --- Batch 2: EdgeDetect, Pixelate, Barrel ---
+
+compositor EdgeDetect
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/EdgeDetect
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor Pixelate
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Pixelate
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor Barrel
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Barrel
+                input 0 rt0
+            }
+        }
+    }
+}
+
+// --- Batch 3: Compositors with time uniforms ---
+
+compositor Kaleidoscope
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/Kaleidoscope
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor ChromaticAberration
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/ChromaticAberration
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor VHS
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/VHS
+                input 0 rt0
+            }
+        }
+    }
+}
+
+// --- Batch 4: Complex compositors ---
+
+compositor HeatDistort
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/HeatDistort
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor ASCII
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/ASCII
+                input 0 rt0
+            }
+        }
+    }
+}
+
+compositor MotionTrail
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            // Simple pass-through with slight blur effect as motion trail approximation
+            input none
+            pass render_quad
+            {
+                material BBFx/MotionTrail
+                input 0 rt0
+            }
+        }
+    }
+}

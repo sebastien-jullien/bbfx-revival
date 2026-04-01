@@ -58,7 +58,7 @@ ImVec4 NodeEditorPanel::nodeColor(const std::string& typeName) const {
 
 NodeEditorPanel::NodeEditorPanel(sol::state& lua) : mLua(lua) {
     ned::Config cfg;
-    cfg.SettingsFile = "node_editor.json";
+    cfg.SettingsFile = ""; // Don't persist to file — positions managed by .bbfx-project
     mEditorContext = ned::CreateEditor(&cfg);
 }
 
@@ -77,18 +77,28 @@ void NodeEditorPanel::syncFromDAG() {
 
     auto names = animator->getRegisteredNodeNames();
 
-    // Remove nodes no longer in DAG
+    // Remove nodes no longer in DAG — also track their editor IDs for ned cleanup
     std::vector<std::string> toRemove;
     for (auto& [name, _] : mNodes) {
         bool found = false;
         for (auto& n : names) if (n == name) { found = true; break; }
         if (!found) toRemove.push_back(name);
     }
-    for (auto& name : toRemove) mNodes.erase(name);
+    for (auto& name : toRemove) {
+        auto it = mNodes.find(name);
+        if (it != mNodes.end()) {
+            mStaleNodeIds.push_back(it->second.id);
+            // Also collect pin IDs
+            for (auto& pin : it->second.inputPins) mStalePinIds.push_back(pin);
+            for (auto& pin : it->second.outputPins) mStalePinIds.push_back(pin);
+        }
+        mNodes.erase(name);
+    }
 
     // Add new nodes (links are synced afterwards in syncLinksFromDAG)
     for (auto& name : names) {
         if (mNodes.count(name)) continue;
+        if (name.rfind("shell/", 0) == 0) continue; // hide internal TCP shell node
 
         auto* node = animator->getRegisteredNode(name);
         if (!node) continue;
@@ -200,15 +210,46 @@ void NodeEditorPanel::render() {
     ned::SetCurrentEditor(mEditorContext);
     ned::Begin("DAG", {0, 0});
 
+    // Clean up stale node/pin IDs from deferred deletes
+    if (!mStaleNodeIds.empty()) {
+        for (auto& id : mStaleNodeIds) ned::DeleteNode(id);
+        mStaleNodeIds.clear();
+    }
+    if (!mStalePinIds.empty()) {
+        mStalePinIds.clear(); // pins are cleaned with their node
+    }
+    // Also clean stale links referencing deleted nodes
+    {
+        std::set<std::string> validNodes;
+        for (auto& [name, _] : mNodes) validNodes.insert(name);
+        mLinks.erase(
+            std::remove_if(mLinks.begin(), mLinks.end(), [&](const LinkData& lk) {
+                return validNodes.find(lk.fromNode) == validNodes.end() ||
+                       validNodes.find(lk.toNode) == validNodes.end();
+            }),
+            mLinks.end());
+    }
+
+
+    // Convert deferred drop screen position to canvas coords (ned context is active here)
+    if (!mDropPresetName.empty()) {
+        auto canvasPos = ned::ScreenToCanvas(mDropScreenPos);
+        mPendingPositions.push_back({mDropPresetName, canvasPos.x, canvasPos.y});
+        mDropPresetName.clear();
+    }
+
     // Apply pending positions (deferred — needs active editor context after ned::Begin)
     if (!mPendingPositions.empty()) {
+        std::vector<NodePosition> remaining;
         for (auto& np : mPendingPositions) {
             auto it = mNodes.find(np.name);
             if (it != mNodes.end()) {
                 ned::SetNodePosition(it->second.id, {np.x, np.y});
+            } else {
+                remaining.push_back(np); // retry next frame
             }
         }
-        mPendingPositions.clear();
+        mPendingPositions = std::move(remaining);
     }
 
     auto* animator = Animator::instance();
@@ -218,12 +259,24 @@ void NodeEditorPanel::render() {
         auto* node = animator ? animator->getRegisteredNode(name) : nullptr;
 
         ImVec4 col = nodeColor(nd.typeName);
+        bool nodeEnabled = true;
+        if (node) nodeEnabled = node->isEnabled();
+
+        // Gray out disabled nodes
+        if (!nodeEnabled) {
+            col = {0.35f, 0.35f, 0.35f, 1.0f};
+            ned::PushStyleColor(ned::StyleColor_NodeBg, ImVec4(0.15f, 0.15f, 0.15f, 0.8f));
+        }
         ned::PushStyleColor(ned::StyleColor_NodeBorder, col);
         ned::BeginNode(nd.id);
 
         // Title bar
         ImGui::PushStyleColor(ImGuiCol_Text, col);
-        ImGui::TextUnformatted(nd.typeName.c_str());
+        if (!nodeEnabled) {
+            ImGui::Text("[OFF] %s", nd.typeName.c_str());
+        } else {
+            ImGui::TextUnformatted(nd.typeName.c_str());
+        }
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImGui::TextDisabled("  %s", name.c_str());
@@ -260,7 +313,8 @@ void NodeEditorPanel::render() {
         }
 
         ned::EndNode();
-        ned::PopStyleColor();
+        ned::PopStyleColor(); // NodeBorder
+        if (!nodeEnabled) ned::PopStyleColor(); // NodeBg
     }
 
     // ── Draw links ────────────────────────────────────────────────────────────
@@ -272,6 +326,15 @@ void NodeEditorPanel::render() {
     handleLinkCreation();
 
     // ── Handle deletion (single BeginDelete/EndDelete scope) ──────────────────
+    // ── Delete key: delete selected node via CommandManager (undoable) ─────
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !mSelectedNode.empty()) {
+        if (mNodes.count(mSelectedNode)) {
+            CommandManager::instance().execute(
+                std::make_unique<DeleteNodeCommand>(mSelectedNode, mLua));
+            mSelectedNode.clear();
+        }
+    }
+
     handleDeletion();
 
     // ── Context menu ──────────────────────────────────────────────────────────
@@ -402,30 +465,15 @@ void NodeEditorPanel::render() {
     if (ImGui::BeginDragDropTarget()) {
         if (auto* payload = ImGui::AcceptDragDropPayload("PRESET_NAME")) {
             std::string presetName(static_cast<const char*>(payload->Data));
-            auto* animator = Animator::instance();
-            if (animator) {
-                std::string presetPath = "lua/presets/" + presetName + ".lua";
-                auto result = mLua.safe_script_file(presetPath, sol::script_pass_on_error);
-                if (result.valid()) {
-                    sol::table preset = result;
-                    std::string name = preset.get_or<std::string>("name", presetName);
-                    sol::table nodes = preset.get_or<sol::table>("nodes", sol::nil);
-                    if (nodes.valid()) {
-                        for (auto& [k, v] : nodes) {
-                            sol::table nodeDesc = v.as<sol::table>();
-                            std::string nodeName = nodeDesc.get_or<std::string>("name", presetName);
-                            // Create a LuaAnimationNode with no-op callback
-                            sol::function noop = mLua.load("return function(node) end")().get<sol::function>();
-                            auto* node = new LuaAnimationNode(nodeName, noop);
-                            node->addInput("in");
-                            node->addOutput("out");
-                            animator->registerNode(node);
-                        }
-                    }
-                    std::cout << "[NodeEditor] Preset '" << presetName << "' instantiated" << std::endl;
-                } else {
-                    sol::error err = result;
-                    std::cout << "[NodeEditor] Preset load error: " << err.what() << std::endl;
+            // Save drop screen position — will be converted to canvas in next frame
+            mDropScreenPos = ImGui::GetMousePos();
+            mDropPresetName = presetName;
+            // Use the deferred debugger queue to avoid Lua re-entrancy crash
+            sol::optional<sol::table> dbg = mLua["dbg"];
+            if (dbg) {
+                sol::optional<sol::function> presetFn = (*dbg)["preset"];
+                if (presetFn) {
+                    (*presetFn)(presetName);
                 }
             }
         }
@@ -497,17 +545,13 @@ void NodeEditorPanel::handleDeletion() {
     }
 
     // ── Node deletion ─────────────────────────────────────────────────────────
+    // Do NOT use ned::QueryDeletedNode/AcceptDeletedItem — it marks the node
+    // as dead inside ned, causing ned::End() to crash when the node is still
+    // in the Begin/End scope. Instead, reject all node deletions from ned and
+    // handle them ourselves via gPendingDeletes.
     ned::NodeId deletedNodeId;
     while (ned::QueryDeletedNode(&deletedNodeId)) {
-        std::string nodeName;
-        for (auto& [name, nd] : mNodes) {
-            if (nd.id == deletedNodeId) { nodeName = name; break; }
-        }
-        if (!nodeName.empty() && ned::AcceptDeletedItem()) {
-            CommandManager::instance().execute(
-                std::make_unique<DeleteNodeCommand>(nodeName, mLua));
-            mNodes.erase(nodeName);
-        }
+        ned::RejectDeletedItem(); // tell ned "no, don't delete it internally"
     }
 
     ned::EndDelete();
@@ -532,6 +576,9 @@ void NodeEditorPanel::showNodeContextMenu() {
                         std::string name = info->typeName + "_" + std::to_string(++counter);
                         CommandManager::instance().execute(
                             std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
+                        // Position the new node at the right-click location
+                        auto canvasPos = ned::ScreenToCanvas(mCreateMenuPos);
+                        mPendingPositions.push_back({name, canvasPos.x, canvasPos.y});
                     }
                 }
                 ImGui::EndMenu();
@@ -568,6 +615,18 @@ void NodeEditorPanel::showNodeContextMenu() {
         ImGui::OpenPopup("NodeContextMenu");
     }
     if (ImGui::BeginPopup("NodeContextMenu")) {
+        // Enable/Disable toggle
+        if (!mSelectedNode.empty()) {
+            auto* animator = Animator::instance();
+            auto* node = animator ? animator->getRegisteredNode(mSelectedNode) : nullptr;
+            if (node) {
+                bool en = node->isEnabled();
+                if (ImGui::MenuItem(en ? "Disable" : "Enable")) {
+                    node->setEnabled(!en);
+                }
+                ImGui::Separator();
+            }
+        }
         if (ImGui::MenuItem("Save as Preset")) {
             mShowSavePresetDialog = true;
             std::memset(mPresetNameBuf, 0, sizeof(mPresetNameBuf));
@@ -583,12 +642,14 @@ void NodeEditorPanel::showNodeContextMenu() {
 
 std::vector<NodeEditorPanel::NodePosition> NodeEditorPanel::getNodePositions() const {
     std::vector<NodePosition> positions;
-    ned::SetCurrentEditor(mEditorContext);
+    // Don't change current editor if we're already inside a render scope
+    auto* prevEditor = ned::GetCurrentEditor();
+    if (!prevEditor) ned::SetCurrentEditor(mEditorContext);
     for (auto& [name, nd] : mNodes) {
         auto pos = ned::GetNodePosition(nd.id);
         positions.push_back({name, pos.x, pos.y});
     }
-    ned::SetCurrentEditor(nullptr);
+    if (!prevEditor) ned::SetCurrentEditor(nullptr);
     return positions;
 }
 

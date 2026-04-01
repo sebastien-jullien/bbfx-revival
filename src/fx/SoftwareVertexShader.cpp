@@ -1,9 +1,65 @@
 #include "SoftwareVertexShader.h"
 #include <cstring>
+#include <iostream>
+
+#include <SDL3/SDL.h>
+
+// GL types — avoid linking opengl32.lib in headless mode
+typedef unsigned int GLenum;
+typedef int GLint;
+typedef unsigned int GLuint;
+#ifndef APIENTRY
+#ifdef _WIN32
+#define APIENTRY __stdcall
+#else
+#define APIENTRY
+#endif
+#endif
+
+// GL constants not in gl.h
+#ifndef GL_COPY_READ_BUFFER
+#define GL_COPY_READ_BUFFER 0x8F36
+#endif
+#ifndef GL_ARRAY_BUFFER_BINDING
+#define GL_ARRAY_BUFFER_BINDING 0x8894
+#endif
+#ifndef GL_ELEMENT_ARRAY_BUFFER_BINDING
+#define GL_ELEMENT_ARRAY_BUFFER_BINDING 0x8895
+#endif
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#endif
 
 namespace bbfx {
 
 using namespace Ogre;
+
+// GL State Guard for readBufferRaw — saves/restores buffer bindings
+// that OGRE's GL3Plus readData() clobbers without restoring.
+static void* sGLBindBuffer = nullptr;
+static void ensureGLGuard() {
+    if (!sGLBindBuffer)
+        sGLBindBuffer = SDL_GL_GetProcAddress("glBindBuffer");
+}
+// Load glGetIntegerv dynamically to avoid link error in headless mode
+static void* sGLGetIntegerv = nullptr;
+static void glGuardSave(GLint& copyRead, GLint& arrayBuf) {
+    if (!sGLGetIntegerv) sGLGetIntegerv = SDL_GL_GetProcAddress("glGetIntegerv");
+    if (!sGLGetIntegerv) return;
+    using GetIntFn = void(APIENTRY*)(GLenum, GLint*);
+    auto fn = reinterpret_cast<GetIntFn>(sGLGetIntegerv);
+    fn(GL_COPY_READ_BUFFER, &copyRead);
+    fn(GL_ARRAY_BUFFER_BINDING, &arrayBuf);
+}
+static void glGuardRestore(GLint copyRead, GLint arrayBuf) {
+    ensureGLGuard();
+    using BindBufFn = void(APIENTRY*)(unsigned int, unsigned int);
+    auto bindBuf = reinterpret_cast<BindBufFn>(sGLBindBuffer);
+    if (bindBuf) {
+        bindBuf(GL_COPY_READ_BUFFER, static_cast<unsigned int>(copyRead));
+        bindBuf(GL_ARRAY_BUFFER, static_cast<unsigned int>(arrayBuf));
+    }
+}
 
 SoftwareVertexShader::SoftwareVertexShader(const String& meshName, const String& cloneName) {
     mMeshName = cloneName;
@@ -13,6 +69,12 @@ SoftwareVertexShader::SoftwareVertexShader(const String& meshName, const String&
 SoftwareVertexShader::~SoftwareVertexShader() { disable(); }
 
 bool SoftwareVertexShader::frameStarted(const FrameEvent& e) {
+    if (!mCloneReady) {
+        // Do NOT unload/remove/reload — it destroys buffers used by other Entities.
+        // readBufferRaw() has GL state guards to handle readData() safely.
+        _prepareClonedMesh();
+        mCloneReady = true;
+    }
     renderOneFrame(e.timeSinceLastFrame);
     return true;
 }
@@ -22,10 +84,11 @@ void SoftwareVertexShader::disable() {
     if (Root::getSingletonPtr()) Root::getSingleton().removeFrameListener(this);
 }
 
-// Read ALL raw bytes from a vertex buffer via its shadow (safe in D3D11 Debug)
+// Read ALL raw bytes from a vertex buffer with GL state protection
 static std::vector<uint8_t> readBufferRaw(HardwareVertexBufferSharedPtr buf) {
     std::vector<uint8_t> data(buf->getSizeInBytes());
-    // hasShadowBuffer() means lock goes to CPU shadow — no GPU stall
+    GLint savedCopyRead = 0, savedArrayBuf = 0;
+    glGuardSave(savedCopyRead, savedArrayBuf);
     if (buf->hasShadowBuffer()) {
         const void* p = buf->lock(0, buf->getSizeInBytes(), HardwareBuffer::HBL_READ_ONLY);
         std::memcpy(data.data(), p, data.size());
@@ -33,11 +96,14 @@ static std::vector<uint8_t> readBufferRaw(HardwareVertexBufferSharedPtr buf) {
     } else {
         buf->readData(0, data.size(), data.data());
     }
+    glGuardRestore(savedCopyRead, savedArrayBuf);
     return data;
 }
 
 static std::vector<uint8_t> readIndexRaw(HardwareIndexBufferSharedPtr buf) {
     std::vector<uint8_t> data(buf->getSizeInBytes());
+    GLint savedCopyRead = 0, savedArrayBuf = 0;
+    glGuardSave(savedCopyRead, savedArrayBuf);
     if (buf->hasShadowBuffer()) {
         const void* p = buf->lock(0, buf->getSizeInBytes(), HardwareBuffer::HBL_READ_ONLY);
         std::memcpy(data.data(), p, data.size());
@@ -45,6 +111,7 @@ static std::vector<uint8_t> readIndexRaw(HardwareIndexBufferSharedPtr buf) {
     } else {
         buf->readData(0, data.size(), data.data());
     }
+    glGuardRestore(savedCopyRead, savedArrayBuf);
     return data;
 }
 
@@ -183,18 +250,15 @@ void SoftwareVertexShader::_prepareClonedMesh() {
 }
 
 void SoftwareVertexShader::_loadMesh(const String& meshName) {
+    // Simply get or load the mesh — no unload, no remove, no special params.
+    // readBufferRaw() has GL state guards to handle readData() safely.
     originalMesh = MeshManager::getSingleton().getByName(meshName);
-    if (originalMesh) {
-        originalMesh->unload();
-        MeshManager::getSingleton().remove(originalMesh);
-        originalMesh.reset();
+    if (!originalMesh) {
+        originalMesh = MeshManager::getSingleton().load(
+            meshName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
     }
-    // Shadow buffers = true → lock() reads from CPU copy, no D3D11 GPU stall
-    originalMesh = MeshManager::getSingleton().load(
-        meshName, ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
-        HBU_GPU_ONLY, HBU_GPU_ONLY, true, true);
     assert(originalMesh);
-    _prepareClonedMesh();
+    mCloneReady = false;
 }
 
 } // namespace bbfx

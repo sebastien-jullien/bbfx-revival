@@ -514,4 +514,24 @@ libtheora est disponible (`sudo apt install libtheora-dev`). Le plugin OGRE Theo
 
 ---
 
-*Document établi en mars 2026. Sources : analyse statique du code source BBFx, recherches web sur l'état des projets en 2026.*
+---
+
+## Note — Etat actuel (v3.2, avril 2026)
+
+Ce document analyse les dependances du projet **original 2006**. Le revival BBFx (v2.0+) utilise un stack entierement different, gere par **vcpkg** :
+
+| Dependance | Version | Usage |
+|---|---|---|
+| **OGRE** | 14.5.2 | Rendu 3D (D3D11/Vulkan/GL) |
+| **SDL3** | 3.x | Fenetre, input, capture audio |
+| **sol2** | 3.x | Bindings C++/Lua (remplace SWIG) |
+| **Lua** | 5.4+ | Runtime scripting |
+| **Boost.Graph** | 1.90+ | DAG animation (seule dependance preservee de 2006) |
+| **libtheora** | 1.2.0 | Decodage video Theora |
+| **libogg** | 1.3.6 | Container Ogg |
+| **Dear ImGui** | 1.91+ | Interface Studio (node editor, inspector, panels) |
+| **imgui-node-editor** | — | Editeur de graphe visuel |
+
+Build system : **CMake 3.20+** (remplace SCons). Compilateur : **MSVC 2022 (C++20)** ou GCC 11+. Voir `bbfx-revival/README.md` pour les instructions de build actuelles.
+
+*Document original etabli en mars 2026. Note v3.2 ajoutee en avril 2026. Sebastien Jullien.*

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <map>
 #include <sol/forward.hpp>
 
 namespace bbfx {
@@ -16,6 +17,7 @@ public:
 
 private:
     void renderPresetTree();
+    void renderAssetBrowser();
     void renderEffectRack();
     void renderQuickAccessBar();
 
@@ -29,6 +31,7 @@ private:
     };
     QuickSlot mQuickSlots[8];
     std::set<std::string> mBypassedNodes;
+    std::map<std::string, std::string> mPresetCategories; // name -> category cache
 };
 
 } // namespace bbfx

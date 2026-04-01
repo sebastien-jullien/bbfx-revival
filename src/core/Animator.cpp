@@ -114,12 +114,27 @@ void Animator::removeNode(AnimationNode* node) {
             mVertexMap = std::move(newVertexMap);
         }
     }
+    // Purge the propagation queue of any ports belonging to this node
+    // to prevent dangling pointer access in propagateFreshValues()
+    std::set<AnimationPort*> deadPorts(ports.begin(), ports.end());
+    PortQueue cleanQueue;
+    for (auto* p : mPortQueue) {
+        if (deadPorts.find(p) == deadPorts.end()) {
+            cleanQueue.push_back(p);
+        }
+    }
+    mPortQueue = std::move(cleanQueue);
+
     node->setListener(nullptr);
     mRegisteredNodes.erase(node->getName());
 }
 
 void Animator::registerNode(AnimationNode* node) {
     mRegisteredNodes[node->getName()] = node;
+}
+
+void Animator::unregisterNode(const std::string& name) {
+    mRegisteredNodes.erase(name);
 }
 
 bool Animator::renameNode(const std::string& oldName, const std::string& newName) {
@@ -267,7 +282,7 @@ void Animator::propagateFreshValues() {
 
                 // If target port's node has all inputs fresh, call update
                 AnimationNode* targetNode = target->getNode();
-                if (targetNode) {
+                if (targetNode && targetNode->isEnabled()) {
                     targetNode->update();
                     enqueueOutputs(targetNode, mPortQueue);
                 }

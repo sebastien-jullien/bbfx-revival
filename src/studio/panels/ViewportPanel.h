@@ -16,6 +16,9 @@ public:
     /// Called inside the ImGui frame to draw the panel.
     void render();
 
+    /// Force RenderTexture resize on next render (call after Performance Mode exit).
+    void invalidateSize() { mLastWidth = 0; mLastHeight = 0; }
+
 private:
     void syncSize();
 

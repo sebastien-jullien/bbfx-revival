@@ -8,6 +8,8 @@
 #include "panels/PresetBrowserPanel.h"
 #include "panels/PerformanceModePanel.h"
 #include "panels/ConsolePanel.h"
+#include "panels/SetEditorPanel.h"
+#include "Debugger.h"
 #include "commands/CommandManager.h"
 #include "NodeTypeRegistry.h"
 #include "SettingsManager.h"
@@ -36,6 +38,8 @@ public:
     void run();
 
     StudioEngine* getEngine() { return mEngine.get(); }
+    NodeEditorPanel* getNodeEditorPanel() { return mNodeEditorPanel.get(); }
+    InspectorPanel* getInspectorPanel() { return mInspectorPanel.get(); }
 
 private:
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -89,6 +93,7 @@ private:
     std::unique_ptr<PresetBrowserPanel>    mPresetBrowserPanel;
     std::unique_ptr<PerformanceModePanel>  mPerformanceModePanel;
     std::unique_ptr<ConsolePanel>          mConsolePanel;
+    std::unique_ptr<SetEditorPanel>        mSetEditorPanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -97,6 +102,7 @@ private:
     bool mShowTimeline      = true;
     bool mShowPresetBrowser = true;
     bool mShowConsole       = false;
+    bool mShowSetEditor     = false;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;

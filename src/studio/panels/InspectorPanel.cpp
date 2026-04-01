@@ -5,6 +5,8 @@
 #include "../../core/PrimitiveNodes.h"
 #include "../commands/CommandManager.h"
 #include "../commands/EditCommands.h"
+#include "../commands/NodeCommands.h"
+#include "../../core/ParamSpec.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -43,16 +45,152 @@ void InspectorPanel::render() {
     ImGui::TextDisabled("  %s", mSelectedNode.c_str());
     ImGui::Separator();
 
-    renderFloatPorts();
-    ImGui::Separator();
-    renderEnumPorts();
-    ImGui::Separator();
+    // If the node has a ParamSpec, render typed widgets instead of generic float sliders
+    if (node->getParamSpec() && !node->getParamSpec()->empty()) {
+        renderParamSpec();
+        ImGui::Separator();
+    } else {
+        renderFloatPorts();
+        ImGui::Separator();
+        renderEnumPorts();
+        ImGui::Separator();
+    }
     renderLuaEditor();
     renderShaderUniforms();
     ImGui::Separator();
     renderRenameDelete();
 
     ImGui::End();
+}
+
+void InspectorPanel::renderParamSpec() {
+    auto* animator = Animator::instance();
+    auto* node = animator->getRegisteredNode(mSelectedNode);
+    if (!node || !node->getParamSpec()) return;
+
+    auto* spec = node->getParamSpec();
+    ImGui::TextDisabled("Parameters");
+
+    for (auto& param : const_cast<std::vector<ParamDef>&>(spec->getParams())) {
+        const std::string& label = param.displayLabel();
+        std::string id = "##ps_" + param.name;
+
+        switch (param.type) {
+            case ParamType::FLOAT: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                if (ImGui::SliderFloat(id.c_str(), &param.floatVal, param.minVal, param.maxVal)) {
+                    // Sync to DAG port if exists
+                    auto& inputs = node->getInputs();
+                    auto it = inputs.find(param.name);
+                    if (it != inputs.end()) it->second->setValue(param.floatVal);
+                }
+                break;
+            }
+            case ParamType::INT: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::SliderInt(id.c_str(), &param.intVal,
+                    static_cast<int>(param.minVal), static_cast<int>(param.maxVal));
+                break;
+            }
+            case ParamType::BOOL: {
+                ImGui::Checkbox((label + id).c_str(), &param.boolVal);
+                break;
+            }
+            case ParamType::STRING:
+            case ParamType::MESH:
+            case ParamType::TEXTURE:
+            case ParamType::MATERIAL:
+            case ParamType::SHADER:
+            case ParamType::PARTICLE:
+            case ParamType::COMPOSITOR: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                char buf[256];
+                std::strncpy(buf, param.stringVal.c_str(), sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                if (ImGui::InputText(id.c_str(), buf, sizeof(buf))) {
+                    param.stringVal = buf;
+                }
+                break;
+            }
+            case ParamType::ENUM: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                if (!param.choices.empty()) {
+                    int current = 0;
+                    for (int i = 0; i < static_cast<int>(param.choices.size()); i++) {
+                        if (param.choices[i] == param.stringVal) { current = i; break; }
+                    }
+                    std::string preview = param.choices[current];
+                    if (ImGui::BeginCombo(id.c_str(), preview.c_str())) {
+                        for (int i = 0; i < static_cast<int>(param.choices.size()); i++) {
+                            bool selected = (i == current);
+                            if (ImGui::Selectable(param.choices[i].c_str(), selected)) {
+                                param.stringVal = param.choices[i];
+                                auto& inputs = node->getInputs();
+                                auto it = inputs.find(param.name);
+                                if (it != inputs.end()) it->second->setValue(static_cast<float>(i));
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+                break;
+            }
+            case ParamType::COLOR: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::ColorEdit3(id.c_str(), param.colorVal,
+                    ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_DisplayRGB);
+                // Color harmonies display
+                {
+                    float h, s, v;
+                    ImGui::ColorConvertRGBtoHSV(param.colorVal[0], param.colorVal[1], param.colorVal[2], h, s, v);
+                    // Complementary
+                    float ch = std::fmod(h + 0.5f, 1.0f);
+                    float cr, cg, cb;
+                    ImGui::ColorConvertHSVtoRGB(ch, s, v, cr, cg, cb);
+                    ImVec4 comp(cr, cg, cb, 1.0f);
+                    // Triadic
+                    float t1h = std::fmod(h + 0.333f, 1.0f);
+                    float t2h = std::fmod(h + 0.667f, 1.0f);
+                    float t1r,t1g,t1b, t2r,t2g,t2b;
+                    ImGui::ColorConvertHSVtoRGB(t1h, s, v, t1r, t1g, t1b);
+                    ImGui::ColorConvertHSVtoRGB(t2h, s, v, t2r, t2g, t2b);
+                    ImVec4 tri1(t1r, t1g, t1b, 1.0f);
+                    ImVec4 tri2(t2r, t2g, t2b, 1.0f);
+
+                    ImGui::Text("  ");
+                    ImGui::SameLine();
+                    ImGui::ColorButton("Comp##h", comp, 0, {16,16});
+                    if (ImGui::IsItemClicked()) { param.colorVal[0]=cr; param.colorVal[1]=cg; param.colorVal[2]=cb; }
+                    ImGui::SameLine(); ImGui::TextDisabled("Comp");
+                    ImGui::SameLine();
+                    ImGui::ColorButton("Tri1##h", tri1, 0, {16,16});
+                    if (ImGui::IsItemClicked()) { param.colorVal[0]=t1r; param.colorVal[1]=t1g; param.colorVal[2]=t1b; }
+                    ImGui::SameLine();
+                    ImGui::ColorButton("Tri2##h", tri2, 0, {16,16});
+                    if (ImGui::IsItemClicked()) { param.colorVal[0]=t2r; param.colorVal[1]=t2g; param.colorVal[2]=t2b; }
+                    ImGui::SameLine(); ImGui::TextDisabled("Triadic");
+                }
+                break;
+            }
+            case ParamType::VEC3: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::DragFloat3(id.c_str(), param.vec3Val, 0.1f);
+                break;
+            }
+        }
+    }
 }
 
 void InspectorPanel::renderFloatPorts() {
@@ -251,11 +389,9 @@ void InspectorPanel::renderRenameDelete() {
         ImGui::Text("Delete node '%s'?", mSelectedNode.c_str());
         ImGui::Separator();
         if (ImGui::Button("Yes", {80, 0})) {
-            auto* animator = Animator::instance();
-            if (animator) {
-                auto* node = animator->getRegisteredNode(mSelectedNode);
-                if (node) animator->removeNode(node);
-            }
+            // Defer deletion to start of next frame — calling CommandManager::execute()
+            // during ImGui render causes segfault (heap operations during GL render context)
+            bbfx::gPendingDeletes.push_back(mSelectedNode);
             mSelectedNode.clear();
             ImGui::CloseCurrentPopup();
         }

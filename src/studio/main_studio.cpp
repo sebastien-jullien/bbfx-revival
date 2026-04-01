@@ -72,9 +72,8 @@ int main(int argc, char* argv[]) {
         bool fullscreen = false;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
-            if (arg == "--default") {
+            if (arg == "--default" || arg == "--reset") {
                 forceDefault = true;
-            } else if (arg == "--reset") {
                 forceReset = true;
             } else if (arg == "--clear") {
                 // Factory reset: delete settings + layout from disk

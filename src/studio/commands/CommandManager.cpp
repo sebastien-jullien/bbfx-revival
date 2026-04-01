@@ -1,4 +1,5 @@
 #include "CommandManager.h"
+#include <iostream>
 
 namespace bbfx {
 

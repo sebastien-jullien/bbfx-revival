@@ -1,4 +1,5 @@
 #include "StudioApp.h"
+#include "commands/NodeCommands.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
 #include "../fx/PerlinFxNode.h"
@@ -6,10 +7,26 @@
 #include "../fx/TextureBlitterNode.h"
 #include "../fx/WaveVertexShader.h"
 #include "../fx/ColorShiftNode.h"
+#include <OgreSubEntity.h>
 #include "../audio/AudioAnalyzer.h"
 #include "../audio/BeatDetector.h"
 #include "../audio/AudioCapture.h"
 #include "../video/TheoraClipNode.h"
+#include "nodes/SceneObjectNode.h"
+#include "nodes/LightNode.h"
+#include "nodes/ParticleNode.h"
+#include "nodes/CompositorNode.h"
+#include "nodes/CameraNode.h"
+#include "nodes/SkyboxNode.h"
+#include "nodes/FogNode.h"
+#include "nodes/BeatTriggerNode.h"
+#include "nodes/MathNode.h"
+#include "nodes/MixerNode.h"
+#include "nodes/MapperNode.h"
+#include "nodes/TriggerNode.h"
+#include "nodes/SplitterNode.h"
+#include "generators/MeshGenerator.h"
+#include <OgreEntity.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -36,12 +53,19 @@ static void ensureGLFunctions() {
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
+#include <cassert>
 
 #ifdef _WIN32
 #include <commdlg.h> // GetOpenFileNameA / GetSaveFileNameA
 #endif
 
 namespace bbfx {
+
+// ── Unique name generator for OGRE objects created by Studio factories ───────
+static std::string uniqueName(const std::string& prefix) {
+    static int sCounter = 0;
+    return prefix + "_" + std::to_string(++sCounter);
+}
 
 // ── Native file dialogs (Windows) ────────────────────────────────────────────
 #ifdef _WIN32
@@ -91,17 +115,22 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     // Panels (created after engine so OGRE is ready)
     mViewportPanel        = std::make_unique<ViewportPanel>(mEngine.get());
     mNodeEditorPanel      = std::make_unique<NodeEditorPanel>(lua);
+    setNodeEditorForCommands(mNodeEditorPanel.get());
     mInspectorPanel       = std::make_unique<InspectorPanel>(lua);
     mTimelinePanel        = std::make_unique<TimelinePanel>();
     mPresetBrowserPanel   = std::make_unique<PresetBrowserPanel>(mNodeEditorPanel.get(), lua);
     mPerformanceModePanel = std::make_unique<PerformanceModePanel>(lua);
     mConsolePanel         = std::make_unique<ConsolePanel>(mLua);
+    mSetEditorPanel       = std::make_unique<SetEditorPanel>(mLua);
 
     initNodeTypeRegistry();
     SettingsManager::instance().load();
 
     // Load studio chord system (provides ChordSystem global for triggers/quick access)
     mLua.safe_script("require 'studio_chord'", sol::script_pass_on_error);
+
+    // Install Studio Debugger (programmatic testing interface)
+    Debugger::install(mLua, this);
 
     // Wire inspector to node editor selection
     mNodeEditorPanel->setSelectionCallback([this](const std::string& nodeName) {
@@ -186,13 +215,34 @@ void StudioApp::run() {
     auto* time     = RootTimeNode::instance();
     if (time) time->reset();
 
-    // Load initial script if provided
-    if (!mInitialScript.empty()) {
-        auto result = mLua.safe_script_file(mInitialScript, sol::script_pass_on_error);
-        if (!result.valid()) {
-            sol::error err = result;
-            std::cerr << "[Studio] Lua error: " << err.what() << '\n';
+    // Load scene setup script — always needed to create camera, lights, mesh
+    {
+        std::string sceneScript = mInitialScript.empty()
+            ? "lua/demos/demo_studio.lua" : mInitialScript;
+        if (std::filesystem::exists(sceneScript)) {
+            auto result = mLua.safe_script_file(sceneScript, sol::script_pass_on_error);
+            if (!result.valid()) {
+                sol::error err = result;
+                std::cerr << "[Studio] Lua error: " << err.what() << '\n';
+            }
+        } else {
+            std::cerr << "[Studio] Scene script not found: " << sceneScript << std::endl;
         }
+    }
+
+    // Start TCP REPL server for remote debugger access (port 33195)
+    {
+        auto shellResult = mLua.safe_script(R"(
+            local ok, err = pcall(function()
+                require 'shell.server'
+                ShellServer:new({port = 33195, max_clients = 2})
+            end)
+            if ok then
+                print("[Studio] TCP Debugger listening on port 33195")
+            else
+                print("[Studio] TCP Debugger not available: " .. tostring(err))
+            end
+        )", sol::script_pass_on_error);
     }
 
     // Load project: --default/--reset → template, else last saved project, else template
@@ -210,7 +260,7 @@ void StudioApp::run() {
                 std::cout << "[Studio] Loading default template" << std::endl;
                 loadProject(templatePath);
                 mProjectPath.clear();
-                SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.1");
+                SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
             }
         }
         if (mRecentProjects.empty() && !settings.get().recentProjects.empty()) {
@@ -230,7 +280,7 @@ void StudioApp::run() {
         if (animator) {
             for (auto& name : animator->getRegisteredNodeNames()) {
                 auto* node = animator->getRegisteredNode(name);
-                if (node && node->getTypeName() != "RootTimeNode") {
+                if (node && node->isEnabled() && node->getTypeName() != "RootTimeNode") {
                     node->update();
                 }
             }
@@ -277,6 +327,8 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         }
         if (evt.key.key == SDLK_F5) {
             mPerformanceMode = !mPerformanceMode;
+            if (!mPerformanceMode && mViewportPanel)
+                mViewportPanel->invalidateSize(); // force resize after perf mode
             return;
         }
         bool ctrl = (evt.key.mod & SDL_KMOD_CTRL) != 0;
@@ -303,7 +355,7 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         if (ctrl && evt.key.key == SDLK_N) {
             mProjectPath.clear();
             mProjectDirty = false;
-            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.1");
+            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
             return;
         }
         if (ctrl && evt.key.key == SDLK_O) {
@@ -402,6 +454,27 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
 }
 
 void StudioApp::renderFrame() {
+    // Process deferred debugger operations (safe context — not inside Lua callback)
+    mLua.safe_script("if _dbg_process_pending then _dbg_process_pending() end", sol::script_pass_on_error);
+
+    // Process deferred deletions from DeleteNodeCommand (in namespace bbfx)
+    {
+        if (!bbfx::gPendingDeletes.empty()) {
+            auto names = std::move(bbfx::gPendingDeletes);
+            bbfx::gPendingDeletes.clear();
+            auto* animator = Animator::instance();
+            for (auto& n : names) {
+                if (!animator) break;
+                auto* node = animator->getRegisteredNode(n);
+                if (node) {
+                    node->setListener(nullptr);
+                    animator->unregisterNode(n);
+                    try { node->cleanup(); } catch (...) {}
+                } else {
+                }
+            }
+        }
+    }
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -486,10 +559,24 @@ void StudioApp::renderMenuBar() {
 
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New", "Ctrl+N")) {
+            // Clear all non-singleton nodes from the DAG
+            auto* animator = Animator::instance();
+            if (animator) {
+                auto names = animator->getRegisteredNodeNames();
+                for (auto& n : names) {
+                    if (n == "time") continue; // keep RootTimeNode
+                    auto* nd = animator->getRegisteredNode(n);
+                    if (nd) {
+                        animator->removeNode(nd);
+                        nd->cleanup();
+                        delete nd;
+                    }
+                }
+            }
             mProjectPath.clear();
             mProjectDirty = false;
-            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.1");
-            std::cout << "[Studio] New project" << std::endl;
+            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
+            std::cout << "[Studio] New project — DAG cleared" << std::endl;
         }
         if (ImGui::MenuItem("Open...", "Ctrl+O")) {
             static const char* filter = "BBFx Project (*.bbfx-project)\0*.bbfx-project\0All Files\0*.*\0";
@@ -551,10 +638,12 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Timeline",      nullptr, &mShowTimeline);
         ImGui::MenuItem("Preset Browser",nullptr, &mShowPresetBrowser);
         ImGui::MenuItem("Console",       nullptr, &mShowConsole);
+        ImGui::MenuItem("Set Editor",    nullptr, &mShowSetEditor);
         ImGui::Separator();
         bool pm = mPerformanceMode;
         if (ImGui::MenuItem("Performance Mode", "F5", &pm)) {
             mPerformanceMode = pm;
+            if (!pm && mViewportPanel) mViewportPanel->invalidateSize();
         }
         ImGui::EndMenu();
     }
@@ -589,6 +678,49 @@ void StudioApp::renderPanels() {
     if (mShowPresetBrowser) mPresetBrowserPanel->render();
 
     if (mShowConsole) mConsolePanel->render();
+    if (mShowSetEditor) mSetEditorPanel->render();
+
+    // ── Status Bar ─────────────────────────────────────────────────────
+    {
+        ImGuiViewport* vp = ImGui::GetMainViewport();
+        float barH = ImGui::GetTextLineHeightWithSpacing() + 4;
+        ImGui::SetNextWindowPos({vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y - barH});
+        ImGui::SetNextWindowSize({vp->WorkSize.x, barH});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {8, 2});
+        ImGui::Begin("##StatusBar", nullptr,
+            ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNav);
+
+        // FPS
+        ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
+        ImGui::SameLine(100);
+
+        // Nodes + Links count
+        auto* animator = Animator::instance();
+        if (animator) {
+            auto names = animator->getRegisteredNodeNames();
+            auto links = animator->getLinks();
+            ImGui::Text("%zu nodes | %zu links", names.size(), links.size());
+        }
+        ImGui::SameLine(300);
+
+        // Audio (check if any AudioCaptureNode exists in DAG)
+        bool audioOn = false;
+        if (animator) {
+            for (auto& n : animator->getRegisteredNodeNames()) {
+                auto* nd = animator->getRegisteredNode(n);
+                if (nd && nd->getTypeName() == "AudioCaptureNode") { audioOn = true; break; }
+            }
+        }
+        ImGui::TextDisabled("Audio: %s", audioOn ? "ON" : "OFF");
+        ImGui::SameLine(420);
+
+        // Modified indicator
+        ImGui::TextDisabled("v3.2.0");
+
+        ImGui::End();
+        ImGui::PopStyleVar();
+    }
 
     // Export dialog (modal, shown on demand)
     mExportDialog.render(mEngine.get());
@@ -713,6 +845,9 @@ void StudioApp::tickAutoSave() {
 // ── Node type registration ──────────────────────────────────────────────────
 
 void StudioApp::initNodeTypeRegistry() {
+    assert(Engine::instance() && "Engine singleton must exist before node registration");
+    assert(Engine::instance()->getSceneManager() && "SceneManager must exist before node registration");
+
     auto& reg = NodeTypeRegistry::instance();
 
     // Core
@@ -743,8 +878,93 @@ void StudioApp::initNodeTypeRegistry() {
         }});
 
     reg.registerType({"AccumulatorNode", "Logic", {0.3f, 0.6f, 1.0f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             auto* node = new AccumulatorNode();
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                // Rename from default "accumulator" to the requested name
+                if (!name.empty() && name != node->getName()) {
+                    animator->renameNode(node->getName(), name);
+                }
+            }
+            return node;
+        }});
+
+    // FX nodes — use the SAME factory as LuaAnimationNode (proven safe)
+    reg.registerType({"PerlinFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* sceneMgr = Engine::instance()->getSceneManager();
+            if (!sceneMgr) return nullptr;
+            std::string cloneName = uniqueName("studio_perlin");
+            auto* node = new PerlinFxNode("ogrehead.mesh", cloneName);
+            node->enable();
+            auto entName = uniqueName("studio_ent");
+            auto snName = uniqueName("studio_sn");
+            node->setStudioSceneNode(entName, snName);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                if (!name.empty() && name != node->getName())
+                    animator->renameNode(node->getName(), name);
+                auto* rootTime = RootTimeNode::instance();
+                if (rootTime && node->getInputs().count("dt"))
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            }
+            std::cout << "[Studio] PerlinFxNode: " << name << " (real Perlin)" << std::endl;
+            return node;
+        }});
+
+    reg.registerType({"ShaderFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [](const std::string& name, sol::state& lua) -> AnimationNode* {
+            auto* sceneMgr = Engine::instance()->getSceneManager();
+            if (!sceneMgr) return nullptr;
+            // Read shader paths from preset params if available
+            std::string vertShader = "perlin_deform.glsl";
+            std::string fragShader = "passthrough.frag";
+            sol::optional<sol::table> pp = lua["_preset_params"];
+            if (pp) {
+                sol::optional<std::string> vs = (*pp)["vert_shader"];
+                sol::optional<std::string> fs = (*pp)["frag_shader"];
+                if (vs && !vs->empty()) vertShader = *vs;
+                if (fs && !fs->empty()) fragShader = *fs;
+            }
+            // Use the demo ogrehead entity if it exists, otherwise create a new one
+            Ogre::Entity* entity = nullptr;
+            if (sceneMgr->hasEntity("StudioHead")) {
+                entity = sceneMgr->getEntity("StudioHead");
+            } else {
+                entity = sceneMgr->createEntity(uniqueName("studio_ent"), "ogrehead.mesh");
+                auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(uniqueName("studio_sn"));
+                sceneNode->attachObject(entity);
+            }
+            auto* node = new ShaderFxNode(name,
+                vertShader, fragShader,
+                sceneMgr, entity);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                auto* rootTime = RootTimeNode::instance();
+                if (rootTime && node->getInputs().count("dt")) {
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+                }
+            }
+            return node;
+        }});
+
+    reg.registerType({"TextureBlitterNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            std::string texName = uniqueName("studio_blittex");
+            auto* node = new TextureBlitterNode(texName);
             auto* animator = Animator::instance();
             if (animator) {
                 for (auto& [pname, port] : node->getInputs()) animator->add(port);
@@ -755,69 +975,151 @@ void StudioApp::initNodeTypeRegistry() {
             return node;
         }});
 
-    // FX — these need OGRE scene objects, register with placeholder factories
-    reg.registerType({"PerlinFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] PerlinFxNode requires scene context — use Lua to create" << std::endl;
-            return nullptr;
-        }});
-
-    reg.registerType({"ShaderFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] ShaderFxNode requires scene context — use Lua to create" << std::endl;
-            return nullptr;
-        }});
-
-    reg.registerType({"TextureBlitterNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] TextureBlitterNode requires scene context — use Lua to create" << std::endl;
-            return nullptr;
-        }});
-
     reg.registerType({"WaveVertexShader", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] WaveVertexShader requires scene context — use Lua to create" << std::endl;
-            return nullptr;
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* sceneMgr = Engine::instance()->getSceneManager();
+            if (!sceneMgr) return nullptr;
+            std::string cloneName = uniqueName("studio_wave");
+            auto* node = new WaveVertexShader("ogrehead.mesh", cloneName);
+            // Entity creation is deferred — the clone mesh is prepared in frameStarted().
+            // We store the entity/scenenode names for deferred creation (same pattern as PerlinFxNode).
+            node->setStudioNames(uniqueName("studio_ent"), uniqueName("studio_sn"));
+            node->enable();
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                // Link dt from RootTimeNode so waves animate
+                auto* rootTime = RootTimeNode::instance();
+                if (rootTime && node->getInputs().count("dt"))
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            }
+            return node;
         }});
 
     reg.registerType({"ColorShiftNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] ColorShiftNode requires scene context — use Lua to create" << std::endl;
-            return nullptr;
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* sceneMgr = Engine::instance()->getSceneManager();
+            if (!sceneMgr) return nullptr;
+            // Get materials of the existing demo ogrehead — apply color to ALL sub-entities
+            std::string firstMat;
+            Ogre::Entity* targetEntity = nullptr;
+            if (sceneMgr->hasEntity("StudioHead")) {
+                targetEntity = sceneMgr->getEntity("StudioHead");
+            } else {
+                targetEntity = sceneMgr->createEntity(uniqueName("studio_ent"), "ogrehead.mesh");
+                auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(uniqueName("studio_sn"));
+                sceneNode->attachObject(targetEntity);
+            }
+            firstMat = targetEntity->getSubEntity(0)->getMaterialName();
+            auto* node = new ColorShiftNode(firstMat);
+            // Add all other sub-entity materials so color applies everywhere
+            for (unsigned i = 1; i < targetEntity->getNumSubEntities(); i++) {
+                node->addMaterial(targetEntity->getSubEntity(i)->getMaterialName());
+            }
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+            }
+            return node;
         }});
 
-    // Audio
+    // Audio — factory creates the full chain if dependencies are missing
+    // Static audio capture singleton (shared across all audio nodes)
+    static AudioCapture* sStudioAudioCapture = nullptr;
+    static AudioCaptureNode* sStudioCaptureNode = nullptr;
+    static AudioAnalyzerNode* sStudioAnalyzerNode = nullptr;
+
+    auto ensureAudioCapture = [](sol::state& /*lua*/) -> AudioCaptureNode* {
+        if (!sStudioCaptureNode) {
+            if (!sStudioAudioCapture) {
+                sStudioAudioCapture = new AudioCapture(44100, 2048);
+                sStudioAudioCapture->start();
+            }
+            sStudioCaptureNode = new AudioCaptureNode(uniqueName("studio_capture"), sStudioAudioCapture);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : sStudioCaptureNode->getInputs()) animator->add(port);
+                for (auto& [pname, port] : sStudioCaptureNode->getOutputs()) animator->add(port);
+                sStudioCaptureNode->setListener(animator);
+                animator->registerNode(sStudioCaptureNode);
+            }
+        }
+        return sStudioCaptureNode;
+    };
+
+    auto ensureAudioAnalyzer = [ensureAudioCapture](sol::state& lua) -> AudioAnalyzerNode* {
+        if (!sStudioAnalyzerNode) {
+            auto* captureNode = ensureAudioCapture(lua);
+            sStudioAnalyzerNode = new AudioAnalyzerNode(uniqueName("studio_analyzer"), captureNode);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : sStudioAnalyzerNode->getInputs()) animator->add(port);
+                for (auto& [pname, port] : sStudioAnalyzerNode->getOutputs()) animator->add(port);
+                sStudioAnalyzerNode->setListener(animator);
+                animator->registerNode(sStudioAnalyzerNode);
+            }
+        }
+        return sStudioAnalyzerNode;
+    };
+
+    reg.registerType({"AudioCaptureNode", "Audio", {0.8f, 0.3f, 0.8f, 1.0f},
+        [ensureAudioCapture](const std::string& name, sol::state& lua) -> AnimationNode* {
+            return ensureAudioCapture(lua);
+        }});
+
     reg.registerType({"AudioAnalyzerNode", "Audio", {0.8f, 0.3f, 0.8f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] AudioAnalyzerNode requires AudioCaptureNode — use Lua to create" << std::endl;
-            return nullptr;
+        [ensureAudioAnalyzer](const std::string& name, sol::state& lua) -> AnimationNode* {
+            return ensureAudioAnalyzer(lua);
         }});
 
     reg.registerType({"BeatDetectorNode", "Audio", {0.8f, 0.3f, 0.8f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] BeatDetectorNode requires AudioAnalyzerNode — use Lua to create" << std::endl;
-            return nullptr;
-        }});
-
-    reg.registerType({"AudioCaptureNode", "Audio", {0.8f, 0.3f, 0.8f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] AudioCaptureNode requires AudioCapture — use Lua to create" << std::endl;
-            return nullptr;
+        [ensureAudioAnalyzer](const std::string& name, sol::state& lua) -> AnimationNode* {
+            auto* analyzerNode = ensureAudioAnalyzer(lua);
+            auto* node = new BeatDetectorNode(name, analyzerNode);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                auto* rootTime = RootTimeNode::instance();
+                if (rootTime && node->getInputs().count("dt")) {
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+                }
+            }
+            return node;
         }});
 
     // Video
     reg.registerType({"TheoraClipNode", "Video", {0.9f, 0.8f, 0.2f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] TheoraClipNode requires video file — use Lua to create" << std::endl;
-            return nullptr;
+        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            // TheoraClipNode will be dormant if the video file doesn't exist
+            auto* node = new TheoraClipNode("video/bombe.ogg");
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& [pname, port] : node->getInputs()) animator->add(port);
+                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+                node->setListener(animator);
+                animator->registerNode(node);
+                auto* rootTime = RootTimeNode::instance();
+                if (rootTime && node->getInputs().count("dt")) {
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+                }
+            }
+            return node;
         }});
 
     // Animation
-    reg.registerType({"AnimationStateNode", "Animation", {0.2f, 0.8f, 0.8f, 1.0f},
-        [](const std::string& /*name*/, sol::state& /*lua*/) -> AnimationNode* {
-            std::cout << "[Studio] AnimationStateNode requires OGRE AnimationState — use Lua to create" << std::endl;
-            return nullptr;
-        }});
+    // AnimationStateNode disabled — ninja.mesh skeleton triggers OGRE crash
+    // (SceneManager::getAnimation "Attack1" not found). Will be re-enabled
+    // when a proper animated mesh pipeline is implemented.
+    // reg.registerType({"AnimationStateNode", ...});
 
     // Signal — Lua-only temporal nodes (created via LuaAnimationNode with specific scripts)
     auto luaTemporalFactory = [](const std::string& luaType, const std::string& name,
@@ -875,6 +1177,157 @@ void StudioApp::initNodeTypeRegistry() {
     reg.registerType({"SubgraphNode", "Logic", {0.5f, 0.5f, 0.5f, 1.0f},
         [luaTemporalFactory](const std::string& name, sol::state& lua) -> AnimationNode* {
             return luaTemporalFactory("SubgraphNode", name, lua);
+        }});
+
+    // ── v3.2 New Node Types ─────────────────────────────────────────────────
+
+    // Helper lambda to register a node in the Animator
+    auto registerInAnimator = [](AnimationNode* node) {
+        auto* animator = Animator::instance();
+        if (animator && node) {
+            for (auto& [pname, port] : node->getInputs()) animator->add(port);
+            for (auto& [pname, port] : node->getOutputs()) animator->add(port);
+            node->setListener(animator);
+            animator->registerNode(node);
+        }
+    };
+
+    // Scene nodes
+    reg.registerType({"SceneObjectNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& lua) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new SceneObjectNode(name, scene);
+            registerInAnimator(node);
+            // Export SceneNode reference to Lua so scripts (e.g. rotate_head) can access it
+            if (node->getSceneNode()) {
+                if (!lua["_sceneNodes"].valid()) lua["_sceneNodes"] = lua.create_table();
+                lua["_sceneNodes"][name] = node->getSceneNode();
+            }
+            return node;
+        }});
+
+    reg.registerType({"LightNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new LightNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"ParticleNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new ParticleNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"CameraNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new CameraNode(name, scene);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    // Environment nodes
+    reg.registerType({"SkyboxNode", "Environment", {0.2f, 0.7f, 0.3f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new SkyboxNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"FogNode", "Environment", {0.2f, 0.7f, 0.3f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new FogNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // PostProcess
+    reg.registerType({"CompositorNode", "PostProcess", {0.7f, 0.2f, 0.7f, 1.0f},
+        [this, registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            // Get viewport from the Studio RenderTexture (not the RenderWindow which may have 0 viewports)
+            Ogre::Viewport* vp = nullptr;
+            if (mEngine) {
+                auto* rt = mEngine->getRenderTarget();
+                if (rt && rt->getNumViewports() > 0)
+                    vp = rt->getViewport(0);
+            }
+            auto* node = new CompositorNode(name, vp);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // Signal extensions
+    reg.registerType({"BeatTriggerNode", "Signal", {0.0f, 0.5f, 1.0f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new BeatTriggerNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator) {
+                if (node->getInputs().count("beat"))
+                    animator->link(rootTime->getOutputs().at("beat"), node->getInputs().at("beat"));
+                if (node->getInputs().count("beatFrac"))
+                    animator->link(rootTime->getOutputs().at("beatFrac"), node->getInputs().at("beatFrac"));
+                if (node->getInputs().count("dt"))
+                    animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            }
+            return node;
+        }});
+
+    // Math nodes
+    reg.registerType({"MathNode", "Math", {0.6f, 0.6f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MathNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"MixerNode", "Math", {0.6f, 0.6f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MixerNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"MapperNode", "Math", {0.6f, 0.6f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MapperNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"TriggerNode", "Signal", {0.0f, 0.5f, 1.0f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TriggerNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"SplitterNode", "Signal", {0.0f, 0.5f, 1.0f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new SplitterNode(name);
+            registerInAnimator(node);
+            return node;
         }});
 }
 
@@ -964,7 +1417,7 @@ void StudioApp::renderAboutDialog() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
     if (ImGui::BeginPopupModal("About BBFx Studio", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("BBFx Studio v3.1.0");
+        ImGui::Text("BBFx Studio v3.2.0");
         ImGui::Separator();
         ImGui::Text("Real-time 3D animation and effects engine");
         ImGui::Spacing();

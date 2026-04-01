@@ -57,4 +57,53 @@ void InputRecorder::recordBeat() {
     mFile.flush();
 }
 
+// v3.2 Studio events
+
+void InputRecorder::recordChordActivate(const std::string& name) {
+    if (!mRecording.load()) return;
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << R"({"t":)" << mTime << R"(,"type":"chord_activate","name":")" << name << R"("})";
+    mFile << ss.str() << "\n";
+    mFile.flush();
+}
+
+void InputRecorder::recordChordDeactivate(const std::string& name) {
+    if (!mRecording.load()) return;
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << R"({"t":)" << mTime << R"(,"type":"chord_deactivate","name":")" << name << R"("})";
+    mFile << ss.str() << "\n";
+    mFile.flush();
+}
+
+void InputRecorder::recordFaderChange(int index, const std::string& node, const std::string& port, float value) {
+    if (!mRecording.load()) return;
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << R"({"t":)" << mTime << R"(,"type":"fader","index":)" << index
+       << R"(,"node":")" << node << R"(","port":")" << port
+       << R"(","value":)" << value << "}";
+    mFile << ss.str() << "\n";
+    mFile.flush();
+}
+
+void InputRecorder::recordBPMChange(float bpm) {
+    if (!mRecording.load()) return;
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << R"({"t":)" << mTime << R"(,"type":"bpm","bpm":)" << bpm << "}";
+    mFile << ss.str() << "\n";
+    mFile.flush();
+}
+
+void InputRecorder::recordPresetInstantiate(const std::string& presetName) {
+    if (!mRecording.load()) return;
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << R"({"t":)" << mTime << R"(,"type":"preset","name":")" << presetName << R"("})";
+    mFile << ss.str() << "\n";
+    mFile.flush();
+}
+
 } // namespace bbfx

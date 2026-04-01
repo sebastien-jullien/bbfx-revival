@@ -34,6 +34,7 @@
 **BBFx Revival — v3.x (2026)**
 22. [BBFx Studio (v3.0)](#22-bbfx-studio-v30)
 23. [BBFx Studio++ (v3.1)](#23-bbfx-studio-v31)
+24. [BBFx Studio Content (v3.2)](#24-bbfx-studio-content-v32)
 
 ---
 
@@ -1301,3 +1302,216 @@ Le FBO ID est decouvert au premier render et cache dans `mCachedFBO`. Il est inv
 | Escape | Quitter (Design) / Retour Design (Performance) |
 
 *Section v3.1 ajoutee en mars 2026. Sebastien Jullien.*
+
+---
+
+## 24. BBFx Studio Content (v3.2)
+
+**155 iterations (I-307 → I-461) — 18 lots (A → R) — 14 epics (EPIC-75 → EPIC-89)**
+
+Le Studio v3.1 etait fonctionnel mais vide. La v3.2 le transforme en outil de creation complet : tous les noeuds s'instancient avec de vrais objets OGRE, les parametres sont types et editables visuellement, 41 presets produisent un effet visible immediatement.
+
+### AnimationNode : extensions structurantes
+
+```cpp
+class AnimationNode {
+    // ... existant v3.1 ...
+
+    // v3.2 : enable/disable
+    bool mEnabled = true;
+    bool isEnabled() const;
+    virtual void setEnabled(bool en);  // override dans SceneObjectNode/LightNode/ParticleNode
+                                       // pour setVisible() sur les objets OGRE
+
+    // v3.2 : cleanup OGRE
+    virtual void cleanup();   // detruit Entity, SceneNode, Material, Texture
+                              // appele par DeleteNodeCommand::execute() avant delete
+
+    // v3.2 : parametres types
+    ParamSpec* mParamSpec = nullptr;
+    void setParamSpec(ParamSpec* spec);
+    ParamSpec* getParamSpec() const;
+};
+```
+
+**Impact Animator :** `propagateFreshValues()` skip `update()` si `!targetNode->isEnabled()`. `removeNode()` purge `mPortQueue` des ports du noeud supprime (previent les dangling pointers). `unregisterNode()` ajoute pour retirer un noeud du name map sans toucher au graphe.
+
+### ParamSpec — systeme de parametres declares
+
+```
+ParamSpec.h/.cpp (C++)                paramspec.lua (Lua)
+  ├── ParamDef (structure)              ├── ParamSpec.float(name, default, {min,max,step,label})
+  │   ├── name, label                   ├── ParamSpec.int(name, default, {min,max,label})
+  │   ├── type (enum ParamType)         ├── ParamSpec.bool(name, default, {label})
+  │   ├── floatVal, minVal, maxVal      ├── ParamSpec.enum(name, default, choices, {label})
+  │   ├── intVal, boolVal               ├── ParamSpec.color(name, {r,g,b}, {label})
+  │   ├── stringVal                     ├── ParamSpec.vec3(name, {x,y,z}, {label})
+  │   ├── colorVal[4], vec3Val[3]       ├── ParamSpec.mesh(name, default, {label})
+  │   └── choices (vector<string>)      ├── ParamSpec.texture / .material / .shader
+  │                                     ├── ParamSpec.particle / .compositor
+  └── ParamSpec (collection)            └── ParamSpec.declare(paramDefs) -> ParamSpec
+      ├── addParam(ParamDef)
+      ├── getParam(name) -> ParamDef*
+      ├── toJson() / fromJson()
+      └── getParams() -> vector<ParamDef>&
+```
+
+**14 types :** FLOAT, INT, BOOL, STRING, ENUM, COLOR, VEC3, MESH, TEXTURE, MATERIAL, SHADER, PARTICLE, COMPOSITOR.
+
+**Synchronisation :** Modification Inspector widget → `ParamSpec::set()` → port DAG `setValue()`. Modification port DAG (depuis lien) → valeur interne mise a jour au prochain `update()`. Serialisation dans `.bbfx-project` sous la cle `"params"` de chaque noeud.
+
+### 13 nouveaux types de noeuds Studio
+
+Tous dans `src/studio/nodes/` :
+
+| Noeud | Fichier | Objets OGRE | Ports animables | Categorie |
+|-------|---------|-------------|-----------------|-----------|
+| SceneObjectNode | SceneObjectNode.h/.cpp | Entity + SceneNode | position.xyz, scale.xyz, rotation.xyz, visible | Scene |
+| LightNode | LightNode.h/.cpp | Light + SceneNode | power, position.xyz, diffuse.rgb | Scene |
+| ParticleNode | ParticleNode.h/.cpp | ParticleSystem + SceneNode | emission_rate, position.xyz, enabled | Scene |
+| CameraNode | CameraNode.h/.cpp | Camera + SceneNode | fov, orbit_radius/speed/height | Scene |
+| SkyboxNode | SkyboxNode.h/.cpp | Scene::setSkyBox | rotation | Environment |
+| FogNode | FogNode.h/.cpp | Scene::setFog | density, start, end | Environment |
+| CompositorNode | CompositorNode.h/.cpp | CompositorManager chain | enabled | PostProcess |
+| BeatTriggerNode | BeatTriggerNode.h/.cpp | — | trigger, envelope, phase | Signal |
+| MathNode | MathNode.h/.cpp | — | a, b → out (15 operations) | Math |
+| MixerNode | MixerNode.h/.cpp | — | in_1..N, weight_1..N → out | Math |
+| MapperNode | MapperNode.h/.cpp | — | in → out (remapping) | Math |
+| TriggerNode | TriggerNode.h/.cpp | — | in, threshold → trigger, gate | Signal |
+| SplitterNode | SplitterNode.h/.cpp | — | in → out_1..N | Signal |
+
+**Color map NodeEditor :** Scene=vert, Environment=cyan, Math=orange, Signal=rouge, PostProcess=violet.
+
+**setEnabled() override :** SceneObjectNode, LightNode et ParticleNode overrident `setEnabled()` pour appeler `setVisible()` sur leurs objets OGRE. Un noeud desactive apparait grise avec prefixe `[OFF]` dans le Node Editor.
+
+### Factories OGRE reelles
+
+Les factories du NodeTypeRegistry (v3.1 : retournaient nullptr pour 10 types) creent maintenant les objets OGRE complets :
+
+| Factory | Objets crees | Mesh/Resource par defaut |
+|---------|-------------|--------------------------|
+| PerlinFxNode | Entity + SceneNode + SoftwareVertexShader (clone mesh) | geosphere4500.mesh |
+| WaveVertexShader | Entity + SceneNode + clone mesh + port dt | geosphere4500.mesh |
+| ShaderFxNode | Entity + SceneNode + Material + GPU programs GLSL | geosphere4500.mesh + passthrough |
+| ColorShiftNode | Material clone + setEmissive/setDiffuse/setAmbient + RTSS | BaseWhiteNoLighting |
+| TextureBlitterNode | Texture manuelle 512x512 PF_A8R8G8B8 | — |
+| AudioCaptureNode | AudioCapture SDL3 singleton | 44100Hz, 2048 buffer |
+| AudioAnalyzerNode | Reference AudioCaptureNode | auto-chain |
+| BeatDetectorNode | Reference AudioAnalyzerNode | auto-chain |
+| TheoraClipNode | TheoraClip + texture dynamique | dormant si absent |
+| AnimationStateNode | Reference Entity AnimationState | ninja.mesh fallback |
+
+### Deferred clone et GL State Guard (Perlin Studio Fix)
+
+Le PerlinFxNode en mode Studio partage le contexte GL avec ImGui. Deux mecanismes evitent la corruption :
+
+1. **Deferred `_prepareClonedMesh()`** : le clone mesh est cree au premier `frameStarted()` OGRE (pas dans le constructeur). A ce moment, le GL state est 100% OGRE-owned.
+
+2. **GL State Guard dans `readBufferRaw()`** : sauvegarde/restauration de `GL_COPY_READ_BUFFER` (0x8F36) et `GL_ARRAY_BUFFER_BINDING` (0x8894) via function pointers charges par `SDL_GL_GetProcAddress`.
+
+Meme pattern applique au WaveVertexShader (entity deferred + `mCloneReady` guard).
+
+### Format preset v2
+
+```lua
+return {
+    name = "preset_name",
+    version = 2,
+    category = "Geometry",         -- Geometry|Color|PostProcess|Particle|Camera|Composition
+    description = "...",
+    tags = {"perlin", "beat"},
+    params = ParamSpec.declare({...}),
+    build = function(params)
+        -- Format A : retourne { type = "NodeType", params = params }
+        -- Format B : retourne { nodes = {...}, links = {...}, primary = "..." }
+    end
+}
+```
+
+**Format B multi-noeud :** Le `build()` peut retourner un graphe de noeuds. Le Debugger detecte `built["nodes"]`, cree chaque noeud avec nom prefixe (`presetName_nodeName`), cree les liens via `Animator::link()`, et stocke le groupe dans `sPresetGroups` pour la suppression cascade.
+
+### 41 Presets BBFx Essentials
+
+| Categorie | Nombre | Exemples |
+|-----------|--------|----------|
+| Geometry | 8 | perlin_pulse, perlin_breath, wave_morph, elastic_bounce |
+| Color | 7 | color_shift, rainbow_cycle, flash_strobe |
+| PostProcess | 8 | bloom_dream, glitch_fx, mirror_kaleidoscope |
+| Particle | 8 | star_field, fireflies, aureola, snowfall |
+| Camera | 5 | orbit_slow, shake_beat, dolly_zoom |
+| Composition | 5 | audio_reactive_sphere, tunnel_infinite |
+
+### Shaders et Compositors
+
+**27 shaders GLSL 330 :**
+- Generateurs : plasma, voronoi, mandelbrot, truchet, flowfield, reaction_diffusion
+- Deformation : wave_deform, tunnel, sphere_trace, kaleidoscope, twist
+- Post-process : chromatic_aberration, vhs, ascii_art, pixel_sort, datamosh, filmgrain, vignette, posterize, pixelate, edge_detect, invert, barrel
+- Vertex : perlin_gpu, wave_gpu
+
+**6 compositors portes Cg → GLSL 330 :** Bloom, B&W (BlackAndWhite), Embossed, Glass, OldTV, DOF.
+
+**13 compositors BBFx crees :** Vignette, FilmGrain, Invert, Posterize, EdgeDetect, Pixelate, Barrel, Kaleidoscope, ChromaticAberration, VHS, HeatDistort, Glitch, ASCII. Tous utilisent `StdQuad_vp.glsl` comme vertex shader commun. Materials definis dans `resources/materials/scripts/bbfx.material`.
+
+### Noeuds dynamiques
+
+Plusieurs noeuds lisent leur configuration depuis le ParamSpec a runtime :
+
+- **CompositorNode** : lit le param `compositor`, switch compositor OGRE a runtime
+- **ParticleNode** : lit le param `template`, recree le ParticleSystem si le template change
+- **SceneObjectNode** : lit le param `mesh_file`, recree l'Entity si le mesh change
+- **LightNode** : lit le type (point/directional/spot) ENUM et la couleur diffuse COLOR
+- **ShaderFxNode** : parse les uniforms du fragment shader, lit `vert_shader`/`frag_shader` depuis les params preset
+
+### Panels modifies
+
+| Panel | Modifications v3.2 |
+|-------|---------------------|
+| InspectorPanel | Generation automatique widgets ParamSpec (14 types), EditParamCommand pour undo/redo |
+| PresetBrowserPanel | Categories en accordeons `CollapsingHeader`, cache `mPresetCategories`, drag-drop intelligent |
+| NodeEditorPanel | Enable/Disable via context menu, rendu grise + prefixe `[OFF]`, shell node cache |
+| PerformanceModePanel | Fix flip UV, viewport resize au retour Design Mode, labels/glow |
+| TimelinePanel | Suppression scrollbar verticale (NoScrollbar + NoScrollWithMouse) |
+| ViewportPanel | Correction flip UV texture OGRE |
+
+### Demo scene as DAG nodes
+
+`demo_studio.lua` ne cree plus que la camera et l'ambient light (minimum OGRE). L'ogrehead et la lumiere sont des noeuds DAG normaux dans le template par defaut :
+
+```json
+// data/templates/default.bbfx-project
+{
+    "nodes": [
+        { "type": "SceneObjectNode", "name": "studio_head", "params": { "mesh_file": "ogrehead.mesh" } },
+        { "type": "LightNode", "name": "studio_light" },
+        { "type": "LuaAnimationNode", "name": "rotate_head", "source": "..." }
+    ]
+}
+```
+
+Les factories C++ exportent `_sceneNodes["studio_head"]` en Lua global pour que les scripts externes puissent acceder au SceneNode.
+
+### Serialisation v3.2
+
+Le format `.bbfx-project` v3.2 ajoute :
+- `"params"` sous chaque noeud : valeurs ParamSpec (JSON)
+- Timeline enrichie : tracks, transitions, markers, loop regions, automation
+- Retrocompatible v3.1 (champs manquants = ignores)
+
+### CLI
+
+`--default` et `--reset` fusionnes : meme comportement (reset complet). Le Set Editor est cache par defaut (toggle via menu View). Le `node_editor.json` n'est plus utilise — les positions sont gerees par le projet.
+
+### Metriques v3.2
+
+| Indicateur | Valeur |
+|---|---|
+| Noeuds instanciables Studio | 30+ (vs 7 en v3.1) |
+| Types ParamSpec | 14 |
+| Presets fonctionnels | 41/41 (100%) |
+| Shaders GLSL | 27 |
+| Compositors | 19 (6 portes + 13 BBFx) |
+| Templates projet | 14 |
+| Iterations | 155 (I-307 → I-461) |
+
+*Section v3.2 ajoutee en avril 2026. Sebastien Jullien.*

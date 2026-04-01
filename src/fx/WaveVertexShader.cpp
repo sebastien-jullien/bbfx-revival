@@ -1,6 +1,10 @@
 #include "WaveVertexShader.h"
+#include "../core/Engine.h"
+#include <OgreMeshManager.h>
+#include <OgreEntity.h>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 namespace bbfx {
 
@@ -9,7 +13,9 @@ using namespace Ogre;
 WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneName)
     : SoftwareVertexShader(meshName, cloneName)
     , AnimationNode("WaveVertexShader")
+    , mCloneMeshName(cloneName)
 {
+    AnimationNode::addInput(new AnimationPort("dt", 0.016f));
     AnimationNode::addInput(new AnimationPort("amplitude", 5.0f));
     AnimationNode::addInput(new AnimationPort("frequency", 2.0f));
     AnimationNode::addInput(new AnimationPort("speed", 1.0f));
@@ -19,8 +25,41 @@ WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneNa
 
 WaveVertexShader::~WaveVertexShader() = default;
 
+void WaveVertexShader::createDeferredEntity() {
+    if (mEntityCreated || mStudioEntityName.empty()) return;
+    auto cloneMesh = Ogre::MeshManager::getSingleton().getByName(mCloneMeshName);
+    if (!cloneMesh) return; // clone not ready yet
+    auto* engine = Engine::instance();
+    auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
+    if (!sceneMgr) return;
+    try {
+        auto* entity = sceneMgr->createEntity(mStudioEntityName, mCloneMeshName);
+        auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(mStudioSceneNodeName);
+        sceneNode->attachObject(entity);
+        mEntityCreated = true;
+    } catch (...) {}
+}
+
+void WaveVertexShader::cleanup() {
+    SoftwareVertexShader::disable();
+    if (!mStudioSceneNodeName.empty()) {
+        try {
+            auto* engine = Engine::instance();
+            auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
+            if (sceneMgr && sceneMgr->hasSceneNode(mStudioSceneNodeName)) {
+                sceneMgr->getSceneNode(mStudioSceneNodeName)->setVisible(false);
+            }
+        } catch (...) {}
+    }
+}
+
 void WaveVertexShader::update() {
+    createDeferredEntity();
+    if (!mCloneReady) return; // Wait for SoftwareVertexShader to prepare the clone in frameStarted()
+
     auto& inputs = AnimationNode::getInputs();
+    float dt = inputs.at("dt")->getValue();
+    if (dt <= 0.0f) dt = 0.016f; // fallback
     amplitude = inputs.at("amplitude")->getValue();
     frequency = inputs.at("frequency")->getValue();
     speed = inputs.at("speed")->getValue();
@@ -28,7 +67,7 @@ void WaveVertexShader::update() {
     if (axis < 0) axis = 0;
     if (axis > 2) axis = 2;
 
-    renderOneFrame(0.016f);
+    renderOneFrame(dt);
     AnimationNode::getOutputs().at("mesh_dirty")->setValue(1.0f);
     AnimationNode::fireUpdate();
 }

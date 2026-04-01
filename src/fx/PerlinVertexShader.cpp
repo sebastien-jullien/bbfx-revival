@@ -97,6 +97,7 @@ void PerlinVertexShader::_applyNoise(VertexData* data, const CpuMeshData& cpuDat
 }
 
 void PerlinVertexShader::renderOneFrame(Real dt) {
+    if (!clonedMesh) return; // not yet initialized (deferred clone)
     for (unsigned m = 0; m < clonedMesh->getNumSubMeshes(); m++) {
         auto* subMesh = clonedMesh->getSubMesh(m);
         VertexData* vdata = subMesh->useSharedVertices

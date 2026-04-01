@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.1.0 LANGUAGES CXX)
+project(BBFx VERSION 3.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -94,6 +94,7 @@ add_library(bbfx-core
     src/fx/ColorShiftNode.cpp
     src/fx/ShaderFxNode.cpp
     src/bindings/bbfx_bindings.cpp
+    src/core/ParamSpec.cpp
     src/input/KeyboardManager.cpp
     src/input/MouseManager.cpp
     src/input/JoystickManager.cpp
@@ -153,6 +154,22 @@ add_executable(bbfx-studio
     src/studio/StudioEngine.cpp
     src/studio/NodeTypeRegistry.cpp
     src/studio/SettingsManager.cpp
+    src/studio/ResourceEnumerator.cpp
+    src/studio/Debugger.cpp
+    src/studio/generators/MeshGenerator.cpp
+    src/studio/nodes/SceneObjectNode.cpp
+    src/studio/nodes/LightNode.cpp
+    src/studio/nodes/ParticleNode.cpp
+    src/studio/nodes/CompositorNode.cpp
+    src/studio/nodes/CameraNode.cpp
+    src/studio/nodes/SkyboxNode.cpp
+    src/studio/nodes/FogNode.cpp
+    src/studio/nodes/BeatTriggerNode.cpp
+    src/studio/nodes/MathNode.cpp
+    src/studio/nodes/MixerNode.cpp
+    src/studio/nodes/MapperNode.cpp
+    src/studio/nodes/TriggerNode.cpp
+    src/studio/nodes/SplitterNode.cpp
     src/studio/commands/CommandManager.cpp
     src/studio/commands/NodeCommands.cpp
     src/studio/commands/LinkCommands.cpp
@@ -165,6 +182,7 @@ add_executable(bbfx-studio
     src/studio/panels/PresetBrowserPanel.cpp
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
+    src/studio/panels/SetEditorPanel.cpp
     src/studio/project/ProjectSerializer.cpp
     src/studio/project/ExportDialog.cpp
     # imgui-node-editor (compiled directly — FetchContent target unreliable)

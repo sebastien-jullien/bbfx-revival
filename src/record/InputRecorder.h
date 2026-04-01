@@ -23,6 +23,13 @@ public:
     void recordAxis(int axis, float value);
     void recordBeat();
 
+    // v3.2 Studio events
+    void recordChordActivate(const std::string& name);
+    void recordChordDeactivate(const std::string& name);
+    void recordFaderChange(int index, const std::string& node, const std::string& port, float value);
+    void recordBPMChange(float bpm);
+    void recordPresetInstantiate(const std::string& presetName);
+
 private:
     std::ofstream mFile;
     std::atomic<bool> mRecording{false};

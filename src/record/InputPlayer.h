@@ -11,10 +11,14 @@ class InputPlayer {
 public:
     struct Event {
         float time;
-        std::string type;   // "key", "axis", "beat"
+        std::string type;   // "key", "axis", "beat", "chord_activate", "chord_deactivate", "fader", "bpm", "preset"
         int code = 0;
         std::string state;  // "press"/"release" for keys
-        float value = 0.0f; // for axes
+        float value = 0.0f; // for axes, faders, bpm
+        std::string name;   // for chord/preset names
+        std::string node;   // for fader (node name)
+        std::string port;   // for fader (port name)
+        int index = 0;      // for fader index
     };
 
     InputPlayer() = default;

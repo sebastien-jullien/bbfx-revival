@@ -32,7 +32,7 @@ void TimelinePanel::stop() {
 
 void TimelinePanel::render(StudioEngine* engine) {
     ensureDefaultChords();
-    ImGui::Begin("Timeline");
+    ImGui::Begin("Timeline", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     renderTransport(engine);
     ImGui::SameLine(0, 10);

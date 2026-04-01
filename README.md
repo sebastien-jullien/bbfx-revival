@@ -1,12 +1,26 @@
-# BBFx Revival — v3.1
+# BBFx Revival — v3.2
 
-**Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BlackBox Effects) engine.
+**Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
 BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drives OGRE 3D rendering in real time. Animation nodes are defined and wired in Lua or via the visual node editor; BBFx propagates values through the graph each frame at render speed.
 
 **v3.0 "BBFx Studio"** adds a full GUI application with Dear ImGui: interactive node editor, inspector, timeline, performance mode (F5), and video export — no code required for artists and VJs.
 
-**v3.1 "BBFx Studio++"** completes and stabilizes the Studio: all stubs wired, BPM-to-DAG sync (beat/beatFrac ports), scene/project separation, Lua source serialization in `.bbfx-project`, CLI arguments (`--default`, `--reset`, `--clear`, `--fullscreen`), native Windows file dialogs, console REPL (`graph`/`ports`/`set`/`help`), full keyboard shortcuts (F1-F7, Space, Ctrl+E/N/O), undo/redo (Command pattern, Ctrl+Z/Y), node duplication (Ctrl+D), bookmarks (Ctrl+1-9), and flow animation on links.
+**v3.1 "BBFx Studio++"** completes and stabilizes the Studio: all stubs wired, BPM-to-DAG sync (beat/beatFrac ports), scene/project separation, Lua source serialization in `.bbfx-project`, CLI arguments (`--default`, `--reset`, `--fullscreen`), native Windows file dialogs, console REPL, full keyboard shortcuts, undo/redo (Command pattern), node duplication, bookmarks, and flow animation on links.
+
+**v3.2 "BBFx Studio Content"** makes all presets functional and the Studio usable as a creative tool:
+- **41 presets** with visible effects (Geometry, Color, PostProcess, Particle, Camera, Composition)
+- **8 procedural fragment shaders** (plasma, voronoi, mandelbrot, truchet, flowfield, tunnel, reaction_diffusion, sphere_trace) applied to meshes via ShaderFxNode
+- **13 BBFx compositors** wrapping existing GLSL shaders for post-processing
+- **Enable/Disable nodes** with visual [OFF] feedback — hides OGRE objects (mesh, light, particles)
+- **Preset browser** organized by category in collapsible accordions
+- **Demo scene as regular DAG nodes** (SceneObjectNode + LightNode), fully deletable and disableable
+- **LightNode** with dynamic type (point/directional/spot) and color from Inspector color picker
+- **ColorShiftNode** with RTSS invalidation for visible color changes on textured meshes
+- **Camera restore** on delete (own SceneNode, detach/reattach pattern)
+- **Particle rendering** in Studio (manual `_update()` call for RenderTexture pipeline)
+- **Performance Mode** flip fix, viewport resize on return to Design Mode
+- **Timeline** without scrollbar, Set Editor hidden by default
 
 ---
 
@@ -88,6 +102,23 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Bookmarks** — Ctrl+1-9
 - **Flow animation on links** — animated particles along DAG edges
 
+### BBFx Studio Content (v3.2)
+- **ParamSpec system** — 14 typed parameters (FLOAT, INT, BOOL, STRING, ENUM, COLOR, VEC3, MESH, TEXTURE, MATERIAL, SHADER, PARTICLE, COMPOSITOR) with auto-generated Inspector widgets
+- **13 new node types** — SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode
+- **41 presets** — 6 categories (Geometry, Color, PostProcess, Particle, Camera, Composition), preset format v2 with ParamSpec + `build()` function
+- **8 procedural fragment shaders** — plasma, voronoi, mandelbrot, truchet, flowfield, tunnel, reaction_diffusion, sphere_trace
+- **13 BBFx compositors** — wrapping existing GLSL shaders for post-processing via CompositorNode
+- **MeshGenerator** — runtime procedural meshes (plane, sphere, cube, cylinder, torus, cone)
+- **Enable/Disable nodes** — `mEnabled` flag with Animator skip, visual [OFF] feedback, OGRE setVisible() overrides
+- **Preset browser** — organized by category in collapsible accordions
+- **Demo scene as DAG nodes** — SceneObjectNode + LightNode, fully deletable and disableable
+- **LightNode** — dynamic type (point/directional/spot) with color from Inspector color picker
+- **Camera restore on delete** — own SceneNode, detach/reattach pattern
+- **Particle rendering in Studio** — manual `_update()` call for RenderTexture pipeline
+- **GL State Guard** — RAII save/restore of GL buffer bindings for OGRE/ImGui coexistence
+- **Deferred clone** — PerlinFxNode/WaveVertexShader create mesh clones at first `frameStarted()` instead of constructor
+- **Studio Debugger** — `dbg.*` commands for automated testing and node inspection from Console panel
+
 ---
 
 ## Architecture
@@ -106,7 +137,13 @@ C++ core
   ├── Audio           -- AudioCapture, AudioAnalyzer, BeatDetector
   ├── Video           -- OggReader, TheoraReader, TheoraBlitter, TheoraClip, Crossfader
   ├── Network         -- TcpServer (remote REPL)
-  └── Record          -- InputRecorder, InputPlayer, VideoExporter
+  ├── Record          -- InputRecorder, InputPlayer, VideoExporter
+  └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
+       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, ...
+       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf
+       ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Chord commands)
+       ├── Generators -- MeshGenerator (procedural meshes)
+       └── Project    -- ProjectSerializer, ExportDialog
     |
 OGRE 14.5 + SDL3  (via vcpkg)
     |
@@ -129,6 +166,12 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/video/` | TheoraClip, ReversableClip, TheoraBlitter, TextureCrossfader |
 | `src/network/TcpServer` | TCP REPL server, WinSock2/POSIX |
 | `src/record/` | InputRecorder, InputPlayer, VideoExporter |
+| `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
+| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode |
+| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel |
+| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands |
+| `src/studio/generators/` | MeshGenerator (plane, sphere, cube, cylinder, torus, cone) |
+| `src/studio/project/` | ProjectSerializer, ExportDialog |
 | `src/bindings/` | sol2 bindings for all BBFx types |
 
 ### Lua Modules
@@ -156,6 +199,7 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `sync.lua` | BPM → beat/bar/cycle, auto-mode from audio |
 | `temporal_nodes.lua` | LFONode, RampNode, DelayNode, EnvelopeFollowerNode |
 | `threads.lua` | Coroutine scheduler integrated with frame loop |
+| `paramspec.lua` | ParamSpec builder: float/int/bool/enum/color/vec3/mesh/texture/material/shader/particle/compositor typed parameters |
 | `video.lua` | createClip, overlay, crossfade |
 
 ---
@@ -195,6 +239,7 @@ All demos run from the build output directory (`build/windows-debug/Debug/` or e
 
 | Demo | Launch | Description |
 |------|--------|-------------|
+| **Studio** | `./bbfx-studio lua/demos/demo_studio.lua` | Full GUI: node editor, inspector, 41 presets, performance mode |
 | **Minimal** | `./bbfx lua/bbfx_minimal.lua` | Rotating mesh with a single LuaAnimationNode |
 | **Interactive** | `./bbfx lua/demo.lua` | 5 modes: minimal / Perlin / wave / colorshift / combined |
 | **Geosphere** | `./bbfx lua/demos/demo_geosphere.lua` | Perlin-deformed head, orbital camera, keyboard+joystick |
@@ -280,6 +325,8 @@ animator:addNode(modulate)
 | sol2 | 3.x | Lua/C++ bindings |
 | Lua | 5.4+ | Scripting runtime |
 | Boost.Graph | 1.90+ | Animation DAG |
+| Dear ImGui | 1.91+ | Studio GUI (panels, inspector, menus) |
+| imgui-node-editor | — | Visual node graph editor |
 | libtheora | 1.2.0 | Theora video decoding |
 | libogg | 1.3.6 | Ogg container parsing |
 
@@ -301,8 +348,8 @@ ctest --preset windows-release
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v2.9), all modules, Lua API, design decisions
-- [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo command reference
+- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2), all modules, Lua API, design decisions
+- [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo and Studio usage reference
 
 ---
 

@@ -18,8 +18,8 @@ in vec4 vertex;
 in vec3 normal;
 in vec2 uv0;
 
-out vec3 vNormal;
-out vec2 vTexCoord;
+out vec3 oNormal;
+out vec2 oUv0;
 out vec3 vWorldPos;
 
 // ─── Perlin 3D Noise (Stefan Gustavson) ───────────────────────────────────
@@ -97,7 +97,7 @@ void main() {
     pos += n * noise * displacement;
 
     gl_Position = worldViewProj * vec4(pos, 1.0);
-    vNormal = mat3(world) * n;
-    vTexCoord = uv0;
+    oNormal = mat3(world) * n;
+    oUv0 = uv0;
     vWorldPos = (world * vec4(pos, 1.0)).xyz;
 }

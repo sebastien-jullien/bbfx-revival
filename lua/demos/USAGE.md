@@ -1,35 +1,70 @@
 # BBFx Demos
 
-## BBFx Studio v3.0 (GUI Application)
+## BBFx Studio v3.2 (GUI Application)
 
 Launch the graphical studio interface:
 ```
 cd build/windows-debug/Debug
-bbfx-studio.exe
-```
-Or with an initial Lua scene:
-```
 bbfx-studio.exe lua/demos/demo_studio.lua
 ```
 
+**CLI arguments:**
+- `--default` — Load default project
+- `--reset` — Reset settings to defaults
+- `--clear` — Start with empty graph
+- `--fullscreen` — Start in fullscreen
+
 **Panels:**
-- **Viewport** — Live OGRE render, resizable, drag to reposition
-- **Node Editor** — Interactive DAG: drag pins to create links, Delete to remove
-- **Inspector** — Float sliders for input ports, Lua source editor for Lua nodes
-- **Timeline** — Beat/bar markers, chord state blocks, BPM, transport
-- **Presets** — Browse and drag-to-graph preset instantiation
+- **Viewport** — Live OGRE render, resizable, FPS/resolution/mode overlay
+- **Node Editor** — Interactive DAG: drag pins to create links, Delete to remove, color by type, real-time port values, flow animation on links
+- **Inspector** — Auto-generated widgets from ParamSpec: float sliders, int spinners, bool checkboxes, enum dropdowns, color pickers, vec3 editors, mesh/texture/material/shader/particle/compositor selectors. Rename/delete nodes.
+- **Timeline** — Beat/bar markers, chord state blocks, BPM, transport, 8-band audio spectrum
+- **Preset Browser** — 41 presets in 6 categories (Geometry, Color, PostProcess, Particle, Camera, Composition), collapsible accordions, drag-to-graph instantiation
+- **Console** — Lua REPL + debugger commands (`dbg.help()`, `dbg.list()`, `dbg.inspect()`, etc.)
+- **Set Editor** — Hidden by default (F4)
+- **Performance Mode** — F5 toggle, fullscreen viewport 80%, 4x4 trigger grid, 8 faders, VU meters, BPM overlay, PANIC button
 
-**Controls:**
-- **F5** — Toggle Design Mode ↔ Performance Mode
-- **ESC** — Quit
+**Keyboard shortcuts:**
+- **F1** — Toggle Node Editor
+- **F2** — Toggle Inspector
+- **F3** — Toggle Timeline
+- **F4** — Toggle Set Editor
+- **F5** — Toggle Design ↔ Performance Mode
+- **F6** — Toggle Preset Browser
+- **F7** — Toggle Console
+- **Space** — Enable/Disable selected node
+- **Delete** — Delete selected node
 - **Ctrl+S** — Save project
+- **Ctrl+O** — Open project
+- **Ctrl+N** — New project
+- **Ctrl+E** — Export dialog
+- **Ctrl+Z** — Undo
+- **Ctrl+Y** — Redo
+- **Ctrl+D** — Duplicate selected node
+- **Ctrl+1-9** — Set bookmark
+- **1-9** — Restore bookmark
+- **ESC** — Quit (Design) / Return to Design (Performance)
 
-**Performance Mode (F5):**
-- Full-screen OGRE viewport (80%)
-- 4×4 trigger grid (chord states)
-- 8 vertical faders (DAG port control)
-- VU meters + BPM overlay
-- PANIC button (resets all ports to 0)
+**Node types (30+):**
+- **Core:** RootTimeNode, LuaAnimationNode, AnimationStateNode, AccumulatorNode
+- **Temporal:** LFONode, RampNode, DelayNode, EnvelopeFollowerNode
+- **FX:** PerlinFxNode, ShaderFxNode, WaveVertexShader, ColorShiftNode, TextureBlitterNode
+- **Studio (v3.2):** SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode
+
+**Debugger commands (Console panel):**
+```
+dbg.help()                              -- Show all commands
+dbg.create("PerlinFxNode", "mynode")    -- Create node
+dbg.delete("mynode")                    -- Delete node
+dbg.preset("perlin_pulse")             -- Instantiate preset
+dbg.link("a", "out", "b", "in")       -- Create link
+dbg.set("node", "port", 1.5)          -- Set port value
+dbg.get("node", "port")               -- Get port value
+dbg.list()                             -- List all nodes
+dbg.inspect("node")                    -- Detail a node
+dbg.test()                             -- Run automated test suite
+dbg.screenshot("path.png")            -- Capture viewport
+```
 
 ---
 

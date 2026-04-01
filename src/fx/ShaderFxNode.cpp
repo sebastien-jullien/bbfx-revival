@@ -59,23 +59,26 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
     std::string vertSource = vertDataStream->getAsString();
     parseUniforms(vertSource);
 
-    // Create vertex program
-    std::string vpName = getName() + "_vp";
+    // Create vertex program with unique name to avoid conflicts on re-creation
+    static int sShaderCounter = 0;
+    std::string uid = std::to_string(++sShaderCounter);
+    std::string vpName = getName() + "_vp_" + uid;
     auto vp = gpuMgr.createProgram(vpName, grp, "glsl", Ogre::GPT_VERTEX_PROGRAM);
     vp->setSource(vertSource);
     // Map OGRE vertex attributes
     vp->setParameter("input_operation_type", "triangle_list");
 
-    // Read fragment shader
+    // Read fragment shader and parse its uniforms too
     auto fragDataStream = Ogre::ResourceGroupManager::getSingleton().openResource(fragPath, grp);
     std::string fragSource = fragDataStream->getAsString();
+    parseUniforms(fragSource);
 
-    std::string fpName = getName() + "_fp";
+    std::string fpName = getName() + "_fp_" + uid;
     auto fp = gpuMgr.createProgram(fpName, grp, "glsl", Ogre::GPT_FRAGMENT_PROGRAM);
     fp->setSource(fragSource);
 
     // Create material
-    std::string matName = getName() + "_mat";
+    std::string matName = getName() + "_mat_" + uid;
     mMaterial = matMgr.create(matName, grp);
     auto* pass = mMaterial->getTechnique(0)->getPass(0);
 
@@ -101,8 +104,10 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
         // Fragment shader may not use all auto-params
     }
 
-    // Apply material to entity
+    // Save original materials, then apply shader material to entity
+    mOriginalMaterials.clear();
     for (unsigned i = 0; i < mEntity->getNumSubEntities(); ++i) {
+        mOriginalMaterials.push_back(mEntity->getSubEntity(i)->getMaterialName());
         mEntity->getSubEntity(i)->setMaterial(mMaterial);
     }
 
@@ -116,7 +121,7 @@ void ShaderFxNode::update() {
     float dt = mInputs.count("dt") ? mInputs["dt"]->getValue() : 0.016f;
     mTime += dt;
 
-    // Push custom uniforms to GPU
+    // Push custom uniforms to GPU (both vertex and fragment params)
     for (auto& u : mUniforms) {
         float val = 0.0f;
         if (u.name == "time") {
@@ -124,12 +129,32 @@ void ShaderFxNode::update() {
         } else if (mInputs.count(u.name)) {
             val = mInputs[u.name]->getValue();
         }
-        try {
-            mVertParams->setNamedConstant(u.name, val);
-        } catch (...) {}
+        if (mVertParams) {
+            try { mVertParams->setNamedConstant(u.name, val); } catch (...) {}
+        }
+        if (mFragParams) {
+            try { mFragParams->setNamedConstant(u.name, val); } catch (...) {}
+        }
     }
 
     fireUpdate();
+}
+
+void ShaderFxNode::cleanup() {
+    // Restore original materials to the entity
+    if (mEntity) {
+        try {
+            for (unsigned i = 0; i < mEntity->getNumSubEntities() && i < mOriginalMaterials.size(); ++i) {
+                auto origMat = Ogre::MaterialManager::getSingleton().getByName(mOriginalMaterials[i]);
+                if (origMat) mEntity->getSubEntity(i)->setMaterial(origMat);
+            }
+        } catch (...) {}
+    }
+    mEntity = nullptr;
+    mVertParams.reset();
+    mFragParams.reset();
+    mMaterial.reset();
+    mOriginalMaterials.clear();
 }
 
 } // namespace bbfx

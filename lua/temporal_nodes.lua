@@ -42,7 +42,21 @@ function LFONode:new(params)
         local wf   = math.floor(wfPort:getValue() + 0.5)
         local ph   = phPort:getValue()
 
-        t = t + dt
+        -- v3.2: beat sync mode
+        local bsPort = self:getInput("beat_sync")
+        local bfPort = self:getInput("beatFrac")
+        local beatSync = bsPort and bsPort:getValue() >= 0.5
+
+        if beatSync and bfPort then
+            -- In beat sync mode, frequency is in beats and phase uses beatFrac
+            local beatFrac = bfPort:getValue()
+            t = t + dt  -- still accumulate for multi-beat periods
+            local tp_raw = t * freq + ph
+            -- Use beatFrac for sub-beat precision
+            local tp = (tp_raw + beatFrac * freq) % 1.0
+        else
+            t = t + dt
+        end
         local tp = (t * freq + ph) % 1.0  -- normalized phase 0..1
 
         local v
@@ -65,6 +79,8 @@ function LFONode:new(params)
     node:addInput("offset")
     node:addInput("waveform")
     node:addInput("phase")
+    node:addInput("beat_sync")
+    node:addInput("beatFrac")
     node:addOutput("out")
 
     -- Set default values on input ports
@@ -124,6 +140,7 @@ function RampNode:new(params)
     node:addInput("dt")
     node:addInput("target")
     node:addInput("rate")
+    node:addInput("beat_sync")
     node:addOutput("out")
 
     node:getInput("rate"):setValue(rate_default)
