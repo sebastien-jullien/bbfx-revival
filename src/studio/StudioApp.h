@@ -9,6 +9,7 @@
 #include "panels/PerformanceModePanel.h"
 #include "panels/ConsolePanel.h"
 #include "panels/SetEditorPanel.h"
+#include "panels/SceneHierarchyPanel.h"
 #include "Debugger.h"
 #include "commands/CommandManager.h"
 #include "NodeTypeRegistry.h"
@@ -95,6 +96,7 @@ private:
     std::unique_ptr<PerformanceModePanel>  mPerformanceModePanel;
     std::unique_ptr<ConsolePanel>          mConsolePanel;
     std::unique_ptr<SetEditorPanel>        mSetEditorPanel;
+    std::unique_ptr<SceneHierarchyPanel>  mSceneHierarchyPanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -104,6 +106,7 @@ private:
     bool mShowPresetBrowser = true;
     bool mShowConsole       = false;
     bool mShowSetEditor     = false;
+    bool mShowSceneHierarchy = true;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;

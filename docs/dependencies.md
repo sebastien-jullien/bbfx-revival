@@ -535,3 +535,21 @@ Ce document analyse les dependances du projet **original 2006**. Le revival BBFx
 Build system : **CMake 3.20+** (remplace SCons). Compilateur : **MSVC 2022 (C++20)** ou GCC 11+. Voir `bbfx-revival/README.md` pour les instructions de build actuelles.
 
 *Document original etabli en mars 2026. Note v3.2.1 ajoutee en avril 2026. Sebastien Jullien.*
+
+---
+
+## Etat des dependances v3.2.2 (Avril 2026)
+
+Aucune nouvelle dependance ajoutee en v3.2.2. Stack inchangee depuis v3.2.0 :
+
+| Dependance | Version | Usage |
+|-----------|---------|-------|
+| OGRE | 14.5.2 | Rendu 3D, scene graph, materials |
+| SDL3 | 3.x | Input (clavier, souris, joystick), audio capture |
+| sol2 | 3.x | Bindings Lua↔C++ |
+| Lua | 5.4+ | Scripting, presets, REPL |
+| Boost.Graph | 1.84+ | DAG Animator |
+| Dear ImGui | docking | GUI Studio |
+| imgui-node-editor | 0.9+ | Node editor visuel |
+| nlohmann/json | 3.x | Serialisation projet |
+| libtheora/libogg | 1.x | Video Theora |

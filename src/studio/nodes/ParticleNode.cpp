@@ -69,7 +69,12 @@ void ParticleNode::update() {
 
 void ParticleNode::setEnabled(bool en) {
     AnimationNode::setEnabled(en);
-    if (mSceneNode) mSceneNode->setVisible(en);
+    if (mSceneNode) mSceneNode->setVisible(en && mUserVisible);
+}
+
+void ParticleNode::setUserVisible(bool v) {
+    AnimationNode::setUserVisible(v);
+    if (mSceneNode) mSceneNode->setVisible(v && mEnabled);
 }
 
 void ParticleNode::cleanup() {

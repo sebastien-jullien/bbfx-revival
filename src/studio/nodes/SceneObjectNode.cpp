@@ -27,6 +27,11 @@ SceneObjectNode::SceneObjectNode(const std::string& name, Ogre::SceneManager* sc
     visDef.boolVal = true;
     mSpec.addParam(visDef);
 
+    ParamDef parentDef;
+    parentDef.name = "parent_node"; parentDef.label = "Parent"; parentDef.type = ParamType::STRING;
+    parentDef.stringVal = "";
+    mSpec.addParam(parentDef);
+
     setParamSpec(&mSpec);
 
     // Animatable ports
@@ -59,9 +64,11 @@ void SceneObjectNode::createDefaultObject() {
     if (meshParam && !meshParam->stringVal.empty()) meshName = meshParam->stringVal;
     mCurrentMesh = meshName;
     try {
-        auto* entity = mScene->createEntity("sceneobj_ent_" + id, meshName);
+        std::string entityName = getName() + "_entity_" + id;
+        std::string snName = getName() + "_sn_" + id;
+        auto* entity = mScene->createEntity(entityName, meshName);
         mMovable = entity;
-        mSceneNode = mScene->getRootSceneNode()->createChildSceneNode("sceneobj_sn_" + id);
+        mSceneNode = mScene->getRootSceneNode()->createChildSceneNode(snName);
         mSceneNode->attachObject(entity);
         if (meshName == "geosphere4500.mesh" || meshName == "geosphere8000.mesh")
             mSceneNode->setScale(30.0f, 30.0f, 30.0f);
@@ -114,14 +121,22 @@ void SceneObjectNode::update() {
     }
 
     bool vis = in.at("visible")->getValue() >= 0.5f;
-    mSceneNode->setVisible(vis);
+    mSceneNode->setVisible(vis && mEnabled && mUserVisible);
 
     fireUpdate();
 }
 
 void SceneObjectNode::setEnabled(bool en) {
+    bool wasDisabled = !mEnabled;
     AnimationNode::setEnabled(en);
-    if (mSceneNode) mSceneNode->setVisible(en);
+    if (mSceneNode) mSceneNode->setVisible(en && mUserVisible);
+    // Re-apply current port values immediately so rotation/position resume
+    if (en && wasDisabled && mSceneNode) update();
+}
+
+void SceneObjectNode::setUserVisible(bool v) {
+    AnimationNode::setUserVisible(v);
+    if (mSceneNode) mSceneNode->setVisible(v && mEnabled);
 }
 
 void SceneObjectNode::cleanup() {

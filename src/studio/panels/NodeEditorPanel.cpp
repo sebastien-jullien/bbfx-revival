@@ -310,6 +310,42 @@ void NodeEditorPanel::render() {
         ImGui::SameLine();
         ImGui::TextDisabled("  %s", name.c_str());
 
+        // FX badge for SceneObjectNode — show count of connected FX nodes
+        if (nd.typeName == "SceneObjectNode" && node) {
+            int fxCount = 0;
+            std::string fxTooltip;
+            auto& outputs = node->getOutputs();
+            auto entityIt = outputs.find("entity");
+            if (entityIt != outputs.end()) {
+                auto* animator = Animator::instance();
+                if (animator) {
+                    for (auto& n2 : animator->getRegisteredNodeNames()) {
+                        auto* other = animator->getRegisteredNode(n2);
+                        if (!other || other == node) continue;
+                        auto& otherInputs = other->getInputs();
+                        auto otherEntityIt = otherInputs.find("entity");
+                        if (otherEntityIt != otherInputs.end()) {
+                            if (other->getParamSpec()) {
+                                auto* te = other->getParamSpec()->getParam("target_entity");
+                                if (te && te->stringVal == name) {
+                                    fxCount++;
+                                    if (!fxTooltip.empty()) fxTooltip += "\n";
+                                    fxTooltip += n2;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (fxCount > 0) {
+                ImGui::SameLine();
+                ImGui::TextColored({0.5f, 1.0f, 0.5f, 1.0f}, "FX:%d", fxCount);
+                if (ImGui::IsItemHovered() && !fxTooltip.empty()) {
+                    ImGui::SetTooltip("%s", fxTooltip.c_str());
+                }
+            }
+        }
+
         // Input pins (left)
         for (size_t i = 0; i < nd.inputPins.size(); ++i) {
             ned::BeginPin(nd.inputPins[i], ned::PinKind::Input);
@@ -533,6 +569,26 @@ void NodeEditorPanel::handleLinkCreation() {
                     if (nd.inputPins[i] == endPinId) {
                         toNode = name;
                         toPort = nd.inputNames[i];
+                    }
+                }
+            }
+
+            // Handle reverse drag direction (input → output)
+            if (fromNode.empty() || toNode.empty()) {
+                fromNode.clear(); fromPort.clear();
+                toNode.clear(); toPort.clear();
+                for (auto& [name, nd] : mNodes) {
+                    for (size_t i = 0; i < nd.outputPins.size(); ++i) {
+                        if (nd.outputPins[i] == endPinId) {
+                            fromNode = name;
+                            fromPort = nd.outputNames[i];
+                        }
+                    }
+                    for (size_t i = 0; i < nd.inputPins.size(); ++i) {
+                        if (nd.inputPins[i] == startPinId) {
+                            toNode = name;
+                            toPort = nd.inputNames[i];
+                        }
                     }
                 }
             }

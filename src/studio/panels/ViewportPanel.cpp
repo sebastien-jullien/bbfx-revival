@@ -1,9 +1,12 @@
 #include "ViewportPanel.h"
 #include "../../core/Animator.h"
 #include "../nodes/SceneObjectNode.h"
+#include "../ResourceEnumerator.h"
+#include "../commands/NodeCommands.h"
 #include <imgui.h>
 #include <OgreRoot.h>
 #include <OgreFrameListener.h>
+#include <OgrePlane.h>
 #include <SDL3/SDL.h>
 #include <cmath>
 
@@ -289,6 +292,135 @@ void ViewportPanel::render() {
         }
     }
 
+    // ── Drag-drop target ──────────────────────────────────────────────────────
+    if (ImGui::BeginDragDropTarget()) {
+        // Accept mesh drag from Preset Browser
+        if (auto* payload = ImGui::AcceptDragDropPayload("MESH_NAME")) {
+            std::string meshName(static_cast<const char*>(payload->Data));
+            ImVec2 mousePos = ImGui::GetMousePos();
+            ImVec2 rectMin = ImGui::GetItemRectMin();
+            ImVec2 rectMax = ImGui::GetItemRectMax();
+            float w = rectMax.x - rectMin.x;
+            float h = rectMax.y - rectMin.y;
+            float nx = (w > 0) ? (mousePos.x - rectMin.x) / w : 0.5f;
+            float ny = (h > 0) ? (mousePos.y - rectMin.y) / h : 0.5f;
+            auto dropPos = viewportDropPosition(nx, ny);
+            if (mCreateSceneObjectFn)
+                mCreateSceneObjectFn(meshName, dropPos.x, dropPos.y, dropPos.z);
+        }
+        // Accept preset drag — apply FX if object selected, else pass through
+        if (auto* payload = ImGui::AcceptDragDropPayload("PRESET_NAME")) {
+            std::string presetName(static_cast<const char*>(payload->Data));
+            if (mPicker && !mPicker->getSelectedNodeName().empty() && mApplyFxFn) {
+                mApplyFxFn(presetName, mPicker->getSelectedNodeName());
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    // ── Viewport context menu ────────────────────────────────────────────────
+    // Right-click on selected object → object context menu
+    // Right-click in empty space → "Add Object" menu
+    if (mIsHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !mFpsCaptured) {
+        if (mPicker) {
+            ImVec2 mousePos = ImGui::GetMousePos();
+            ImVec2 rectMin = ImGui::GetItemRectMin();
+            ImVec2 rectMax = ImGui::GetItemRectMax();
+            float w = rectMax.x - rectMin.x;
+            float h = rectMax.y - rectMin.y;
+            float nx = (w > 0) ? (mousePos.x - rectMin.x) / w : 0.5f;
+            float ny = (h > 0) ? (mousePos.y - rectMin.y) / h : 0.5f;
+
+            auto* hit = mPicker->pick(nx, ny);
+            if (hit && !mPicker->getSelectedNodeName().empty()) {
+                // Check if the hit is the currently selected object
+                std::string hitDag = mPicker->getSelectedNodeName();
+                auto* hitNode = Animator::instance()->getRegisteredNode(hitDag);
+                if (hitNode) {
+                    ImGui::OpenPopup("ObjectContextMenu");
+                }
+            } else {
+                ImGui::OpenPopup("ViewportAddMenu");
+            }
+        }
+    }
+
+    if (ImGui::BeginPopup("ObjectContextMenu")) {
+        std::string selectedName = mPicker ? mPicker->getSelectedNodeName() : "";
+        auto* selectedNode = selectedName.empty() ? nullptr : Animator::instance()->getRegisteredNode(selectedName);
+
+        if (ImGui::BeginMenu("Apply FX")) {
+            for (auto& fxType : {"PerlinFxNode", "ShaderFxNode", "WaveVertexShader"}) {
+                if (ImGui::MenuItem(fxType)) {
+                    if (mApplyFxFn && !selectedName.empty())
+                        mApplyFxFn(fxType, selectedName);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+            if (mDuplicateFn && !selectedName.empty())
+                mDuplicateFn(selectedName);
+        }
+        if (ImGui::MenuItem("Delete", "Del")) {
+            if (!selectedName.empty())
+                gPendingDeletes.push_back(selectedName);
+        }
+        if (ImGui::MenuItem("Focus", "F")) {
+            if (selectedNode && mCameraController) {
+                auto* soNode = dynamic_cast<SceneObjectNode*>(selectedNode);
+                if (soNode && soNode->getSceneNode())
+                    mCameraController->focusOn(soNode->getSceneNode());
+            }
+        }
+        ImGui::Separator();
+        if (selectedNode) {
+            bool vis = selectedNode->isUserVisible();
+            if (ImGui::MenuItem(vis ? "Hide" : "Show", "H")) {
+                selectedNode->setUserVisible(!vis);
+            }
+            bool locked = selectedNode->isLocked();
+            if (ImGui::MenuItem(locked ? "Unlock" : "Lock")) {
+                selectedNode->setLocked(!locked);
+            }
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("ViewportAddMenu")) {
+        if (ImGui::BeginMenu("Add Object")) {
+            auto meshes = ResourceEnumerator::listMeshes();
+            for (auto& mesh : meshes) {
+                if (ImGui::MenuItem(mesh.c_str())) {
+                    auto dropPos = viewportDropPosition(0.5f, 0.5f);
+                    if (mCreateSceneObjectFn)
+                        mCreateSceneObjectFn(mesh, dropPos.x, dropPos.y, dropPos.z);
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
+
+    // ── Keyboard shortcuts (viewport focused + object selected) ──────────────
+    if (mIsHovered && mPicker && !mPicker->getSelectedNodeName().empty() && !mFpsCaptured) {
+        auto& io = ImGui::GetIO();
+        // Ctrl+D → Duplicate
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+            if (mDuplicateFn) mDuplicateFn(mPicker->getSelectedNodeName());
+        }
+        // Delete → Delete node
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+            gPendingDeletes.push_back(mPicker->getSelectedNodeName());
+        }
+        // H → Toggle visibility
+        if (ImGui::IsKeyPressed(ImGuiKey_H) && !io.KeyCtrl && !io.KeyAlt) {
+            auto* node = Animator::instance()->getRegisteredNode(mPicker->getSelectedNodeName());
+            if (node) node->setUserVisible(!node->isUserVisible());
+        }
+    }
+
     // ── Overlay ───────────────────────────────────────────────────────────────
     if (mShowOverlay) {
         ImVec2 overlayPos = ImGui::GetItemRectMin();
@@ -309,6 +441,28 @@ void ViewportPanel::render() {
     }
 
     ImGui::End();
+}
+
+Ogre::Vector3 ViewportPanel::viewportDropPosition(float nx, float ny) const {
+    auto* sm = mEngine->getSceneManager();
+    if (!sm) return Ogre::Vector3::ZERO;
+    auto* cam = sm->getCamera("MainCamera");
+    if (!cam) return Ogre::Vector3::ZERO;
+
+    auto ray = cam->getCameraToViewportRay(nx, ny);
+    Ogre::Plane xzPlane(Ogre::Vector3::UNIT_Y, 0);
+    auto result = ray.intersects(xzPlane);
+    if (result.first && result.second > 0 && result.second < 1000.0f) {
+        return ray.getPoint(result.second);
+    }
+    // Fallback: 10 units in front of camera, Y=0
+    auto* camNode = cam->getParentSceneNode();
+    if (camNode) {
+        auto pos = camNode->_getDerivedPosition() + camNode->_getDerivedOrientation() * Ogre::Vector3(0, 0, -10.0f);
+        pos.y = 0;
+        return pos;
+    }
+    return Ogre::Vector3::ZERO;
 }
 
 } // namespace bbfx

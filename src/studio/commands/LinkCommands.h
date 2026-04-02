@@ -14,6 +14,10 @@ public:
     std::string description() const override;
 private:
     std::string mFromNode, mFromPort, mToNode, mToPort;
+    // Auto entity→entity link (created automatically when linking data ports
+    // between a SceneObjectNode and a node with entity input)
+    std::string mAutoEntityFrom, mAutoEntityTo;
+    bool mAutoEntityCreated = false;
 };
 
 class DeleteLinkCommand : public Command {

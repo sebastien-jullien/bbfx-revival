@@ -23,13 +23,20 @@ public:
     void addInput(const string& name);
     void addOutput(const string& name);
     void update() override;
+    void onLinkChanged() override;
     void setUpdateFunction(sol::function fn) { mUpdateHook = std::move(fn); }
     void setSource(const std::string& src) { mSource = src; }
     const std::string& getSource() const { return mSource; }
     std::string getTypeName() const override { return "LuaAnimationNode"; }
+    /// Returns the name of the linked target SceneObjectNode (empty if none).
+    const std::string& getTargetNodeName() const { return mTargetNodeName; }
+    /// Resolves target_entity → SceneObjectNode → OGRE SceneNode (nullptr if unlinked).
+    Ogre::SceneNode* getTargetSceneNode() const;
 protected:
     sol::function mUpdateHook;
     std::string mSource; // Lua source code (for serialization)
+    ParamSpec mSpec;
+    std::string mTargetNodeName;
 };
 
 class AnimableValuePort : public AnimationPort {

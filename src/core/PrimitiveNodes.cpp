@@ -1,11 +1,23 @@
 #include "PrimitiveNodes.h"
+#include "Animator.h"
+#include "../studio/nodes/SceneObjectNode.h"
 
 namespace bbfx {
 
 // ── LuaAnimationNode ────────────────────────────────────────────────────────
 
 LuaAnimationNode::LuaAnimationNode(const string& name, sol::function update)
-    : AnimationNode(name), mUpdateHook(std::move(update)) {}
+    : AnimationNode(name), mUpdateHook(std::move(update)) {
+    // Entity input port — visual anchor for Mesh→LuaAnimation linking
+    AnimationNode::addInput(new AnimationPort("entity", 0.0f));
+
+    // ParamSpec with target_entity (same pattern as FX nodes)
+    ParamDef targetDef;
+    targetDef.name = "target_entity";
+    targetDef.type = ParamType::STRING;
+    mSpec.addParam(targetDef);
+    setParamSpec(&mSpec);
+}
 
 LuaAnimationNode::~LuaAnimationNode() = default;
 
@@ -25,6 +37,21 @@ void LuaAnimationNode::update() {
             cerr << "LuaAnimationNode update error: " << err.what() << endl;
         }
     }
+}
+
+void LuaAnimationNode::onLinkChanged() {
+    auto* td = mSpec.getParam("target_entity");
+    mTargetNodeName = td ? td->stringVal : "";
+}
+
+Ogre::SceneNode* LuaAnimationNode::getTargetSceneNode() const {
+    if (mTargetNodeName.empty()) return nullptr;
+    auto* animator = Animator::instance();
+    if (!animator) return nullptr;
+    auto* node = animator->getRegisteredNode(mTargetNodeName);
+    if (!node) return nullptr;
+    auto* sceneObj = dynamic_cast<SceneObjectNode*>(node);
+    return sceneObj ? sceneObj->getSceneNode() : nullptr;
 }
 
 // ── AnimableValuePort ───────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ public:
     void update() override;
     void cleanup() override;
     void setEnabled(bool en) override;
+    void setUserVisible(bool v) override;
     std::string getTypeName() const override { return "SceneObjectNode"; }
     Ogre::SceneNode* getSceneNode() const { return mSceneNode; }
     Ogre::Entity* getEntity() const { return dynamic_cast<Ogre::Entity*>(mMovable); }

@@ -1,4 +1,4 @@
-# BBFx Revival — v3.2.1
+# BBFx Revival — v3.2.2
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -8,19 +8,11 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 
 **v3.1 "BBFx Studio++"** completes and stabilizes the Studio: all stubs wired, BPM-to-DAG sync (beat/beatFrac ports), scene/project separation, Lua source serialization in `.bbfx-project`, CLI arguments (`--default`, `--reset`, `--fullscreen`), native Windows file dialogs, console REPL, full keyboard shortcuts, undo/redo (Command pattern), node duplication, bookmarks, and flow animation on links.
 
-**v3.2 "BBFx Studio Content"** makes all presets functional and the Studio usable as a creative tool:
-- **41 presets** with visible effects (Geometry, Color, PostProcess, Particle, Camera, Composition)
-- **8 procedural fragment shaders** (plasma, voronoi, mandelbrot, truchet, flowfield, tunnel, reaction_diffusion, sphere_trace) applied to meshes via ShaderFxNode
-- **13 BBFx compositors** wrapping existing GLSL shaders for post-processing
-- **Enable/Disable nodes** with visual [OFF] feedback — hides OGRE objects (mesh, light, particles)
-- **Preset browser** organized by category in collapsible accordions
-- **Demo scene as regular DAG nodes** (SceneObjectNode + LightNode), fully deletable and disableable
-- **LightNode** with dynamic type (point/directional/spot) and color from Inspector color picker
-- **ColorShiftNode** with RTSS invalidation for visible color changes on textured meshes
-- **Camera restore** on delete (own SceneNode, detach/reattach pattern)
-- **Particle rendering** in Studio (manual `_update()` call for RenderTexture pipeline)
-- **Performance Mode** flip fix, viewport resize on return to Design Mode
-- **Timeline** without scrollbar, Set Editor hidden by default
+**v3.2 "BBFx Studio Content"** makes all presets functional and the Studio usable as a creative tool: 41 presets across 6 categories, 8 procedural fragment shaders, 13 BBFx compositors, ParamSpec system with auto-generated Inspector widgets, enable/disable nodes with visual [OFF] feedback, preset browser organized by category, and 13 new node types (SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Mapper, Mixer, Splitter, Trigger, BeatTrigger).
+
+**v3.2.1 "Interactive Viewport"** adds direct manipulation in the 3D viewport: orbit/pan/zoom camera controller (Alt+LMB/MMB/scroll), ray-query object picking with bidirectional selection sync, translation gizmo with axis constraints and undo, procedural infinite grid, viewport toolbar (Select/Translate modes via Q/W), safe deletion with full OGRE cleanup, mesh-to-FX auto-linking, and "Use Editor Camera" toggle.
+
+**v3.2.2 "Multi-Object Scene"** transforms the Studio from a single-object editor into a multi-object composition engine: Scene Hierarchy panel (F8) with visibility/lock toggles, Blender-style intelligent naming (ogrehead→Ogre with auto-increment), right-click context menus for object creation and FX application, drag-drop mesh/FX from browser to viewport, object duplication (Ctrl+D), parent-child hierarchy with relative transforms, cascade FX (multiple FX on one object), unified entity linking for all node types, and dynamic target resolution.
 
 ---
 
@@ -96,7 +88,7 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **CLI arguments** — `--default`, `--reset`, `--clear`, `--fullscreen`
 - **Native Windows file dialogs** — open/save via OS dialogs
 - **Console REPL** — `graph`, `ports`, `set`, `help` commands
-- **Full keyboard shortcuts** — F1-F7, Space, Ctrl+E/N/O
+- **Full keyboard shortcuts** — F1-F8, Space, Ctrl+E/N/O
 - **Undo/redo** — Command pattern, Ctrl+Z / Ctrl+Y
 - **Node duplication** — Ctrl+D
 - **Bookmarks** — Ctrl+1-9
@@ -131,6 +123,19 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **"Use Editor Camera" menu** — toggle between editor orbit camera and DAG-driven CameraNode
 - **LMB confirm in keyboard mode** — left mouse button confirms node placement in keyboard navigation mode
 
+### BBFx Studio Multi-Object Scene (v3.2.2)
+- **SceneHierarchyPanel** — dockable panel (F8) listing all scene objects with type prefixes ([M]esh, [L]ight, [P]article, [C]amera), visibility eye toggle, lock padlock toggle, context menu (Rename, Delete, Focus, Hide, Lock), drag-drop reparenting
+- **SceneObjectNamer** — intelligent Blender-style naming from mesh files (ogrehead→Ogre, geosphere4500→Geosphere), auto-increment (.001, .002)
+- **Viewport context menus** — right-click in void: "Add Object" with mesh list; right-click on object: Apply FX, Duplicate, Delete, Focus, Hide, Lock, Rename
+- **Drag-drop mesh/FX** — drag mesh from browser to viewport creates SceneObjectNode at raycast position; drag FX preset onto selected object auto-creates and auto-connects
+- **Object duplication** — Ctrl+D duplicates selected SceneObjectNode with all parameters and +2 position offset
+- **Per-object visibility/lock** — `mUserVisible` and `mLocked` flags on AnimationNode; visibility = AND of mEnabled, mUserVisible, port visible; lock prevents picking and gizmo
+- **Parent-child hierarchy** — ParamSpec `parent_node`, OGRE reparenting with world→local transform conversion, ReparentNodeCommand with undo
+- **FX badge** — SceneObjectNode shows "FX: N" in node editor with tooltip listing connected FX names
+- **Entity link unifie** — auto-creation of entity→entity links on data port connections (CreateLinkCommand, Debugger, ProjectSerializer with Lua source introspection); `getTargetSceneNode()` Lua API for dynamic target resolution; moving entity link instantly changes animation target
+- **Cascade FX** — multiple FX nodes can target the same SceneObjectNode simultaneously
+- **dbg.test() 11/11 PASS** — fix timing deferred creates, all tests green
+
 ---
 
 ## Architecture
@@ -154,7 +159,8 @@ C++ core
        ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, ...
        ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf
        ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
-       ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform commands)
+       ├── Hierarchy  -- SceneHierarchyPanel (v3.2.2)
+       ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform/Scene/Reparent commands)
        ├── Generators -- MeshGenerator (procedural meshes)
        └── Project    -- ProjectSerializer, ExportDialog
     |
@@ -181,9 +187,9 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/record/` | InputRecorder, InputPlayer, VideoExporter |
 | `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
 | `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode |
-| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel |
+| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel |
 | `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
-| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands |
+| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands |
 | `src/studio/generators/` | MeshGenerator (plane, sphere, cube, cylinder, torus, cone) |
 | `src/studio/project/` | ProjectSerializer, ExportDialog |
 | `src/bindings/` | sol2 bindings for all BBFx types |
@@ -362,14 +368,14 @@ ctest --preset windows-release
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2.1), all modules, Lua API, design decisions
+- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2.2), all modules, Lua API, design decisions
 - [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo and Studio usage reference
 
 ---
 
 ## History
 
-BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline.
+BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), and v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX.
 
 ---
 

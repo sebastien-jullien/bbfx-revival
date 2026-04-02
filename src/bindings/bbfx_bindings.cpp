@@ -184,6 +184,8 @@ void register_bbfx_bindings(sol::state& lua) {
         "addOutput", &LuaAnimationNode::addOutput,
         "update", &LuaAnimationNode::update,
         "setUpdateFunction", &LuaAnimationNode::setUpdateFunction,
+        "getTargetNodeName", &LuaAnimationNode::getTargetNodeName,
+        "getTargetSceneNode", &LuaAnimationNode::getTargetSceneNode,
         sol::base_classes, sol::bases<AnimationNode>()
     );
     bbfx["LuaAnimationNode"] = lua["bbfx_LuaAnimationNode"];
