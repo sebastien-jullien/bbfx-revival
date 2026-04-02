@@ -3,6 +3,7 @@
 namespace bbfx {
 
 static int sCamCounter = 0;
+bool CameraNode::sEditorCameraActive = true;
 
 CameraNode::CameraNode(const std::string& name, Ogre::SceneManager* scene)
     : AnimationNode(name), mScene(scene) {
@@ -77,20 +78,22 @@ void CameraNode::update() {
     auto* mp = mSpec.getParam("mode");
     if (mp && !mp->stringVal.empty()) mode = mp->stringVal;
 
-    // Orbit around origin using our own node
+    // Compute orbit values (always, for DAG consistency)
     float angle = mTime * speed;
     float x = radius * std::sin(angle);
     float z = radius * std::cos(angle);
     mOwnNode->setPosition(x, height, z);
     mOwnNode->lookAt(Ogre::Vector3(0, 0, 0), Ogre::Node::TS_WORLD);
 
-    // Attach camera to our node (detaches from demo node)
-    if (mCamera->getParentSceneNode() != mOwnNode) {
-        if (mCamera->getParentSceneNode())
-            mCamera->getParentSceneNode()->detachObject(mCamera);
-        mOwnNode->attachObject(mCamera);
+    // Only attach camera and modify FOV when editor camera is NOT active
+    if (!sEditorCameraActive) {
+        if (mCamera->getParentSceneNode() != mOwnNode) {
+            if (mCamera->getParentSceneNode())
+                mCamera->getParentSceneNode()->detachObject(mCamera);
+            mOwnNode->attachObject(mCamera);
+        }
+        mCamera->setFOVy(Ogre::Degree(fov));
     }
-    mCamera->setFOVy(Ogre::Degree(fov));
 
     fireUpdate();
 }

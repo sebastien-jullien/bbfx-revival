@@ -60,6 +60,7 @@ void CreateNodeCommand::undo() {
     if (node) {
         animator->removeNode(node);
         try { node->cleanup(); } catch (...) {}
+        delete node;
     }
 }
 
@@ -86,7 +87,18 @@ void DeleteNodeCommand::execute() {
         mSavedInputs.push_back({name, port->getValue()});
     }
 
+    // Save ParamSpec values (mesh_file, material, target_entity, etc.)
+    mSavedParams.clear();
+    if (node->getParamSpec()) {
+        mSavedParams = node->getParamSpec()->getParams();
+    }
+
     mSavedLinks.clear();
+    auto allLinks = animator->getLinks();
+    for (auto& lk : allLinks) {
+        if (lk.fromNode == mNodeName || lk.toNode == mNodeName)
+            mSavedLinks.push_back({lk.fromNode, lk.fromPort, lk.toNode, lk.toPort});
+    }
 
     // Save node position — use try/catch since ned context may not be active
     if (sNodeEditorPanel) {
@@ -110,6 +122,14 @@ void DeleteNodeCommand::undo() {
     // Re-create the node
     auto* node = NodeTypeRegistry::instance().create(mTypeName, mNodeName, mLua);
     if (!node) return;
+
+    // Restore ParamSpec values (mesh_file, material, target_entity, etc.)
+    if (node->getParamSpec() && !mSavedParams.empty()) {
+        for (auto& saved : mSavedParams) {
+            auto* p = node->getParamSpec()->getParam(saved.name);
+            if (p) *p = saved;
+        }
+    }
 
     // Restore input port values
     for (auto& sp : mSavedInputs) {

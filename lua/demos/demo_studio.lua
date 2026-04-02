@@ -11,11 +11,7 @@ local scene = engine:getSceneManager()
 -- Ambient light (scene-level, not a node)
 scene:setAmbientLight(ColourValue(0.3, 0.3, 0.35))
 
--- Camera (required for rendering)
-local cam = scene:getCamera("MainCamera")
-local camNode = scene:getRootSceneNode():createChildSceneNode("CameraNode")
-camNode:setPosition(Vector3(0, 25, 150))
-camNode:lookAt(Vector3(0, 0, 0), 1)  -- TS_WORLD
-camNode:attachObject(cam)
+-- Camera: managed by ViewportCameraController in Studio mode.
+-- No manual attach needed — the controller handles position and orientation.
 
 print("[demo_studio] Minimal scene ready. Content will be loaded from project.")

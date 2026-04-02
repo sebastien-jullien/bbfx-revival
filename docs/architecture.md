@@ -35,6 +35,7 @@
 22. [BBFx Studio (v3.0)](#22-bbfx-studio-v30)
 23. [BBFx Studio++ (v3.1)](#23-bbfx-studio-v31)
 24. [BBFx Studio Content (v3.2)](#24-bbfx-studio-content-v32)
+25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
 
 ---
 
@@ -1515,3 +1516,120 @@ Le format `.bbfx-project` v3.2 ajoute :
 | Iterations | 155 (I-307 → I-461) |
 
 *Section v3.2 ajoutee en avril 2026. Sebastien Jullien.*
+
+---
+
+## 25. BBFx Studio Interactive Viewport (v3.2.1)
+
+v3.2.1 "Interactive Viewport" ajoute un sous-systeme viewport complet permettant l'interaction directe avec la scene 3D depuis le Studio : camera libre, selection par clic, gizmo de transformation, grille, toolbar, suppression sure et liaison Mesh→FX.
+
+### Table des matieres (ToC)
+
+25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
+
+Ajouter a la ToC principale, section **BBFx Revival — v3.x (2026)** :
+
+```
+25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
+```
+
+### Sous-systeme Viewport (`src/studio/viewport/`)
+
+Nouveau dossier dedie, 5 classes :
+
+| Classe | Fichiers | Role |
+|--------|----------|------|
+| `ViewportCameraController` | .h/.cpp | Camera orbite (Alt+LMB), pan (Alt+MMB), zoom (scroll), modes Editor/DAGDriven, reset (F) |
+| `ViewportPicker` | .h/.cpp | Ray query OGRE (`RaySceneQuery`), selection bidirectionnelle NodeEditor↔Viewport, highlight wireframe orange |
+| `ViewportGizmo` | .h/.cpp | Gizmo XYZ (`ManualObject`, fleches + sphere centre), drag axis-constrained, calcul intersection rayon/axe |
+| `ViewportGrid` | .h/.cpp | Grille procedurale infinie (`ManualObject`, 200 lignes), axes colores (X=rouge, Z=bleu), plan Y=0 |
+| `ViewportToolbar` | .h/.cpp | Barre ImGui en overlay (Select=Q / Translate=W), callback mode change |
+
+### Highlight de selection (wireframe overlay)
+
+Approche **clone Entity** : un second Entity utilisant le meme mesh est cree avec le material `bbfx/selection_highlight` et attache au meme SceneNode. Cela preserve le rendu solide original tout en ajoutant le wireframe par-dessus.
+
+```
+Entity original (solid)  ←  SceneNode  →  Entity clone (wireframe overlay)
+     mesh.mesh                                   mesh.mesh
+     material original                           bbfx/selection_highlight
+     render queue: default                       render queue: OVERLAY-1
+     query flags: SCENE_QUERY_MASK               query flags: 0 (non pickable)
+```
+
+**Material `bbfx/selection_highlight`** : cree programmatiquement (pas de fichier .material). GPU programs GLSL 330 inline via `setSource()` :
+- Vertex shader : passthrough `gl_Position = worldViewProj * vertex`
+- Fragment shader : couleur fixe `vec4(1.0, 0.5, 0.0, 1.0)` (orange)
+- Pass : `PM_WIREFRAME`, depth check on, depth write off, `CULL_NONE`, depth bias 1.0
+
+**Note GL3+** : le renderer OGRE GL3+ ne supporte PAS le fixed-function pipeline (`Fixed function pipeline: no`). Les appels `setLightingEnabled()`, `setSelfIllumination()`, `setDiffuse()` sont ignores par RTSS. Les shaders GLSL explicites sont obligatoires pour controler la couleur.
+
+### Suppression sure (Safe Deletion)
+
+Lot F, EPIC-93. `DeleteNodeCommand` effectue un cleanup complet avant suppression :
+
+1. **Confirmation** : dialogue ImGui "Delete node X?" avec boutons Confirm/Cancel
+2. **Deselection** : `ViewportPicker::deselect()` si le noeud est selectionne
+3. **Cleanup OGRE** : detach Entity/Light/ParticleSystem du SceneNode, destroy, destroy SceneNode
+4. **Cleanup DAG** : unlink tous les ports, retirer de l'Animator
+5. **Undo** : stocke l'etat complet du noeud, restauration possible via Ctrl+Z
+
+Types geres : SceneObjectNode (Entity + Mesh), LightNode (Light OGRE), ParticleNode (ParticleSystem), CameraNode (detach/reattach camera).
+
+### Liaison Mesh→FX (EPIC-94)
+
+Lot G. Connexion automatique entre un SceneObjectNode et un PerlinFxNode ou WaveVertexShader :
+
+1. **Detection** : quand un lien est cree entre un SceneObjectNode et un FxNode, le systeme detecte le type
+2. **Resolution** : le nom de l'Entity OGRE est extrait du SceneObjectNode (`getEntityName()`)
+3. **Injection** : le nom est passe au FxNode qui reconfigure son mesh cible
+4. **LinkMeshFxCommand** : commande undo/redo dediee, stocke l'ancien target pour rollback
+
+### Commandes ajoutees
+
+| Commande | Fichier | Role |
+|----------|---------|------|
+| `MoveNodeCommand` | TransformCommands.h/.cpp | Undo/redo gizmo drag (before/after `Vector3`) |
+| `DeleteNodeCommand` | NodeCommands.h/.cpp | Suppression sure avec cleanup OGRE complet |
+| `LinkMeshFxCommand` | LinkCommands.h/.cpp | Liaison Mesh→FX avec undo |
+
+### Modifications panels
+
+| Panel | Modifications v3.2.1 |
+|-------|----------------------|
+| ViewportPanel | Integration CameraController, Picker, Gizmo, Grid, Toolbar; detection hover/input ImGui; selection bidirectionnelle |
+| NodeEditorPanel | Callback `onSelectionChanged` → `ViewportPicker::selectByDAGName()` pour highlight dans viewport |
+| InspectorPanel | Affiche les infos du noeud selectionne dans le viewport |
+| StudioApp | Menu "Use Editor Camera" (toggle Editor↔DAGDriven), raccourci LMB confirm en keyboard mode |
+
+### Integration bidirectionnelle de la selection
+
+```
+Clic viewport          NodeEditor clic noeud
+      |                         |
+ViewportPicker::pick()   NodeEditorPanel::onSelectionChanged()
+      |                         |
+      v                         v
+select(movable)          selectByDAGName(dagName)
+      |                         |
+      v                         v
+applyHighlight()         applyHighlight()
+findDAGNodeForEntity()   (pas de callback → evite boucle)
+mSelectionCallback()
+      |
+      v
+NodeEditorPanel::selectNode()
+```
+
+Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infinies (NodeEditor → Viewport → NodeEditor → ...).
+
+### Metriques v3.2.1
+
+| Indicateur | Valeur |
+|---|---|
+| Nouvelles classes C++ | 5 (viewport/) + 1 (TransformCommands) |
+| Iterations | 44 (I-413 → I-456) |
+| Lots | A (Camera), B (Picking/Selection), C (Gizmo), D (Grille), E (Toolbar), F (Suppression), G (Mesh→FX) |
+| Epics | EPIC-88 → EPIC-94 (7 epics) |
+
+*Section v3.2.1 ajoutee en avril 2026. Sebastien Jullien.*

@@ -10,6 +10,11 @@ public:
     void update() override;
     void cleanup() override;
     std::string getTypeName() const override { return "CameraNode"; }
+
+    /// When true, the editor camera is active and CameraNode should not
+    /// modify the camera position/orientation (but still computes values).
+    static bool sEditorCameraActive;
+
 private:
     Ogre::SceneManager* mScene;
     Ogre::Camera* mCamera = nullptr;

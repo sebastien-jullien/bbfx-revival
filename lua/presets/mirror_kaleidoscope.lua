@@ -12,5 +12,18 @@ return {
         ParamSpec.float("max_iter", 50.0, {min=10, max=500, label="Max Iterations"}),
         ParamSpec.float("color_speed", 1.0, {min=0, max=10, label="Color Speed"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

@@ -20,6 +20,8 @@ public:
     void setEnabled(bool en) override;
     std::string getTypeName() const override { return "SceneObjectNode"; }
     Ogre::SceneNode* getSceneNode() const { return mSceneNode; }
+    Ogre::Entity* getEntity() const { return dynamic_cast<Ogre::Entity*>(mMovable); }
+    std::string getMeshName() const { return mCurrentMesh; }
 
 private:
     Ogre::SceneManager* mScene;

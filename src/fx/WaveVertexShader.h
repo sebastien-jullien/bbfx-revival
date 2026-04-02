@@ -2,6 +2,7 @@
 
 #include "SoftwareVertexShader.h"
 #include "../core/AnimationNode.h"
+#include "../core/ParamSpec.h"
 #include <vector>
 
 namespace bbfx {
@@ -14,7 +15,9 @@ public:
     virtual ~WaveVertexShader();
     void renderOneFrame(Real dt) override;
     void update() override;
+    void setEnabled(bool en) override;
     void cleanup() override;
+    void onLinkChanged() override;
 
     void setStudioNames(const std::string& entName, const std::string& snName) {
         mStudioEntityName = entName;
@@ -48,6 +51,12 @@ protected:
     bool mEntityCreated = false;
 
     void createDeferredEntity();
+    void resolveTarget();
+    void setFxVisible(bool vis);
+    class SceneObjectNode* findTargetSceneObj();
+
+    ParamSpec mSpec;
+    std::string mTargetNodeName;
 
     void _applyWave(VertexData* data, const CpuMeshData& cpuData);
 };

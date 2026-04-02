@@ -41,6 +41,9 @@ SceneObjectNode::SceneObjectNode(const std::string& name, Ogre::SceneManager* sc
     addInput(new AnimationPort("rotation.z", 0.0f));
     addInput(new AnimationPort("visible", 1.0f));
 
+    // Entity output — used as visual link anchor for FX nodes
+    addOutput(new AnimationPort("entity", 0.0f));
+
     createDefaultObject();
 }
 

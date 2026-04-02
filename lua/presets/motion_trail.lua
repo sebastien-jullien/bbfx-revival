@@ -9,5 +9,18 @@ return {
         ParamSpec.float("feed_rate", 0.055, {min=0.01, max=0.1, label="Feed Rate"}),
         ParamSpec.float("kill_rate", 0.062, {min=0.01, max=0.1, label="Kill Rate"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/AnimationNode.h"
+#include "../core/ParamSpec.h"
 #include "PerlinVertexShader.h"
 #include <memory>
 
@@ -11,10 +12,12 @@ public:
     PerlinFxNode(const string& meshName, const string& cloneName);
     virtual ~PerlinFxNode();
     void update() override;
+    void setEnabled(bool en) override;
     std::string getTypeName() const override { return "PerlinFxNode"; }
     void enable();
     void disable();
     void cleanup() override;
+    void onLinkChanged() override;
 
     /// Set by the Studio factory so cleanup() can destroy the OGRE objects
     void setStudioSceneNode(const std::string& entityName, const std::string& sceneNodeName) {
@@ -31,6 +34,12 @@ private:
     std::string mStudioSceneNodeName;
     std::string mCloneMeshName;
     bool mEntityCreated = false;
+    ParamSpec mSpec;
+    std::string mTargetNodeName;
+
+    void resolveTarget();
+    void setFxVisible(bool vis);
+    class SceneObjectNode* findTargetSceneObj();
 };
 
 } // namespace bbfx

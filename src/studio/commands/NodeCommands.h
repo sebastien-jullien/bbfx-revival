@@ -1,11 +1,10 @@
 #pragma once
 
 #include "CommandManager.h"
+#include "../../core/ParamSpec.h"
 #include <string>
 #include <vector>
 #include <sol/forward.hpp>
-
-#include <vector>
 
 namespace bbfx {
 
@@ -45,6 +44,7 @@ private:
     std::vector<SavedPort> mSavedInputs;
     struct SavedLink { std::string fromNode, fromPort, toNode, toPort; };
     std::vector<SavedLink> mSavedLinks;
+    std::vector<ParamDef> mSavedParams;
     float mSavedPosX = 0, mSavedPosY = 0;
     bool mHasSavedPos = false;
 };

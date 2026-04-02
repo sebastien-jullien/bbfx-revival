@@ -3,11 +3,14 @@
 #include "NodeTypeRegistry.h"
 #include "commands/CommandManager.h"
 #include "commands/NodeCommands.h"
+#include "commands/LinkCommands.h"
 #include "../core/Animator.h"
 #include "../core/AnimationNode.h"
 #include "../core/AnimationPort.h"
 #include "../core/PrimitiveNodes.h"
 #include "../core/Engine.h"
+#include "nodes/SceneObjectNode.h"
+#include "panels/ViewportPanel.h"
 
 #include <iostream>
 #include <filesystem>
@@ -116,9 +119,15 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                 // Check for Format B (multi-node): built["nodes"] is a table
                 sol::optional<sol::table> multiNodes = hasBuilt ? built.get<sol::optional<sol::table>>("nodes") : sol::nullopt;
                 if (multiNodes) {
-                    // === Format B: multi-node preset ===
+                    // === Format B: multi-node preset (undoable via CompoundCommand) ===
+                    auto compound = std::make_unique<CompoundCommand>("Preset '" + op.arg1 + "'");
                     std::vector<std::string> groupNames;
                     std::string presetPrefix = op.arg1;
+
+                    // Collect node specs for param application after creation
+                    struct NodeParamInfo { std::string name; std::string paramName; std::string sVal; float fVal; bool bVal; enum { S, F, B } kind; };
+                    std::vector<NodeParamInfo> deferredParams;
+
                     for (auto& kv : *multiNodes) {
                         if (!kv.second.is<sol::table>()) continue;
                         sol::table nspec = kv.second;
@@ -126,16 +135,51 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                         sol::optional<std::string> ntype = nspec["type"];
                         if (!nname || !ntype) continue;
                         std::string fullName = presetPrefix + "_" + *nname;
-                        auto* n = NodeTypeRegistry::instance().create(*ntype, fullName, lua);
-                        if (n) {
-                            groupNames.push_back(fullName);
-                            std::cout << "[dbg] Preset multi: created " << *ntype << " '" << fullName << "'" << std::endl;
+                        groupNames.push_back(fullName);
+                        compound->add(std::make_unique<CreateNodeCommand>(*ntype, fullName, lua));
+                        // Collect per-node params for deferred application
+                        sol::optional<sol::table> nodeParams = nspec["params"];
+                        if (nodeParams) {
+                            for (auto& pk : *nodeParams) {
+                                if (!pk.first.is<std::string>()) continue;
+                                NodeParamInfo pi;
+                                pi.name = fullName;
+                                pi.paramName = pk.first.as<std::string>();
+                                if (pk.second.is<std::string>()) { pi.sVal = pk.second.as<std::string>(); pi.kind = NodeParamInfo::S; }
+                                else if (pk.second.is<double>()) { pi.fVal = static_cast<float>(pk.second.as<double>()); pi.kind = NodeParamInfo::F; }
+                                else if (pk.second.is<bool>()) { pi.bVal = pk.second.as<bool>(); pi.kind = NodeParamInfo::B; }
+                                else continue;
+                                deferredParams.push_back(pi);
+                            }
                         }
                     }
-                    // Create links
+
+                    // Add a lambda command to apply per-node params after all nodes are created
+                    if (!deferredParams.empty()) {
+                        auto params = std::make_shared<std::vector<NodeParamInfo>>(std::move(deferredParams));
+                        compound->add(std::make_unique<LambdaCommand>("Apply preset params",
+                            [params]() {
+                                auto* animator = Animator::instance();
+                                if (!animator) return;
+                                for (auto& pi : *params) {
+                                    auto* n = animator->getRegisteredNode(pi.name);
+                                    if (!n || !n->getParamSpec()) continue;
+                                    auto* pd = n->getParamSpec()->getParam(pi.paramName);
+                                    if (!pd) continue;
+                                    if (pi.kind == NodeParamInfo::S) pd->stringVal = pi.sVal;
+                                    else if (pi.kind == NodeParamInfo::F) pd->floatVal = pi.fVal;
+                                    else if (pi.kind == NodeParamInfo::B) pd->boolVal = pi.bVal;
+                                }
+                            },
+                            [params]() {
+                                // Undo: clear applied params (nodes will be deleted by CreateNodeCommand::undo anyway)
+                            }
+                        ));
+                    }
+
+                    // Add link commands
                     sol::optional<sol::table> multiLinks = built.get<sol::optional<sol::table>>("links");
                     if (multiLinks) {
-                        auto* animator = Animator::instance();
                         for (auto& kv : *multiLinks) {
                             if (!kv.second.is<sol::table>()) continue;
                             sol::table lk = kv.second;
@@ -146,21 +190,13 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                             if (!from || !fromPort || !to || !toPort) continue;
                             std::string fn = presetPrefix + "_" + *from;
                             std::string tn = presetPrefix + "_" + *to;
-                            auto* fnNode = animator->getRegisteredNode(fn);
-                            auto* tnNode = animator->getRegisteredNode(tn);
-                            if (fnNode && tnNode) {
-                                auto& outs = fnNode->getOutputs();
-                                auto& ins = tnNode->getInputs();
-                                auto oit = outs.find(*fromPort);
-                                auto iit = ins.find(*toPort);
-                                if (oit != outs.end() && iit != ins.end()) {
-                                    animator->link(oit->second, iit->second);
-                                    std::cout << "[dbg] Preset link: " << fn << "." << *fromPort
-                                              << " -> " << tn << "." << *toPort << std::endl;
-                                }
-                            }
+                            compound->add(std::make_unique<CreateLinkCommand>(fn, *fromPort, tn, *toPort));
                         }
                     }
+
+                    // Execute the whole compound as one undoable operation
+                    CommandManager::instance().execute(std::move(compound));
+
                     // Register preset group for cascade deletion
                     if (!groupNames.empty()) {
                         for (auto& gn : groupNames) {
@@ -255,6 +291,33 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         return true;
     };
 
+    // ── Undo / Redo ──────────────────────────────────────────────────
+    dbg["undo"] = []() {
+        CommandManager::instance().undo();
+        std::cout << "[dbg] undo" << std::endl;
+    };
+    dbg["redo"] = []() {
+        CommandManager::instance().redo();
+        std::cout << "[dbg] redo" << std::endl;
+    };
+
+    // ── Enable / Disable ──────────────────────────────────────────────
+    dbg["set_enabled"] = [](const std::string& nodeName, bool en) {
+        auto* animator = Animator::instance();
+        if (!animator) return;
+        auto* node = animator->getRegisteredNode(nodeName);
+        if (node) {
+            node->setEnabled(en);
+            std::cout << "[dbg] " << nodeName << " enabled=" << (en ? "true" : "false") << std::endl;
+        }
+    };
+    dbg["is_enabled"] = [](const std::string& nodeName) -> bool {
+        auto* animator = Animator::instance();
+        if (!animator) return false;
+        auto* node = animator->getRegisteredNode(nodeName);
+        return node ? node->isEnabled() : false;
+    };
+
     // ── Preset instantiation (deferred) ──────────────────────────────
     dbg["preset"] = [](const std::string& presetName) -> bool {
         // Deferred: loads preset file and creates node at start of next frame
@@ -283,6 +346,13 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
             return false;
         }
         animator->link(oit->second, iit->second);
+        // Auto-fill target_entity ParamSpec when entity→entity link is created
+        if (fromPort == "entity" && toPort == "entity") {
+            if (tn->getParamSpec()) {
+                auto* td = tn->getParamSpec()->getParam("target_entity");
+                if (td) td->stringVal = fromNode;
+            }
+        }
         std::cout << "[dbg] Linked " << fromNode << "." << fromPort
                   << " -> " << toNode << "." << toPort << std::endl;
         return true;
@@ -302,6 +372,14 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         auto iit = ins.find(toPort);
         if (oit == outs.end() || iit == ins.end()) return false;
         animator->unlink(oit->second, iit->second);
+        // Clear target_entity ParamSpec when entity→entity link is removed
+        if (fromPort == "entity" && toPort == "entity") {
+            if (tn->getParamSpec()) {
+                auto* td = tn->getParamSpec()->getParam("target_entity");
+                if (td) td->stringVal.clear();
+            }
+            tn->onLinkChanged();
+        }
         std::cout << "[dbg] Unlinked " << fromNode << "." << fromPort
                   << " -> " << toNode << "." << toPort << std::endl;
         return true;
@@ -469,6 +547,103 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     // ── Save/Load project ──────────────────────────────────────────────
     dbg["save"] = [](const std::string& path) {
         std::cout << "[dbg] Save to " << path << " (use File > Save)" << std::endl;
+    };
+
+    // ── Lock-on orbit test ──────────────────────────────────────────────
+    // Full 360° orbit around the ogre: 8 screenshots every 45°.
+    // Uses direct camera positioning (same math as applyOrbit) to verify.
+    dbg["lockon_test"] = [app]() {
+        if (!app) return;
+        auto* sm = app->getEngine()->getSceneManager();
+        auto* cam = sm ? sm->getCamera("MainCamera") : nullptr;
+        if (!sm || !cam) {
+            std::cout << "[dbg] lockon_test: no camera" << std::endl;
+            return;
+        }
+        auto* camNode = cam->getParentSceneNode();
+        if (!camNode) return;
+
+        // Ensure render target is big enough to see the ogre
+        app->getEngine()->resizeRenderTexture(800, 600);
+
+        // Find target
+        Ogre::Vector3 center = Ogre::Vector3::ZERO;
+        auto* animator = Animator::instance();
+        if (animator) {
+            for (auto& name : animator->getRegisteredNodeNames()) {
+                auto* dagNode = animator->getRegisteredNode(name);
+                auto* soNode = dynamic_cast<SceneObjectNode*>(dagNode);
+                if (soNode && soNode->getSceneNode()) {
+                    center = soNode->getSceneNode()->_getDerivedPosition();
+                    std::cout << "[dbg] lockon_test: target '" << name << "' at ("
+                              << center.x << "," << center.y << "," << center.z << ")" << std::endl;
+                    break;
+                }
+            }
+        }
+
+        // Orbit params: distance 120, pitch 20° — ogre (scale 30) fills ~1/3 of frame
+        float distance = 120.0f;
+        float pitchDeg = 20.0f;
+        float pitchRad = Ogre::Math::DegreesToRadians(pitchDeg);
+        float cosP = std::cos(pitchRad);
+
+        std::cout << "[dbg] lockon_test: 8 shots, dist=" << distance << " pitch=" << pitchDeg << std::endl;
+
+        for (int i = 0; i < 8; i++) {
+            float yawDeg = i * 45.0f;
+            float yawRad = Ogre::Math::DegreesToRadians(yawDeg);
+
+            Ogre::Vector3 offset(
+                distance * std::sin(yawRad) * cosP,
+                distance * std::sin(pitchRad),
+                distance * std::cos(yawRad) * cosP
+            );
+            camNode->setPosition(center + offset);
+            camNode->lookAt(center, Ogre::Node::TS_WORLD);
+
+            app->getEngine()->updateRenderTarget();
+            std::string filename = "lockon_orbit_" + std::to_string(i) + "_deg" + std::to_string((int)yawDeg) + ".png";
+            app->getEngine()->captureFrame(filename);
+
+            auto pos = camNode->getPosition();
+            std::cout << "[dbg] shot " << i << " yaw=" << (int)yawDeg << " cam=("
+                      << pos.x << "," << pos.y << "," << pos.z << ")" << std::endl;
+        }
+
+        // Now test handleLockOn specifically: enter + orbit 90° + screenshot
+        auto* vp = app->getViewportPanel();
+        auto* camCtrl = vp ? vp->getCameraController() : nullptr;
+        if (camCtrl) {
+            // Reset camera position
+            camNode->setPosition(center + Ogre::Vector3(0, distance * std::sin(pitchRad), distance * cosP));
+            camNode->lookAt(center, Ogre::Node::TS_WORLD);
+
+            // Enter lock-on
+            camCtrl->handleLockOn(0.016f, 0, 0, true);
+            app->getEngine()->updateRenderTarget();
+            app->getEngine()->captureFrame("lockon_handleLockOn_enter.png");
+            std::cout << "[dbg] handleLockOn enter: cam=(" << camNode->getPosition().x
+                      << "," << camNode->getPosition().y << "," << camNode->getPosition().z << ")" << std::endl;
+
+            // Orbit 90° right via handleLockOn (90° / 0.15 sensitivity = 600 px total, 60 frames × 10px)
+            for (int f = 0; f < 60; f++)
+                camCtrl->handleLockOn(0.016f, 10.0f, 0, false);
+            app->getEngine()->updateRenderTarget();
+            app->getEngine()->captureFrame("lockon_handleLockOn_90deg.png");
+            std::cout << "[dbg] handleLockOn +90°: cam=(" << camNode->getPosition().x
+                      << "," << camNode->getPosition().y << "," << camNode->getPosition().z << ")" << std::endl;
+
+            // Orbit another 90° right
+            for (int f = 0; f < 60; f++)
+                camCtrl->handleLockOn(0.016f, 10.0f, 0, false);
+            app->getEngine()->updateRenderTarget();
+            app->getEngine()->captureFrame("lockon_handleLockOn_180deg.png");
+            std::cout << "[dbg] handleLockOn +180°: cam=(" << camNode->getPosition().x
+                      << "," << camNode->getPosition().y << "," << camNode->getPosition().z << ")" << std::endl;
+        }
+
+        std::cout << "[dbg] lockon_test: done — check screenshots" << std::endl;
     };
 
     // ── Automated test suite ───────────────────────────────────────────

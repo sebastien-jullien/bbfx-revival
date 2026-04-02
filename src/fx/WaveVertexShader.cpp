@@ -1,7 +1,10 @@
 #include "WaveVertexShader.h"
+#include "../core/Animator.h"
+#include "../studio/nodes/SceneObjectNode.h"
 #include "../core/Engine.h"
 #include <OgreMeshManager.h>
 #include <OgreEntity.h>
+#include <OgreSceneManager.h>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -20,7 +23,14 @@ WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneNa
     AnimationNode::addInput(new AnimationPort("frequency", 2.0f));
     AnimationNode::addInput(new AnimationPort("speed", 1.0f));
     AnimationNode::addInput(new AnimationPort("axis", 1.0f));
+    AnimationNode::addInput(new AnimationPort("entity", 0.0f));
     AnimationNode::addOutput(new AnimationPort("mesh_dirty", 0.0f));
+
+    ParamDef targetDef;
+    targetDef.name = "target_entity";
+    targetDef.type = ParamType::STRING;
+    mSpec.addParam(targetDef);
+    AnimationNode::setParamSpec(&mSpec);
 }
 
 WaveVertexShader::~WaveVertexShader() = default;
@@ -28,7 +38,7 @@ WaveVertexShader::~WaveVertexShader() = default;
 void WaveVertexShader::createDeferredEntity() {
     if (mEntityCreated || mStudioEntityName.empty()) return;
     auto cloneMesh = Ogre::MeshManager::getSingleton().getByName(mCloneMeshName);
-    if (!cloneMesh) return; // clone not ready yet
+    if (!cloneMesh) return;
     auto* engine = Engine::instance();
     auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
     if (!sceneMgr) return;
@@ -40,8 +50,19 @@ void WaveVertexShader::createDeferredEntity() {
     } catch (...) {}
 }
 
+SceneObjectNode* WaveVertexShader::findTargetSceneObj() {
+    if (mTargetNodeName.empty()) return nullptr;
+    auto* animator = dynamic_cast<Animator*>(AnimationNode::getListener());
+    if (!animator) return nullptr;
+    auto* targetNode = animator->getRegisteredNode(mTargetNodeName);
+    return targetNode ? dynamic_cast<SceneObjectNode*>(targetNode) : nullptr;
+}
+
 void WaveVertexShader::cleanup() {
     SoftwareVertexShader::disable();
+    auto* sceneObj = findTargetSceneObj();
+    if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
+        sceneObj->getSceneNode()->setVisible(true);
     if (!mStudioSceneNodeName.empty()) {
         try {
             auto* engine = Engine::instance();
@@ -53,13 +74,93 @@ void WaveVertexShader::cleanup() {
     }
 }
 
+void WaveVertexShader::setFxVisible(bool vis) {
+    if (mStudioSceneNodeName.empty()) return;
+    auto* engine = Engine::instance();
+    auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
+    if (!sceneMgr) return;
+    try {
+        if (sceneMgr->hasSceneNode(mStudioSceneNodeName))
+            sceneMgr->getSceneNode(mStudioSceneNodeName)->setVisible(vis);
+    } catch (...) {}
+}
+
+void WaveVertexShader::setEnabled(bool en) {
+    AnimationNode::setEnabled(en);
+    if (en) {
+        if (!mTargetNodeName.empty()) SoftwareVertexShader::enable();
+    } else {
+        SoftwareVertexShader::disable();
+    }
+}
+
+void WaveVertexShader::resolveTarget() {
+    std::string targetName;
+    auto* td = mSpec.getParam("target_entity");
+    if (td) targetName = td->stringVal;
+
+    // Target removed (link deleted) → hide FX clone, restore original mesh
+    if (targetName.empty()) {
+        if (!mTargetNodeName.empty()) {
+            auto* sceneObj = findTargetSceneObj();
+            if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
+                sceneObj->getSceneNode()->setVisible(true);
+            mTargetNodeName.clear();
+            SoftwareVertexShader::disable();
+            setFxVisible(false);
+        }
+        return;
+    }
+
+    // Target changed
+    if (targetName != mTargetNodeName) {
+        if (!mTargetNodeName.empty()) {
+            auto* oldObj = findTargetSceneObj();
+            if (oldObj && oldObj->isEnabled() && oldObj->getSceneNode())
+                oldObj->getSceneNode()->setVisible(true);
+        }
+        mTargetNodeName = targetName;
+        if (AnimationNode::isEnabled()) {
+            SoftwareVertexShader::enable();
+            setFxVisible(true);
+        }
+    }
+
+    auto* sceneObj = findTargetSceneObj();
+    if (!sceneObj || !sceneObj->getSceneNode()) return;
+
+    if (!sceneObj->isEnabled()) {
+        setFxVisible(false);
+        return;
+    }
+
+    // Whether FX is enabled or disabled, keep clone visible and hide original
+    // (disabled = frozen deformation, enabled = active deformation)
+    setFxVisible(true);
+    sceneObj->getSceneNode()->setVisible(false);
+
+    // Sync transform
+    auto* engine = Engine::instance();
+    auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
+    if (!sceneMgr || mStudioSceneNodeName.empty()) return;
+    try {
+        if (sceneMgr->hasSceneNode(mStudioSceneNodeName)) {
+            auto* fxSn = sceneMgr->getSceneNode(mStudioSceneNodeName);
+            fxSn->setPosition(sceneObj->getSceneNode()->_getDerivedPosition());
+            fxSn->setScale(sceneObj->getSceneNode()->_getDerivedScale());
+            fxSn->setOrientation(sceneObj->getSceneNode()->_getDerivedOrientation());
+        }
+    } catch (...) {}
+}
+
 void WaveVertexShader::update() {
     createDeferredEntity();
-    if (!mCloneReady) return; // Wait for SoftwareVertexShader to prepare the clone in frameStarted()
+    resolveTarget();
+    if (!mCloneReady) return;
 
     auto& inputs = AnimationNode::getInputs();
     float dt = inputs.at("dt")->getValue();
-    if (dt <= 0.0f) dt = 0.016f; // fallback
+    if (dt <= 0.0f) dt = 0.016f;
     amplitude = inputs.at("amplitude")->getValue();
     frequency = inputs.at("frequency")->getValue();
     speed = inputs.at("speed")->getValue();
@@ -88,11 +189,9 @@ void WaveVertexShader::_applyWave(VertexData* data, const CpuMeshData& cpuData) 
         dstPos[i]   = srcPos[i];
         dstPos[i+1] = srcPos[i+1];
         dstPos[i+2] = srcPos[i+2];
-        // Apply wave displacement on the chosen axis
         dstPos[i + axis] += amplitude * std::sin(frequency * srcPos[i] + speed * time);
     }
 
-    // Recalculate normals
     float* norms = mNormals.data();
     std::memset(norms, 0, needed * sizeof(float));
     const uint32_t* indices = cpuData.indices.data();
@@ -113,7 +212,6 @@ void WaveVertexShader::_applyWave(VertexData* data, const CpuMeshData& cpuData) 
         norms[i] = n.x; norms[i+1] = n.y; norms[i+2] = n.z;
     }
 
-    // Write back
     const auto* posElem = data->vertexDeclaration->findElementBySemantic(VES_POSITION);
     const auto* normElem = data->vertexDeclaration->findElementBySemantic(VES_NORMAL);
     if (!posElem) return;
@@ -160,6 +258,10 @@ void WaveVertexShader::renderOneFrame(Real dt) {
         }
     }
     time += dt;
+}
+
+void WaveVertexShader::onLinkChanged() {
+    resolveTarget();
 }
 
 } // namespace bbfx

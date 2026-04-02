@@ -10,5 +10,18 @@ return {
         ParamSpec.float("speed", 1.0, {min=0, max=10, label="Speed"}),
         ParamSpec.float("complexity", 3.0, {min=1, max=10, label="Complexity"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

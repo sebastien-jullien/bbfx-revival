@@ -13,5 +13,18 @@ return {
         ParamSpec.float("timeDensity", 5.0, {min=0, max=20, label="Speed"}),
         ParamSpec.bool("beat_sync", true, {label="Sync to Beat"}),
     }),
-    build = function(params) return {type="PerlinFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "PerlinFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode", params={mesh_file="ogrehead.mesh"}},
+                {name="fx",   type="PerlinFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

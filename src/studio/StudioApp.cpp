@@ -132,10 +132,22 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     // Install Studio Debugger (programmatic testing interface)
     Debugger::install(mLua, this);
 
-    // Wire inspector to node editor selection
+    // Wire inspector to node editor selection + viewport sync
     mNodeEditorPanel->setSelectionCallback([this](const std::string& nodeName) {
         mInspectorPanel->setSelectedNode(nodeName);
+        // Sync selection to viewport (highlight object, no callback to avoid loop)
+        if (mViewportPanel && mViewportPanel->getPicker()) {
+            mViewportPanel->getPicker()->selectByDAGName(nodeName);
+        }
     });
+
+    // Wire viewport picker selection to node editor + inspector
+    if (mViewportPanel && mViewportPanel->getPicker()) {
+        mViewportPanel->getPicker()->setSelectionCallback([this](const std::string& nodeName) {
+            mNodeEditorPanel->selectNodeFromExternal(nodeName);
+            mInspectorPanel->setSelectedNode(nodeName);
+        });
+    }
 
     initImGui();
 }
@@ -318,8 +330,14 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
     if (evt.type == SDL_EVENT_KEY_DOWN) {
         if (evt.key.key == SDLK_ESCAPE) {
             if (mPerformanceMode) {
-                // In Performance Mode, Escape = exit Performance Mode (not quit app)
                 mPerformanceMode = false;
+            } else if (mViewportPanel && mViewportPanel->getGizmo() &&
+                       mViewportPanel->getGizmo()->isInKeyboardMode()) {
+                mViewportPanel->getGizmo()->cancelKeyboardTransform();
+            } else if (mViewportPanel && mViewportPanel->getPicker() &&
+                       !mViewportPanel->getPicker()->getSelectedNodeName().empty()) {
+                mViewportPanel->getPicker()->deselect();
+                if (mViewportPanel->getGizmo()) mViewportPanel->getGizmo()->clearTarget();
             } else {
                 mRunning = false;
             }
@@ -410,6 +428,51 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
             return;
         }
 
+        // Viewport gizmo shortcuts (G/R/S/X/Y/Z) — disabled during FPS camera mode
+        bool fpsCaptured = mViewportPanel && mViewportPanel->isFpsCaptured();
+        if (mViewportPanel && mViewportPanel->getGizmo() && !io.WantCaptureKeyboard && !ctrl && !fpsCaptured) {
+            auto* gizmo = mViewportPanel->getGizmo();
+            if (gizmo->isInKeyboardMode()) {
+                // During keyboard mode: X/Y/Z constrain, Escape cancels
+                if (evt.key.key == SDLK_X) { gizmo->constrainAxis(0); return; }
+                if (evt.key.key == SDLK_Y) { gizmo->constrainAxis(1); return; }
+                if (evt.key.key == SDLK_Z) { gizmo->constrainAxis(2); return; }
+                // Escape handled above (deselect section)
+            } else if (gizmo->hasTarget()) {
+                if (evt.key.key == SDLK_G) { gizmo->startKeyboardTransform(ViewportGizmo::Tool::Translate); return; }
+                if (evt.key.key == SDLK_R && !ctrl) { gizmo->startKeyboardTransform(ViewportGizmo::Tool::Rotate); return; }
+                if (evt.key.key == SDLK_S && !ctrl) { gizmo->startKeyboardTransform(ViewportGizmo::Tool::Scale); return; }
+            }
+        }
+
+        // Viewport camera shortcuts (F=focus, Home=reset, Numpad views)
+        if (mViewportPanel && mViewportPanel->getCameraController() && !io.WantCaptureKeyboard) {
+            auto* camCtrl = mViewportPanel->getCameraController();
+            if (evt.key.key == SDLK_F && !ctrl) {
+                // Focus on selected object
+                auto selName = mNodeEditorPanel ? mNodeEditorPanel->getSelectedNodeName() : "";
+                if (!selName.empty()) {
+                    auto* animator = Animator::instance();
+                    auto* node = animator ? animator->getRegisteredNode(selName) : nullptr;
+                    if (node) {
+                        // Try to get SceneNode from known node types
+                        auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+                        if (soNode && soNode->getSceneNode()) {
+                            camCtrl->focusOn(soNode->getSceneNode());
+                        }
+                    }
+                }
+            }
+            if (evt.key.key == SDLK_HOME) {
+                camCtrl->resetCamera();
+            }
+            // Numpad preset views
+            bool numCtrl = ctrl;
+            if (evt.key.key == SDLK_KP_1) camCtrl->setPresetView(1, numCtrl);
+            if (evt.key.key == SDLK_KP_3) camCtrl->setPresetView(3, numCtrl);
+            if (evt.key.key == SDLK_KP_7) camCtrl->setPresetView(7, numCtrl);
+        }
+
         // Record keyboard events if recording is active
         if (mTimelinePanel && mTimelinePanel->isRecording()) {
             auto* rec = mTimelinePanel->getRecorder();
@@ -466,13 +529,46 @@ void StudioApp::renderFrame() {
             for (auto& n : names) {
                 if (!animator) break;
                 auto* node = animator->getRegisteredNode(n);
-                if (node) {
-                    node->setListener(nullptr);
-                    animator->unregisterNode(n);
-                    try { node->cleanup(); } catch (...) {}
-                } else {
+                if (!node) continue;
+
+                // Clear viewport references BEFORE destroying the node
+                if (mViewportPanel) {
+                    auto* picker = mViewportPanel->getPicker();
+                    if (picker && picker->getSelectedNodeName() == n)
+                        picker->deselect();
+
+                    auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+                    if (soNode) {
+                        auto* gizmo = mViewportPanel->getGizmo();
+                        if (gizmo && gizmo->getTargetSceneNode() == soNode->getSceneNode())
+                            gizmo->clearTarget();
+
+                        auto* camCtrl = mViewportPanel->getCameraController();
+                        if (camCtrl && camCtrl->getLockTarget() == soNode->getSceneNode())
+                            camCtrl->setOrbitLockTarget(nullptr);
+
+                        // Clear Lua _sceneNodes reference to prevent dangling pointer
+                        // Also nil any cached _rotateTarget that points to this node
+                        if (mLua["_sceneNodes"].valid()) {
+                            sol::object sn = mLua["_sceneNodes"][n];
+                            mLua["_sceneNodes"][n] = sol::nil;
+                            // Nil any global that cached this SceneNode pointer
+                            if (sn.valid() && mLua["_rotateTarget"].valid()) {
+                                if (sn == mLua["_rotateTarget"])
+                                    mLua["_rotateTarget"] = sol::nil;
+                            }
+                        }
+                    }
                 }
+
+                // Full removal: graph edges + ports + name map + queues
+                animator->removeNode(node);
+                try { node->cleanup(); } catch (...) {}
+                delete node;
             }
+
+            // Sync node editor visuals
+            if (mNodeEditorPanel) mNodeEditorPanel->syncFromDAG();
         }
     }
     ImGui_ImplOpenGL3_NewFrame();
@@ -639,6 +735,17 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Preset Browser",nullptr, &mShowPresetBrowser);
         ImGui::MenuItem("Console",       nullptr, &mShowConsole);
         ImGui::MenuItem("Set Editor",    nullptr, &mShowSetEditor);
+        ImGui::Separator();
+        // Editor Camera toggle
+        bool editorCam = CameraNode::sEditorCameraActive;
+        if (ImGui::MenuItem("Use Editor Camera", nullptr, &editorCam)) {
+            CameraNode::sEditorCameraActive = editorCam;
+            if (mViewportPanel && mViewportPanel->getCameraController()) {
+                mViewportPanel->getCameraController()->setMode(
+                    editorCam ? ViewportCameraController::Mode::Editor
+                              : ViewportCameraController::Mode::DAGDriven);
+            }
+        }
         ImGui::Separator();
         bool pm = mPerformanceMode;
         if (ImGui::MenuItem("Performance Mode", "F5", &pm)) {
@@ -935,18 +1042,9 @@ void StudioApp::initNodeTypeRegistry() {
                 if (vs && !vs->empty()) vertShader = *vs;
                 if (fs && !fs->empty()) fragShader = *fs;
             }
-            // Use the demo ogrehead entity if it exists, otherwise create a new one
-            Ogre::Entity* entity = nullptr;
-            if (sceneMgr->hasEntity("StudioHead")) {
-                entity = sceneMgr->getEntity("StudioHead");
-            } else {
-                entity = sceneMgr->createEntity(uniqueName("studio_ent"), "ogrehead.mesh");
-                auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(uniqueName("studio_sn"));
-                sceneNode->attachObject(entity);
-            }
             auto* node = new ShaderFxNode(name,
                 vertShader, fragShader,
-                sceneMgr, entity);
+                sceneMgr);
             auto* animator = Animator::instance();
             if (animator) {
                 for (auto& [pname, port] : node->getInputs()) animator->add(port);

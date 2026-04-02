@@ -38,6 +38,12 @@ public:
         if (mSelectionCallback) mSelectionCallback(name);
     }
 
+    /// Select a node from external source (viewport picking) WITHOUT firing the callback.
+    /// This avoids infinite selection loops.
+    void selectNodeFromExternal(const std::string& name) {
+        mSelectedNode = name;
+    }
+
     struct NodePosition { std::string name; float x, y; };
     std::vector<NodePosition> getNodePositions() const;
     void setNodePositions(const std::vector<NodePosition>& positions);

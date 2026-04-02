@@ -38,6 +38,10 @@ public:
     /// Override in FX nodes that create OGRE resources.
     virtual void cleanup() {}
 
+    /// Called when a link to/from this node is created or deleted.
+    /// Override in FX nodes to react immediately (e.g. resolve target changes).
+    virtual void onLinkChanged() {}
+
     void setListener(AnimationNodeListener* listener);
 
     /// Optional typed parameter spec. If set, Inspector generates widgets automatically.
@@ -55,6 +59,7 @@ protected:
     void fireUpdate();
 
     ParamSpec* mParamSpec = nullptr;
+    AnimationNodeListener* getListener() const { return mListener; }
 
     friend class Animator; // for renameNode() access to mName
 

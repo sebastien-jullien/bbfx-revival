@@ -28,7 +28,7 @@
         "position": { "x": 300, "y": 50 },
         "inputNames": ["time", "speed"],
         "outputNames": ["angle"],
-        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal s = node:getInput('speed') and node:getInput('speed'):getValue() or 1.0\nlocal angle = t * s\nif not _rotateTarget then\n  if _sceneNodes and _sceneNodes['studio_head'] then\n    _rotateTarget = _sceneNodes['studio_head']\n  end\nend\nif _rotateTarget then _rotateTarget:setOrientation(Quaternion(Radian(angle), Vector3(0, 1, 0))) end\nlocal out = node:getOutput('angle')\nif out then out:setValue(angle) end",
+        "source": "local t = node:getInput('time') and node:getInput('time'):getValue() or 0\nlocal s = node:getInput('speed') and node:getInput('speed'):getValue() or 1.0\nlocal angleDeg = t * s * 57.2958\nlocal out = node:getOutput('angle')\nif out then out:setValue(angleDeg) end",
         "ports": { "time": 0, "speed": 1.0 }
       },
       {
@@ -43,7 +43,8 @@
     ],
     "links": [
       { "from_node": "time", "from_port": "beat", "to_node": "rotate_head", "to_port": "time" },
-      { "from_node": "time", "from_port": "beat", "to_node": "oscillator", "to_port": "time" }
+      { "from_node": "time", "from_port": "beat", "to_node": "oscillator", "to_port": "time" },
+      { "from_node": "rotate_head", "from_port": "angle", "to_node": "studio_head", "to_port": "rotation.y" }
     ]
   },
   "chords": [
