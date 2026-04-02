@@ -9,5 +9,18 @@ return {
         ParamSpec.float("speed", 1.5, {min=0, max=10, label="Speed"}),
         ParamSpec.float("axis", 1.0, {min=0, max=2, label="Axis (0=X 1=Y 2=Z)"}),
     }),
-    build = function(params) return {type="WaveVertexShader", params=params} end
+    build = function(params)
+        return {
+            type = "WaveVertexShader",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode", params={mesh_file="ogrehead.mesh"}},
+                {name="fx",   type="WaveVertexShader"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

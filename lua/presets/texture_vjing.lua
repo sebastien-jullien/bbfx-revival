@@ -10,5 +10,18 @@ return {
         ParamSpec.float("speed", 0.5, {min=0, max=10, label="Speed"}),
         ParamSpec.float("edge_width", 0.05, {min=0.001, max=0.5, label="Edge Width"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

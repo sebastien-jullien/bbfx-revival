@@ -18,6 +18,14 @@ static bool linkPorts(const std::string& fromNode, const std::string& fromPort,
     auto iIt = ins.find(toPort);
     if (oIt == outs.end() || iIt == ins.end()) return false;
     animator->link(oIt->second, iIt->second);
+    // Auto-fill target_entity and notify FX node
+    if (fromPort == "entity" && toPort == "entity") {
+        if (tn->getParamSpec()) {
+            auto* td = tn->getParamSpec()->getParam("target_entity");
+            if (td) td->stringVal = fromNode;
+        }
+        tn->onLinkChanged();
+    }
     return true;
 }
 
@@ -34,6 +42,14 @@ static bool unlinkPorts(const std::string& fromNode, const std::string& fromPort
     auto iIt = ins.find(toPort);
     if (oIt == outs.end() || iIt == ins.end()) return false;
     animator->unlink(oIt->second, iIt->second);
+    // Clear target_entity and notify FX node
+    if (fromPort == "entity" && toPort == "entity") {
+        if (tn->getParamSpec()) {
+            auto* td = tn->getParamSpec()->getParam("target_entity");
+            if (td) td->stringVal.clear();
+        }
+        tn->onLinkChanged();
+    }
     return true;
 }
 

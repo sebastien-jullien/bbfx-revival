@@ -526,13 +526,12 @@ void register_bbfx_bindings(sol::state& lua) {
     lua.new_usertype<ShaderFxNode>("bbfx_ShaderFxNode",
         sol::call_constructor, sol::factories(
             [](const std::string& name, const std::string& vertPath,
-               const std::string& fragPath, Ogre::SceneManager* scene,
-               Ogre::Entity* entity) {
-                return new ShaderFxNode(name, vertPath, fragPath, scene, entity);
+               const std::string& fragPath, Ogre::SceneManager* scene) {
+                return new ShaderFxNode(name, vertPath, fragPath, scene);
             },
             [](const std::string& name, const std::string& vertPath,
-               Ogre::SceneManager* scene, Ogre::Entity* entity) {
-                return new ShaderFxNode(name, vertPath, "", scene, entity);
+               Ogre::SceneManager* scene) {
+                return new ShaderFxNode(name, vertPath, "", scene);
             }
         ),
         sol::base_classes, sol::bases<AnimationNode>()

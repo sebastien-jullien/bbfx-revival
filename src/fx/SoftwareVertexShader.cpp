@@ -69,17 +69,17 @@ SoftwareVertexShader::SoftwareVertexShader(const String& meshName, const String&
 SoftwareVertexShader::~SoftwareVertexShader() { disable(); }
 
 bool SoftwareVertexShader::frameStarted(const FrameEvent& e) {
-    if (!mCloneReady) {
-        // Do NOT unload/remove/reload — it destroys buffers used by other Entities.
-        // readBufferRaw() has GL state guards to handle readData() safely.
-        _prepareClonedMesh();
-        mCloneReady = true;
-    }
     renderOneFrame(e.timeSinceLastFrame);
     return true;
 }
 
-void SoftwareVertexShader::enable() { Root::getSingleton().addFrameListener(this); }
+void SoftwareVertexShader::enable() {
+    if (!mCloneReady) {
+        _prepareClonedMesh();
+        mCloneReady = true;
+    }
+    Root::getSingleton().addFrameListener(this);
+}
 void SoftwareVertexShader::disable() {
     if (Root::getSingletonPtr()) Root::getSingleton().removeFrameListener(this);
 }

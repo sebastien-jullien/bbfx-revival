@@ -40,6 +40,7 @@ public:
     StudioEngine* getEngine() { return mEngine.get(); }
     NodeEditorPanel* getNodeEditorPanel() { return mNodeEditorPanel.get(); }
     InspectorPanel* getInspectorPanel() { return mInspectorPanel.get(); }
+    ViewportPanel* getViewportPanel() { return mViewportPanel.get(); }
 
 private:
     // ── Init ─────────────────────────────────────────────────────────────────

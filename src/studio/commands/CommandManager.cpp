@@ -8,6 +8,19 @@ CommandManager& CommandManager::instance() {
     return mgr;
 }
 
+// ── CompoundCommand ──────────────────────────────────────────────────────────
+
+void CompoundCommand::execute() {
+    for (auto& cmd : mCommands) cmd->execute();
+}
+
+void CompoundCommand::undo() {
+    for (auto it = mCommands.rbegin(); it != mCommands.rend(); ++it)
+        (*it)->undo();
+}
+
+// ── CommandManager ──────────────────────────────────────────────────────────
+
 void CommandManager::execute(std::unique_ptr<Command> cmd) {
     cmd->execute();
     mUndoStack.push_back(std::move(cmd));

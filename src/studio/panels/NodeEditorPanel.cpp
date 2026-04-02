@@ -7,6 +7,7 @@
 #include "../commands/CommandManager.h"
 #include "../commands/NodeCommands.h"
 #include "../commands/LinkCommands.h"
+#include "../commands/EditCommands.h"
 
 #include <imgui.h>
 #include <imgui_node_editor.h>
@@ -234,7 +235,22 @@ void NodeEditorPanel::render() {
     // Convert deferred drop screen position to canvas coords (ned context is active here)
     if (!mDropPresetName.empty()) {
         auto canvasPos = ned::ScreenToCanvas(mDropScreenPos);
-        mPendingPositions.push_back({mDropPresetName, canvasPos.x, canvasPos.y});
+        // For multi-node presets, node names are "presetName_xxx".
+        // Queue positions for all nodes that match the prefix.
+        std::string prefix = mDropPresetName + "_";
+        float yOff = 0.0f;
+        bool anyMatch = false;
+        for (auto& [name, nd] : mNodes) {
+            if (name == mDropPresetName || name.rfind(prefix, 0) == 0) {
+                mPendingPositions.push_back({name, canvasPos.x, canvasPos.y + yOff});
+                yOff += 150.0f;
+                anyMatch = true;
+            }
+        }
+        if (!anyMatch) {
+            // Nodes not yet synced — queue with prefix marker for retry
+            mPendingPositions.push_back({mDropPresetName, canvasPos.x, canvasPos.y});
+        }
         mDropPresetName.clear();
     }
 
@@ -246,7 +262,20 @@ void NodeEditorPanel::render() {
             if (it != mNodes.end()) {
                 ned::SetNodePosition(it->second.id, {np.x, np.y});
             } else {
-                remaining.push_back(np); // retry next frame
+                // Check if this is a preset prefix — expand to matching nodes
+                std::string prefix = np.name + "_";
+                float yOff = 0.0f;
+                bool expanded = false;
+                for (auto& [name, nd] : mNodes) {
+                    if (name.rfind(prefix, 0) == 0) {
+                        ned::SetNodePosition(nd.id, {np.x, np.y + yOff});
+                        yOff += 150.0f;
+                        expanded = true;
+                    }
+                }
+                if (!expanded) {
+                    remaining.push_back(np); // retry next frame
+                }
             }
         }
         mPendingPositions = std::move(remaining);
@@ -514,6 +543,7 @@ void NodeEditorPanel::handleLinkCreation() {
                 if (ned::AcceptNewItem({0.0f, 1.0f, 0.0f, 1.0f})) {
                     CommandManager::instance().execute(
                         std::make_unique<CreateLinkCommand>(fromNode, fromPort, toNode, toPort));
+                    // ParamSpec fill + onLinkChanged() handled by linkPorts() inside the command
                 }
             } else {
                 ned::RejectNewItem({1.0f, 0.0f, 0.0f, 1.0f}); // red = reject
@@ -534,6 +564,7 @@ void NodeEditorPanel::handleDeletion() {
         if (ned::AcceptDeletedItem()) {
             for (auto it = mLinks.begin(); it != mLinks.end(); ++it) {
                 if (it->id == deletedLinkId) {
+                    // ParamSpec clear + onLinkChanged() handled by unlinkPorts() inside the command
                     CommandManager::instance().execute(
                         std::make_unique<DeleteLinkCommand>(
                             it->fromNode, it->fromPort, it->toNode, it->toPort));
@@ -598,6 +629,7 @@ void NodeEditorPanel::showNodeContextMenu() {
         if (ImGui::MenuItem("Delete Link")) {
             for (auto it = mLinks.begin(); it != mLinks.end(); ++it) {
                 if (it->id == mContextLinkId) {
+                    // ParamSpec clear + onLinkChanged() handled by unlinkPorts() inside the command
                     CommandManager::instance().execute(
                         std::make_unique<DeleteLinkCommand>(
                             it->fromNode, it->fromPort, it->toNode, it->toPort));
@@ -612,6 +644,15 @@ void NodeEditorPanel::showNodeContextMenu() {
     // ── Node context menu (right-click on a node) ────────────────────────────
     ned::NodeId contextNodeId;
     if (ned::ShowNodeContextMenu(&contextNodeId)) {
+        // Auto-select the right-clicked node so the context menu operates on it
+        for (auto& [name, nd] : mNodes) {
+            if (nd.id == contextNodeId) {
+                mSelectedNode = name;
+                ned::SelectNode(contextNodeId);
+                if (mSelectionCallback) mSelectionCallback(name);
+                break;
+            }
+        }
         ImGui::OpenPopup("NodeContextMenu");
     }
     if (ImGui::BeginPopup("NodeContextMenu")) {
@@ -622,7 +663,8 @@ void NodeEditorPanel::showNodeContextMenu() {
             if (node) {
                 bool en = node->isEnabled();
                 if (ImGui::MenuItem(en ? "Disable" : "Enable")) {
-                    node->setEnabled(!en);
+                    CommandManager::instance().execute(
+                        std::make_unique<SetEnabledCommand>(mSelectedNode, en, !en));
                 }
                 ImGui::Separator();
             }
@@ -654,9 +696,9 @@ std::vector<NodeEditorPanel::NodePosition> NodeEditorPanel::getNodePositions() c
 }
 
 void NodeEditorPanel::setNodePositions(const std::vector<NodePosition>& positions) {
-    // Store positions to apply — some nodes may not be in mNodes yet
+    // Append positions — some nodes may not be in mNodes yet
     // (syncFromDAG hasn't run). Apply what we can now, defer the rest.
-    mPendingPositions = positions;
+    mPendingPositions.insert(mPendingPositions.end(), positions.begin(), positions.end());
 
     ned::SetCurrentEditor(mEditorContext);
     for (auto& np : positions) {

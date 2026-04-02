@@ -1,4 +1,4 @@
-# BBFx Revival — v3.2
+# BBFx Revival — v3.2.1
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -119,6 +119,18 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Deferred clone** — PerlinFxNode/WaveVertexShader create mesh clones at first `frameStarted()` instead of constructor
 - **Studio Debugger** — `dbg.*` commands for automated testing and node inspection from Console panel
 
+### BBFx Studio Interactive Viewport (v3.2.1)
+- **ViewportCameraController** — orbit (Alt+LMB), pan (Alt+MMB), zoom (scroll wheel), editor/DAG-driven modes, camera reset (F key)
+- **ViewportPicker** — OGRE ray query picking, bidirectional selection with NodeEditor, orange wireframe highlight (GLSL clone entity overlay)
+- **ViewportGizmo** — translation gizmo (XYZ arrows + center sphere), axis-constrained drag, screen-space interaction via OGRE ManualObject
+- **ViewportGrid** — procedural infinite grid (fade-out by distance), axis-colored lines (X=red, Z=blue), Y=0 reference plane
+- **ViewportToolbar** — ImGui toolbar strip (Select / Translate mode toggle), keyboard shortcuts (Q/W)
+- **Safe deletion** — confirmation dialog, full OGRE cleanup (Entity, SceneNode, Light, ParticleSystem), Animator unlink, undo support via DeleteNodeCommand
+- **Mesh→FX linking** — automatic SceneObjectNode↔PerlinFxNode/WaveVertexShader connection, entity name resolution, LinkMeshFxCommand with undo
+- **TransformCommands** — undo/redo for gizmo transforms (MoveNodeCommand stores before/after positions)
+- **"Use Editor Camera" menu** — toggle between editor orbit camera and DAG-driven CameraNode
+- **LMB confirm in keyboard mode** — left mouse button confirms node placement in keyboard navigation mode
+
 ---
 
 ## Architecture
@@ -141,7 +153,8 @@ C++ core
   └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
        ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, ...
        ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf
-       ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Chord commands)
+       ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
+       ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform commands)
        ├── Generators -- MeshGenerator (procedural meshes)
        └── Project    -- ProjectSerializer, ExportDialog
     |
@@ -169,7 +182,8 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
 | `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode |
 | `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel |
-| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands |
+| `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
+| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands |
 | `src/studio/generators/` | MeshGenerator (plane, sphere, cube, cylinder, torus, cone) |
 | `src/studio/project/` | ProjectSerializer, ExportDialog |
 | `src/bindings/` | sol2 bindings for all BBFx types |
@@ -348,7 +362,7 @@ ctest --preset windows-release
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2), all modules, Lua API, design decisions
+- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2.1), all modules, Lua API, design decisions
 - [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo and Studio usage reference
 
 ---

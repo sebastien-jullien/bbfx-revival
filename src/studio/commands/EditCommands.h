@@ -18,6 +18,17 @@ private:
     void setPortValue(float val);
 };
 
+class SetEnabledCommand : public Command {
+public:
+    SetEnabledCommand(const std::string& nodeName, bool oldEnabled, bool newEnabled);
+    void execute() override;
+    void undo() override;
+    std::string description() const override;
+private:
+    std::string mNodeName;
+    bool mOldEnabled, mNewEnabled;
+};
+
 class RenameNodeCommand : public Command {
 public:
     RenameNodeCommand(const std::string& oldName, const std::string& newName);

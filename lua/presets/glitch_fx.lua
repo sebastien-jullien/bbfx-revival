@@ -9,5 +9,18 @@ return {
         ParamSpec.float("scale", 5.0, {min=0.1, max=20, label="Scale"}),
         ParamSpec.float("line_width", 0.1, {min=0.01, max=0.5, label="Line Width"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

@@ -9,5 +9,18 @@ return {
         ParamSpec.float("morph", 0.5, {min=0, max=1, label="Morph"}),
         ParamSpec.float("rotation_speed", 1.0, {min=0, max=5, label="Rotation Speed"}),
     }),
-    build = function(params) return {type="ShaderFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "ShaderFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode"},
+                {name="fx",   type="ShaderFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

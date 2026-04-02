@@ -9,5 +9,18 @@ return {
         ParamSpec.float("density", 1.0, {min=0.1, max=10, label="Density"}),
         ParamSpec.float("timeDensity", 10.0, {min=0.1, max=20, label="Time Density"}),
     }),
-    build = function(params) return {type="PerlinFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "PerlinFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode", params={mesh_file="ogrehead.mesh"}},
+                {name="fx",   type="PerlinFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

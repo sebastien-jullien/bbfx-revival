@@ -15,5 +15,18 @@ return {
         ParamSpec.bool("camera_orbit", true, {label="Camera Orbit"}),
         ParamSpec.float("orbit_speed", 0.3, {min=0, max=2, label="Orbit Speed"}),
     }),
-    build = function(params) return {type="PerlinFxNode", params=params} end
+    build = function(params)
+        return {
+            type = "PerlinFxNode",
+            primary = "fx",
+            nodes = {
+                {name="mesh", type="SceneObjectNode", params={mesh_file="ogrehead.mesh"}},
+                {name="fx",   type="PerlinFxNode"},
+            },
+            links = {
+                {from="mesh", fromPort="entity", to="fx", toPort="entity"},
+            },
+            params = params,
+        }
+    end
 }

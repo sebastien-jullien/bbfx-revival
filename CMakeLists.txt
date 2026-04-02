@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.2.0 LANGUAGES CXX)
+project(BBFx VERSION 3.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -183,6 +183,12 @@ add_executable(bbfx-studio
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
     src/studio/panels/SetEditorPanel.cpp
+    src/studio/viewport/ViewportCameraController.cpp
+    src/studio/viewport/ViewportPicker.cpp
+    src/studio/viewport/ViewportGrid.cpp
+    src/studio/viewport/ViewportGizmo.cpp
+    src/studio/viewport/ViewportToolbar.cpp
+    src/studio/commands/TransformCommands.cpp
     src/studio/project/ProjectSerializer.cpp
     src/studio/project/ExportDialog.cpp
     # imgui-node-editor (compiled directly — FetchContent target unreliable)

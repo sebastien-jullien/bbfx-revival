@@ -14,6 +14,7 @@ public:
     void cleanup() override;
     void setEnabled(bool en) override;
     std::string getTypeName() const override { return "LightNode"; }
+    Ogre::SceneNode* getSceneNode() const { return mSceneNode; }
 private:
     Ogre::SceneManager* mScene;
     Ogre::SceneNode* mSceneNode = nullptr;

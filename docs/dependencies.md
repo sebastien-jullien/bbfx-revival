@@ -516,7 +516,7 @@ libtheora est disponible (`sudo apt install libtheora-dev`). Le plugin OGRE Theo
 
 ---
 
-## Note — Etat actuel (v3.2, avril 2026)
+## Note — Etat actuel (v3.2.1, avril 2026)
 
 Ce document analyse les dependances du projet **original 2006**. Le revival BBFx (v2.0+) utilise un stack entierement different, gere par **vcpkg** :
 
@@ -534,4 +534,4 @@ Ce document analyse les dependances du projet **original 2006**. Le revival BBFx
 
 Build system : **CMake 3.20+** (remplace SCons). Compilateur : **MSVC 2022 (C++20)** ou GCC 11+. Voir `bbfx-revival/README.md` pour les instructions de build actuelles.
 
-*Document original etabli en mars 2026. Note v3.2 ajoutee en avril 2026. Sebastien Jullien.*
+*Document original etabli en mars 2026. Note v3.2.1 ajoutee en avril 2026. Sebastien Jullien.*
