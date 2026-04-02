@@ -1,5 +1,6 @@
 #include "StudioApp.h"
 #include "commands/NodeCommands.h"
+#include "commands/SceneCommands.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
 #include "../fx/PerlinFxNode.h"
@@ -122,6 +123,7 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mPerformanceModePanel = std::make_unique<PerformanceModePanel>(lua);
     mConsolePanel         = std::make_unique<ConsolePanel>(mLua);
     mSetEditorPanel       = std::make_unique<SetEditorPanel>(mLua);
+    mSceneHierarchyPanel  = std::make_unique<SceneHierarchyPanel>(Animator::instance());
 
     initNodeTypeRegistry();
     SettingsManager::instance().load();
@@ -139,13 +141,149 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
         if (mViewportPanel && mViewportPanel->getPicker()) {
             mViewportPanel->getPicker()->selectByDAGName(nodeName);
         }
+        // Sync selection to hierarchy panel
+        if (mSceneHierarchyPanel) {
+            mSceneHierarchyPanel->selectNodeFromExternal(nodeName);
+        }
     });
 
-    // Wire viewport picker selection to node editor + inspector
+    // Wire viewport picker selection to node editor + inspector + hierarchy
     if (mViewportPanel && mViewportPanel->getPicker()) {
         mViewportPanel->getPicker()->setSelectionCallback([this](const std::string& nodeName) {
             mNodeEditorPanel->selectNodeFromExternal(nodeName);
             mInspectorPanel->setSelectedNode(nodeName);
+            if (mSceneHierarchyPanel) mSceneHierarchyPanel->selectNodeFromExternal(nodeName);
+        });
+    }
+
+    // Wire hierarchy panel selection to viewport + node editor + inspector
+    if (mSceneHierarchyPanel) {
+        mSceneHierarchyPanel->setSelectionCallback([this](const std::string& nodeName) {
+            mNodeEditorPanel->selectNodeFromExternal(nodeName);
+            mInspectorPanel->setSelectedNode(nodeName);
+            if (mViewportPanel && mViewportPanel->getPicker()) {
+                mViewportPanel->getPicker()->selectByDAGName(nodeName);
+                // Also set gizmo target
+                auto* dagNode = Animator::instance()->getRegisteredNode(nodeName);
+                auto* soNode = dynamic_cast<SceneObjectNode*>(dagNode);
+                if (soNode && soNode->getSceneNode()) {
+                    if (mViewportPanel->getGizmo()) mViewportPanel->getGizmo()->setTarget(soNode->getSceneNode(), dagNode);
+                    if (mViewportPanel->getCameraController()) mViewportPanel->getCameraController()->setOrbitLockTarget(soNode->getSceneNode());
+                }
+            }
+        });
+    }
+
+    // Wire viewport callbacks for scene object creation and FX application
+    if (mViewportPanel) {
+        mViewportPanel->setCreateSceneObjectCallback([this](const std::string& meshFile, float x, float y, float z) {
+            auto* animator = Animator::instance();
+            std::string name = generateSceneObjectName(meshFile, animator);
+            auto compound = std::make_unique<CompoundCommand>("Add " + name);
+            compound->add(std::make_unique<CreateNodeCommand>("SceneObjectNode", name, mLua));
+            compound->add(std::make_unique<LambdaCommand>("Set mesh+pos",
+                [this, name, meshFile, x, y, z]() {
+                    auto* node = Animator::instance()->getRegisteredNode(name);
+                    if (!node) return;
+                    if (node->getParamSpec()) {
+                        auto* mp = node->getParamSpec()->getParam("mesh_file");
+                        if (mp) mp->stringVal = meshFile;
+                    }
+                    auto& inputs = const_cast<AnimationNode::Ports&>(node->getInputs());
+                    if (inputs.count("position.x")) inputs["position.x"]->setValue(x);
+                    if (inputs.count("position.y")) inputs["position.y"]->setValue(y);
+                    if (inputs.count("position.z")) inputs["position.z"]->setValue(z);
+                },
+                [this, name]() {
+                    // Undo is handled by CreateNodeCommand::undo
+                }
+            ));
+            CommandManager::instance().execute(std::move(compound));
+        });
+
+        mViewportPanel->setDuplicateCallback([this](const std::string& nodeName) {
+            CommandManager::instance().execute(
+                std::make_unique<DuplicateNodeCommand>(nodeName, mLua));
+        });
+
+        mViewportPanel->setApplyFxCallback([this](const std::string& fxType, const std::string& targetName) {
+            auto* animator = Animator::instance();
+            if (!animator) return;
+            // Generate FX name
+            std::string fxName = generateSceneObjectName(fxType + ".mesh", animator);
+            // Use the fxType directly as a node type name for FX nodes
+            // Check if fxType is a preset or a node type
+            auto* typeInfo = NodeTypeRegistry::instance().getType(fxType);
+            if (typeInfo) {
+                auto compound = std::make_unique<CompoundCommand>("Apply " + fxType + " to " + targetName);
+                compound->add(std::make_unique<CreateNodeCommand>(fxType, fxName, mLua));
+                // Auto-connect entity ports
+                compound->add(std::make_unique<LambdaCommand>("Auto-connect entity",
+                    [this, fxName, targetName]() {
+                        auto* animator = Animator::instance();
+                        if (!animator) return;
+                        auto* fxNode = animator->getRegisteredNode(fxName);
+                        auto* targetNode = animator->getRegisteredNode(targetName);
+                        if (!fxNode || !targetNode) return;
+                        // Set target_entity ParamSpec
+                        if (fxNode->getParamSpec()) {
+                            auto* p = fxNode->getParamSpec()->getParam("target_entity");
+                            if (p) p->stringVal = targetName;
+                        }
+                        // Create the DAG link (entity output → entity input)
+                        auto& srcOutputs = targetNode->getOutputs();
+                        auto& dstInputs = fxNode->getInputs();
+                        auto srcIt = srcOutputs.find("entity");
+                        auto dstIt = dstInputs.find("entity");
+                        if (srcIt != srcOutputs.end() && dstIt != dstInputs.end()) {
+                            animator->link(srcIt->second, dstIt->second);
+                        }
+                        fxNode->onLinkChanged();
+                    },
+                    [this, fxName, targetName]() {
+                        auto* animator = Animator::instance();
+                        if (!animator) return;
+                        auto* fxNode = animator->getRegisteredNode(fxName);
+                        if (!fxNode) return;
+                        if (fxNode->getParamSpec()) {
+                            auto* p = fxNode->getParamSpec()->getParam("target_entity");
+                            if (p) p->stringVal = "";
+                        }
+                        auto* targetNode = animator->getRegisteredNode(targetName);
+                        if (!targetNode) return;
+                        auto& srcOutputs = targetNode->getOutputs();
+                        auto& dstInputs = fxNode->getInputs();
+                        auto srcIt = srcOutputs.find("entity");
+                        auto dstIt = dstInputs.find("entity");
+                        if (srcIt != srcOutputs.end() && dstIt != dstInputs.end()) {
+                            animator->unlink(srcIt->second, dstIt->second);
+                        }
+                        fxNode->onLinkChanged();
+                    }
+                ));
+                CommandManager::instance().execute(std::move(compound));
+
+                // Position FX node to the right of the target in the node editor
+                if (mNodeEditorPanel) {
+                    auto positions = mNodeEditorPanel->getNodePositions();
+                    float targetX = 0, targetY = 0;
+                    for (auto& p : positions) {
+                        if (p.name == targetName) { targetX = p.x; targetY = p.y; break; }
+                    }
+                    // Count existing FX on this target to stack vertically
+                    int fxIndex = 0;
+                    for (auto& n : animator->getRegisteredNodeNames()) {
+                        auto* nd = animator->getRegisteredNode(n);
+                        if (nd && nd->getParamSpec() && n != fxName) {
+                            auto* te = nd->getParamSpec()->getParam("target_entity");
+                            if (te && te->stringVal == targetName) fxIndex++;
+                        }
+                    }
+                    std::vector<NodeEditorPanel::NodePosition> newPos;
+                    newPos.push_back({fxName, targetX + 200.0f, targetY + fxIndex * 100.0f});
+                    mNodeEditorPanel->setNodePositions(newPos);
+                }
+            }
         });
     }
 
@@ -418,6 +556,11 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         // F7 = Toggle Node Editor
         if (evt.key.key == SDLK_F7) {
             mShowNodeEditor = !mShowNodeEditor;
+            return;
+        }
+        // F8 = Toggle Scene Hierarchy
+        if (evt.key.key == SDLK_F8) {
+            mShowSceneHierarchy = !mShowSceneHierarchy;
             return;
         }
         // Space = Play/Pause toggle (when not typing in a text field)
@@ -735,6 +878,7 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Preset Browser",nullptr, &mShowPresetBrowser);
         ImGui::MenuItem("Console",       nullptr, &mShowConsole);
         ImGui::MenuItem("Set Editor",    nullptr, &mShowSetEditor);
+        ImGui::MenuItem("Scene Hierarchy", nullptr, &mShowSceneHierarchy);
         ImGui::Separator();
         // Editor Camera toggle
         bool editorCam = CameraNode::sEditorCameraActive;
@@ -786,6 +930,7 @@ void StudioApp::renderPanels() {
 
     if (mShowConsole) mConsolePanel->render();
     if (mShowSetEditor) mSetEditorPanel->render();
+    if (mShowSceneHierarchy && mSceneHierarchyPanel) mSceneHierarchyPanel->render();
 
     // ── Status Bar ─────────────────────────────────────────────────────
     {
@@ -1569,6 +1714,7 @@ void StudioApp::renderShortcutsDialog() {
             row("F5",      "Toggle Performance Mode");
             row("F6",      "Toggle Preset Browser");
             row("F7",      "Toggle Node Editor");
+            row("F8",      "Toggle Scene Hierarchy");
             row("Ctrl+1-9","Save bookmark (Node Editor)");
             row("1-9",     "Restore bookmark (Node Editor)");
             row("Delete",  "Delete selected node/link");

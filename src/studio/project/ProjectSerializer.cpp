@@ -316,6 +316,77 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     auto ii = ins.find(toPort);
                     if (oi != outs.end() && ii != ins.end()) {
                         animator->link(oi->second, ii->second);
+                        // Entity→entity links: fill target_entity ParamSpec + notify
+                        if (fromPort == "entity" && toPort == "entity") {
+                            if (tn->getParamSpec()) {
+                                auto* td = tn->getParamSpec()->getParam("target_entity");
+                                if (td) td->stringVal = fromNode;
+                            }
+                            tn->onLinkChanged();
+                        }
+                    }
+                }
+            }
+
+            // Auto-create missing entity→entity links:
+            // 1) For data-connected nodes (SceneObjectNode ↔ node with entity input)
+            // 2) For LuaAnimationNodes whose source references a SceneObjectNode by name
+            auto allLinks = animator->getLinks();
+            auto allNames = animator->getRegisteredNodeNames();
+
+            // Helper: create entity link if absent
+            auto autoEntityLink = [&](const std::string& sceneNodeName,
+                                      const std::string& targetNodeName) {
+                // Check entity link doesn't already exist
+                for (auto& el : animator->getLinks()) {
+                    if (el.fromNode == sceneNodeName && el.fromPort == "entity" &&
+                        el.toNode == targetNodeName && el.toPort == "entity")
+                        return;
+                }
+                auto* sn = animator->getRegisteredNode(sceneNodeName);
+                auto* tg = animator->getRegisteredNode(targetNodeName);
+                if (!sn || !tg) return;
+                auto sIt = sn->getOutputs().find("entity");
+                auto tIt = tg->getInputs().find("entity");
+                if (sIt == sn->getOutputs().end() || tIt == tg->getInputs().end()) return;
+                animator->link(sIt->second, tIt->second);
+                if (tg->getParamSpec()) {
+                    auto* td = tg->getParamSpec()->getParam("target_entity");
+                    if (td) td->stringVal = sceneNodeName;
+                }
+                tg->onLinkChanged();
+                std::cout << "[ProjectSerializer] Auto-created entity link: "
+                          << sceneNodeName << " -> " << targetNodeName << std::endl;
+            };
+
+            // Pass 1: data-connected nodes
+            for (auto& lk : allLinks) {
+                if (lk.fromPort == "entity" || lk.toPort == "entity") continue;
+                auto* fn = animator->getRegisteredNode(lk.fromNode);
+                auto* tn = animator->getRegisteredNode(lk.toNode);
+                if (!fn || !tn) continue;
+                if (tn->getOutputs().count("entity") && fn->getInputs().count("entity"))
+                    autoEntityLink(lk.toNode, lk.fromNode);
+                else if (fn->getOutputs().count("entity") && tn->getInputs().count("entity"))
+                    autoEntityLink(lk.fromNode, lk.toNode);
+            }
+
+            // Pass 2: Lua source introspection — detect SceneObjectNode names
+            // referenced in LuaAnimationNode source code
+            for (auto& name : allNames) {
+                auto* node = animator->getRegisteredNode(name);
+                if (!node || node->getTypeName() != "LuaAnimationNode") continue;
+                if (node->getInputs().count("entity") == 0) continue;
+                auto* luaNode = dynamic_cast<LuaAnimationNode*>(node);
+                if (!luaNode) continue;
+                const auto& src = luaNode->getSource();
+                if (src.empty()) continue;
+                for (auto& otherName : allNames) {
+                    if (otherName == name) continue;
+                    auto* other = animator->getRegisteredNode(otherName);
+                    if (!other || other->getOutputs().count("entity") == 0) continue;
+                    if (src.find(otherName) != std::string::npos) {
+                        autoEntityLink(otherName, name);
                     }
                 }
             }

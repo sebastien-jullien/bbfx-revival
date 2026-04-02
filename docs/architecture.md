@@ -1633,3 +1633,24 @@ Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infi
 | Epics | EPIC-88 → EPIC-94 (7 epics) |
 
 *Section v3.2.1 ajoutee en avril 2026. Sebastien Jullien.*
+
+---
+
+## BBFx Studio — Architecture v3.0 → v3.2.2
+
+Le BBFx Revival v3.x ajoute une couche Studio GUI complete au-dessus du moteur headless v2.x :
+
+### v3.0 — BBFx Studio
+Application GUI Dear ImGui : StudioApp, StudioEngine (RenderTexture), NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel. Serialisation projet `.bbfx-project` (JSON). CommandManager avec undo/redo (Command pattern).
+
+### v3.1 — BBFx Studio++
+Completion et stabilisation. BPM sync DAG (beat/beatFrac ports). CLI (`--default`, `--reset`, `--fullscreen`). File dialogs natifs. Console REPL. Raccourcis clavier complets.
+
+### v3.2 — BBFx Studio Content
+ParamSpec (14 types, auto-generation Inspector). 13 node types Studio (SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Mixer, Mapper, Trigger, Splitter, BeatTrigger). 41 presets. 8 shaders proceduraux. 13 compositors BBFx. NodeTypeRegistry. Enable/disable noeuds. MeshGenerator.
+
+### v3.2.1 — Interactive Viewport
+ViewportCameraController (orbit/pan/zoom/FPS). ViewportPicker (ray query, outline GLSL). ViewportGizmo (translate/rotate/scale XYZ). ViewportGrid (procedurale infinie). ViewportToolbar. Safe deletion (cleanup OGRE). Entity linking system (SceneObjectNode→FX nodes, target_entity ParamSpec, onLinkChanged, Format B presets). TransformCommands (undo/redo gizmo).
+
+### v3.2.2 — Multi-Object Scene
+SceneHierarchyPanel (F8, visibility/lock par objet). SceneObjectNamer (nommage Blender-style). DuplicateNodeCommand (Ctrl+D). Viewport context menus (Add Object, Apply FX). Drag-drop mesh/FX. Reparenting OGRE (parent_node ParamSpec, transform conversion). FX badge. Entity link unifie (auto-creation 3 passes, getTargetSceneNode() Lua API, resolution dynamique). Visibilite 3 sources (mEnabled && mUserVisible && port visible).

@@ -34,6 +34,14 @@ public:
     bool isEnabled() const { return mEnabled; }
     virtual void setEnabled(bool en) { mEnabled = en; }
 
+    /// User-controlled visibility (distinct from enable). Affects OGRE rendering only, not DAG.
+    bool isUserVisible() const { return mUserVisible; }
+    virtual void setUserVisible(bool v) { mUserVisible = v; }
+
+    /// Lock prevents selection and transformation via viewport picking/gizmo.
+    bool isLocked() const { return mLocked; }
+    void setLocked(bool l) { mLocked = l; }
+
     /// Called before deletion to destroy OGRE objects (Entity, SceneNode, Material, etc.)
     /// Override in FX nodes that create OGRE resources.
     virtual void cleanup() {}
@@ -53,6 +61,8 @@ protected:
     Ports mInputs;
     Ports mOutputs;
     bool mEnabled = true;
+    bool mUserVisible = true;
+    bool mLocked = false;
 
     AnimationPort* addInput(AnimationPort* port);
     AnimationPort* addOutput(AnimationPort* port);

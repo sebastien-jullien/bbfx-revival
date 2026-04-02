@@ -7,6 +7,8 @@
 #include "../viewport/ViewportToolbar.h"
 #include <cstdint>
 #include <memory>
+#include <functional>
+#include <string>
 
 namespace bbfx {
 
@@ -45,6 +47,21 @@ public:
     /// Check if FPS camera mode is active (RMB held, cursor locked).
     bool isFpsCaptured() const { return mFpsCaptured; }
 
+    /// Set callback for scene object creation from viewport (Add Object, drag-drop, duplicate).
+    using CreateSceneObjectFn = std::function<void(const std::string& meshFile, float x, float y, float z)>;
+    void setCreateSceneObjectCallback(CreateSceneObjectFn fn) { mCreateSceneObjectFn = std::move(fn); }
+
+    /// Set callback for applying FX to selected object from viewport.
+    using ApplyFxFn = std::function<void(const std::string& fxType, const std::string& targetNodeName)>;
+    void setApplyFxCallback(ApplyFxFn fn) { mApplyFxFn = std::move(fn); }
+
+    /// Set callback for duplicating the selected object.
+    using DuplicateFn = std::function<void(const std::string& nodeName)>;
+    void setDuplicateCallback(DuplicateFn fn) { mDuplicateFn = std::move(fn); }
+
+    /// Compute the 3D position from viewport coordinates by ray-plane intersection (XZ plane).
+    Ogre::Vector3 viewportDropPosition(float normalizedX, float normalizedY) const;
+
 private:
     void syncSize();
 
@@ -69,6 +86,10 @@ private:
     std::unique_ptr<ViewportGizmo> mGizmo;
     ViewportToolbar mToolbar;
 
+    // Callbacks for scene operations
+    CreateSceneObjectFn mCreateSceneObjectFn;
+    ApplyFxFn mApplyFxFn;
+    DuplicateFn mDuplicateFn;
 };
 
 } // namespace bbfx

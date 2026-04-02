@@ -42,6 +42,15 @@ Ogre::MovableObject* ViewportPicker::pick(float nx, float ny)
     auto& results = mRayQuery->execute();
     for (auto& entry : results) {
         if (entry.movable && entry.distance > 0) {
+            // Check if the corresponding DAG node is locked
+            std::string dagName = findDAGNodeForEntity(entry.movable);
+            if (!dagName.empty()) {
+                auto* animator = Animator::instance();
+                if (animator) {
+                    auto* node = animator->getRegisteredNode(dagName);
+                    if (node && node->isLocked()) continue; // skip locked nodes
+                }
+            }
             return entry.movable;
         }
     }

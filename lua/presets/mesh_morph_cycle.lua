@@ -14,7 +14,7 @@ return {
             type = "PerlinFxNode",
             primary = "fx",
             nodes = {
-                {name="mesh", type="SceneObjectNode", params={mesh_file="ogrehead.mesh"}},
+                {name="mesh", type="SceneObjectNode", params={mesh_file="geosphere4500.mesh"}},
                 {name="fx",   type="PerlinFxNode"},
             },
             links = {

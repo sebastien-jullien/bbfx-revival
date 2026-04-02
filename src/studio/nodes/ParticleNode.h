@@ -11,6 +11,7 @@ public:
     void update() override;
     void cleanup() override;
     void setEnabled(bool en) override;
+    void setUserVisible(bool v) override;
     std::string getTypeName() const override { return "ParticleNode"; }
     Ogre::SceneNode* getSceneNode() const { return mSceneNode; }
 private:

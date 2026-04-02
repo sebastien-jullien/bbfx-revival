@@ -44,7 +44,12 @@ LightNode::~LightNode() { cleanup(); }
 
 void LightNode::setEnabled(bool en) {
     AnimationNode::setEnabled(en);
-    if (mLight) mLight->setVisible(en);
+    if (mLight) mLight->setVisible(en && mUserVisible);
+}
+
+void LightNode::setUserVisible(bool v) {
+    AnimationNode::setUserVisible(v);
+    if (mLight) mLight->setVisible(v && mEnabled);
 }
 
 void LightNode::update() {

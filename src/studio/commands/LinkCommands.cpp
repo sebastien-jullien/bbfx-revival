@@ -64,10 +64,50 @@ CreateLinkCommand::CreateLinkCommand(const std::string& fromNode,
 
 void CreateLinkCommand::execute() {
     linkPorts(mFromNode, mFromPort, mToNode, mToPort);
+
+    // Auto-create entity→entity link when connecting data ports between
+    // a SceneObjectNode (entity output) and a node with entity input
+    if (mFromPort != "entity" && mToPort != "entity" && !mAutoEntityCreated) {
+        auto* animator = Animator::instance();
+        if (animator) {
+            auto* fn = animator->getRegisteredNode(mFromNode);
+            auto* tn = animator->getRegisteredNode(mToNode);
+            if (fn && tn) {
+                // Determine which node is the SceneObjectNode (entity output)
+                // and which has the entity input
+                std::string sceneNode, targetNode;
+                if (tn->getOutputs().count("entity") && fn->getInputs().count("entity"))
+                    { sceneNode = mToNode; targetNode = mFromNode; }
+                else if (fn->getOutputs().count("entity") && tn->getInputs().count("entity"))
+                    { sceneNode = mFromNode; targetNode = mToNode; }
+
+                if (!sceneNode.empty()) {
+                    // Check no entity link already exists between these two
+                    bool exists = false;
+                    for (auto& lk : animator->getLinks()) {
+                        if (lk.fromNode == sceneNode && lk.fromPort == "entity" &&
+                            lk.toNode == targetNode && lk.toPort == "entity") {
+                            exists = true; break;
+                        }
+                    }
+                    if (!exists) {
+                        linkPorts(sceneNode, "entity", targetNode, "entity");
+                        mAutoEntityFrom = sceneNode;
+                        mAutoEntityTo = targetNode;
+                        mAutoEntityCreated = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 void CreateLinkCommand::undo() {
     unlinkPorts(mFromNode, mFromPort, mToNode, mToPort);
+    if (mAutoEntityCreated) {
+        unlinkPorts(mAutoEntityFrom, "entity", mAutoEntityTo, "entity");
+        mAutoEntityCreated = false;
+    }
 }
 
 std::string CreateLinkCommand::description() const {
