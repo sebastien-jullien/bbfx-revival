@@ -4,12 +4,14 @@
 #include "../core/ParamSpec.h"
 #include "PerlinVertexShader.h"
 #include <memory>
+#include <map>
+#include <vector>
 
 namespace bbfx {
 
 class PerlinFxNode : public AnimationNode {
 public:
-    PerlinFxNode(const string& meshName, const string& cloneName);
+    PerlinFxNode(const string& defaultMesh, const string& clonePrefix);
     virtual ~PerlinFxNode();
     void update() override;
     void setEnabled(bool en) override;
@@ -21,25 +23,36 @@ public:
 
     /// Set by the Studio factory so cleanup() can destroy the OGRE objects
     void setStudioSceneNode(const std::string& entityName, const std::string& sceneNodeName) {
-        mStudioEntityName = entityName;
-        mStudioSceneNodeName = sceneNodeName;
+        mDefaultEntityName = entityName;
+        mDefaultSceneNodeName = sceneNodeName;
     }
 
-    /// Called by update() to create the Entity once the clone mesh is ready
-    void createDeferredEntity();
+    /// Called by update() to create Entities once clone meshes are ready
+    void createDeferredEntities();
 
 private:
-    std::unique_ptr<PerlinVertexShader> mShader;
-    std::string mStudioEntityName;
-    std::string mStudioSceneNodeName;
-    std::string mCloneMeshName;
-    bool mEntityCreated = false;
-    ParamSpec mSpec;
-    std::string mTargetNodeName;
+    /// Per-target clone data
+    struct FxClone {
+        std::unique_ptr<PerlinVertexShader> shader;
+        std::string cloneMeshName;
+        std::string entityName;
+        std::string sceneNodeName;
+        bool entityCreated = false;
+    };
 
-    void resolveTarget();
-    void setFxVisible(bool vis);
-    class SceneObjectNode* findTargetSceneObj();
+    std::map<std::string, FxClone> mClones;  // key = target node name
+    std::vector<std::string> mTargetNodeNames;
+    std::string mClonePrefix;
+    std::string mDefaultMesh;
+    std::string mDefaultEntityName;
+    std::string mDefaultSceneNodeName;
+    ParamSpec mSpec;
+
+    void resolveTargets();
+    void addCloneForTarget(const std::string& targetName);
+    void removeClone(const std::string& targetName);
+    void setCloneVisible(const std::string& targetName, bool vis);
+    class SceneObjectNode* findTargetSceneObj(const std::string& targetName);
 };
 
 } // namespace bbfx

@@ -25,7 +25,7 @@ ShaderFxNode::ShaderFxNode(const std::string& name,
     // dt input for time accumulation
     addInput(new AnimationPort("dt", 0.016f));
     // entity input — visual anchor for linking from SceneObjectNode
-    addInput(new AnimationPort("entity", 0.0f));
+    addInput(new AnimationPort("entity", 0.0f, true));
 
     // ParamSpec for target_entity (STRING type, filled by auto-link)
     ParamDef targetDef;
@@ -123,10 +123,18 @@ void ShaderFxNode::setEnabled(bool en) {
 }
 
 void ShaderFxNode::resolveTarget() {
-    // Read target name from ParamSpec
+    // Read first target from the DAG graph (source of truth)
     std::string targetName;
-    auto* td = mSpec.getParam("target_entity");
-    if (td) targetName = td->stringVal;
+    auto* animator = Animator::instance();
+    if (animator) {
+        auto& inputs = getInputs();
+        auto it = inputs.find("entity");
+        if (it != inputs.end()) {
+            auto sources = animator->getSourceNodes(it->second);
+            if (!sources.empty() && sources[0])
+                targetName = sources[0]->getName();
+        }
+    }
 
     // No target configured — detach if we were attached
     if (targetName.empty()) {
@@ -135,10 +143,8 @@ void ShaderFxNode::resolveTarget() {
         return;
     }
 
-    // Look up the SceneObjectNode by name via the Animator
-    auto* animator = dynamic_cast<Animator*>(getListener());
+    // Look up the SceneObjectNode by name
     if (!animator) return;
-
     auto* targetNode = animator->getRegisteredNode(targetName);
     if (!targetNode) {
         // Target was deleted — detach gracefully

@@ -1,4 +1,4 @@
-# BBFx Revival — v3.2.2
+# BBFx Revival — v3.2.3
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -13,6 +13,8 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 **v3.2.1 "Interactive Viewport"** adds direct manipulation in the 3D viewport: orbit/pan/zoom camera controller (Alt+LMB/MMB/scroll), ray-query object picking with bidirectional selection sync, translation gizmo with axis constraints and undo, procedural infinite grid, viewport toolbar (Select/Translate modes via Q/W), safe deletion with full OGRE cleanup, mesh-to-FX auto-linking, and "Use Editor Camera" toggle.
 
 **v3.2.2 "Multi-Object Scene"** transforms the Studio from a single-object editor into a multi-object composition engine: Scene Hierarchy panel (F8) with visibility/lock toggles, Blender-style intelligent naming (ogrehead→Ogre with auto-increment), right-click context menus for object creation and FX application, drag-drop mesh/FX from browser to viewport, object duplication (Ctrl+D), parent-child hierarchy with relative transforms, cascade FX (multiple FX on one object), unified entity linking for all node types, and dynamic target resolution.
+
+**v3.2.3 "Timeline Automation"** transforms the decorative timeline into a full automation sequencer: AutomationData structures with multi-mode interpolation (Step, Linear, Smooth, EaseIn, EaseOut, Bezier), AutomationEngine per-frame evaluation and DAG injection, automation lanes UI with virtualized rendering, keyframe editing (create/drag/delete, popup, multi-selection, quantize), cue markers with keyboard navigation, loop region, trigger events (chord_jump, preset, enable/disable), real-time recording from faders and Inspector (overdub/replace modes), bezier tangent editing, copy-paste keyframes, LFO generation (sine/square/triangle/sawtooth), chord snapshots with crossfade transitions, and native multi-target DAG (port multiLink, FX multi-clone from graph, target_entity migration). 58 iterations across 9 lots (A-I).
 
 ---
 
@@ -136,6 +138,25 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Cascade FX** — multiple FX nodes can target the same SceneObjectNode simultaneously
 - **dbg.test() 11/11 PASS** — fix timing deferred creates, all tests green
 
+### BBFx Studio Timeline Automation (v3.2.3)
+- **Fix pause/resume** — `RootTimeNode::resume()` resets `mLastTime` without touching `mTotalTime`, `seekTo()` for repositioning, dt clamp 0.1s
+- **AutomationData** — Keyframe, AutomationLane, CueMarker, TriggerEvent, LoopRegion structures; multi-mode interpolation (Step, Linear, Smooth, EaseIn, EaseOut, Bezier); `evaluate()` with binary search
+- **AutomationEngine** — per-frame evaluation of all active lanes, port value injection between `time->update()` and `renderOneFrame()`
+- **Automation lanes UI** — virtualized rendering under chord blocks, keyframe diamonds (8x8px), interpolation curves, lane header (mute/collapse/arm), assignation lane-to-port via dropdown
+- **Keyframe editing** — double-click create, drag move, Delete remove, popup editor (beat/value/mode), right-click interpolation mode, Ctrl+Q quantize, rubber band multi-selection, grouped operations
+- **Cue markers** — M to add at playhead, Ctrl+Left/Right navigation, rename, delete; yellow dashed vertical lines
+- **Loop region** — Shift+drag on time bar, L toggle, `seekTo()` wrap at endBeat
+- **Trigger events** — programmable actions at precise beats (chord_jump, preset, enable, disable); fire on beat crossing
+- **Recording** — arm lanes (R button), real-time capture from faders and Inspector, `thinRedundantKeyframes()` post-record cleanup, overdub/replace modes
+- **Bezier tangents** — editable handles (drag circles), `SetTangentCommand` with undo, cubic bezier evaluation via De Casteljau
+- **Copy-paste** — Ctrl+C/V keyframes with relative beat offset, `PasteKeyframesCommand`
+- **LFO generation** — sine/square/triangle/sawtooth waveforms, configurable frequency/amplitude/offset/cycles, `GenerateLFOCommand`
+- **Zoom vertical** — Ctrl+scroll on lanes area, 24px-200px range
+- **Chord snapshots** — Store/Recall parameter snapshots on chord blocks, crossfade transitions on playhead entry
+- **Automation serialization** — `AutomationData::toJson()/fromJson()`, `ProjectSerializer` section "automation", retrocompatible with v3.2.2 files
+- **AutomationCommands** — 17 undoable commands (AddKeyframe, MoveKeyframe, DeleteKeyframe, SetInterpolationMode, SetTangent, AddLane, DeleteLane, AssignLanePort, AddCueMarker, DeleteCueMarker, RenameCueMarker, AddTriggerEvent, DeleteTriggerEvent, SetLoopRegion, QuantizeKeyframes, PasteKeyframes, GenerateLFO)
+- **Native multi-target DAG** — `AnimationPort::multiLink` flag, `Animator::getSourceNodes()` helper, FX nodes `resolveTargets()` multi-clone from graph, `target_entity` ParamSpec removed, serialization migration
+
 ---
 
 ## Architecture
@@ -147,8 +168,9 @@ sol2 bindings (src/bindings/bbfx_bindings.cpp)
     |
 C++ core
   ├── Engine          -- SDL3 window + OGRE render loop
-  ├── Animator        -- Boost.Graph DAG, BFS propagation, pre/post op queues
-  ├── PrimitiveNodes  -- RootTimeNode, LuaAnimationNode, AnimationStateNode
+  ├── Animator        -- Boost.Graph DAG, BFS propagation, pre/post op queues, multiLink ports
+  ├── PrimitiveNodes  -- RootTimeNode (resume/seekTo), LuaAnimationNode, AnimationStateNode
+  ├── Automation      -- AutomationData, AutomationEngine (per-frame DAG injection)
   ├── FX              -- Perlin (CPU+GPU), TextureBlitter, WaveVertex, Shader, ColorShift
   ├── Input           -- KeyboardManager, MouseManager, JoystickManager (SDL3)
   ├── Audio           -- AudioCapture, AudioAnalyzer, BeatDetector
@@ -175,7 +197,9 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 |--------|-------------|
 | `src/core/Engine` | SDL3 window + OGRE render loop singleton |
 | `src/core/Animator` | Animation DAG: add/remove nodes, link/unlink ports, BFS propagation |
-| `src/core/PrimitiveNodes` | RootTimeNode (clock), LuaAnimationNode, AnimationStateNode, AccumulatorNode |
+| `src/core/PrimitiveNodes` | RootTimeNode (clock + resume/seekTo), LuaAnimationNode, AnimationStateNode, AccumulatorNode |
+| `src/core/AutomationData` | Keyframe, AutomationLane, CueMarker, TriggerEvent, LoopRegion; multi-mode interpolation evaluate() |
+| `src/core/AutomationEngine` | Per-frame automation evaluation, DAG port injection |
 | `src/fx/PerlinVertexShader` | 3D Perlin noise CPU vertex deformation |
 | `src/fx/ShaderFxNode` | GLSL shader loader with auto-parsed float uniforms as ports |
 | `src/fx/TextureBlitter` | Manual RGBA texture, pixel-level write |
@@ -189,7 +213,7 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode |
 | `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel |
 | `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
-| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands |
+| `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands, AutomationCommands |
 | `src/studio/generators/` | MeshGenerator (plane, sphere, cube, cylinder, torus, cone) |
 | `src/studio/project/` | ProjectSerializer, ExportDialog |
 | `src/bindings/` | sol2 bindings for all BBFx types |
@@ -368,14 +392,14 @@ ctest --preset windows-release
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2.2), all modules, Lua API, design decisions
+- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.2.3), all modules, Lua API, design decisions
 - [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo and Studio usage reference
 
 ---
 
 ## History
 
-BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), and v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX.
+BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, and v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG.
 
 ---
 

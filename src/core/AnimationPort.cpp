@@ -2,8 +2,8 @@
 
 namespace bbfx {
 
-AnimationPort::AnimationPort(const string& name, Ogre::Real value)
-    : mName(name), mValue(value) {}
+AnimationPort::AnimationPort(const string& name, Ogre::Real value, bool multiLink)
+    : mName(name), mValue(value), mMultiLink(multiLink) {}
 
 AnimationPort::~AnimationPort() = default;
 

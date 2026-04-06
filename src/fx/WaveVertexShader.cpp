@@ -23,7 +23,7 @@ WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneNa
     AnimationNode::addInput(new AnimationPort("frequency", 2.0f));
     AnimationNode::addInput(new AnimationPort("speed", 1.0f));
     AnimationNode::addInput(new AnimationPort("axis", 1.0f));
-    AnimationNode::addInput(new AnimationPort("entity", 0.0f));
+    AnimationNode::addInput(new AnimationPort("entity", 0.0f, true));
     AnimationNode::addOutput(new AnimationPort("mesh_dirty", 0.0f));
 
     ParamDef targetDef;
@@ -95,9 +95,18 @@ void WaveVertexShader::setEnabled(bool en) {
 }
 
 void WaveVertexShader::resolveTarget() {
+    // Read first target from the DAG graph (source of truth)
     std::string targetName;
-    auto* td = mSpec.getParam("target_entity");
-    if (td) targetName = td->stringVal;
+    auto* animator = Animator::instance();
+    if (animator) {
+        auto& inputs = getInputs();
+        auto it = inputs.find("entity");
+        if (it != inputs.end()) {
+            auto sources = animator->getSourceNodes(it->second);
+            if (!sources.empty() && sources[0])
+                targetName = sources[0]->getName();
+        }
+    }
 
     // Target removed (link deleted) → hide FX clone, restore original mesh
     if (targetName.empty()) {

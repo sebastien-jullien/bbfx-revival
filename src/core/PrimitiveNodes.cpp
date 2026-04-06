@@ -1,6 +1,7 @@
 #include "PrimitiveNodes.h"
 #include "Animator.h"
 #include "../studio/nodes/SceneObjectNode.h"
+#include <sstream>
 
 namespace bbfx {
 
@@ -8,8 +9,8 @@ namespace bbfx {
 
 LuaAnimationNode::LuaAnimationNode(const string& name, sol::function update)
     : AnimationNode(name), mUpdateHook(std::move(update)) {
-    // Entity input port — visual anchor for Mesh→LuaAnimation linking
-    AnimationNode::addInput(new AnimationPort("entity", 0.0f));
+    // Entity input port — multi-link: accepts N SceneObjectNode connections
+    AnimationNode::addInput(new AnimationPort("entity", 0.0f, true));
 
     // ParamSpec with target_entity (same pattern as FX nodes)
     ParamDef targetDef;
@@ -30,18 +31,50 @@ void LuaAnimationNode::addOutput(const string& name) {
 }
 
 void LuaAnimationNode::update() {
-    if (mUpdateHook.valid()) {
+    if (!mUpdateHook.valid()) return;
+
+    if (mTargetNodeNames.size() <= 1) {
+        // Single target or no target: call once (original behavior)
         auto result = mUpdateHook(this);
         if (!result.valid()) {
             sol::error err = result;
             cerr << "LuaAnimationNode update error: " << err.what() << endl;
         }
+    } else {
+        // Multi-target: call the update hook once per target,
+        // temporarily setting mTargetNodeName to each target.
+        // This way, getTargetSceneNode() returns the correct target
+        // for scripts using the single-target API.
+        std::string saved = mTargetNodeName;
+        for (auto& name : mTargetNodeNames) {
+            mTargetNodeName = name;
+            auto result = mUpdateHook(this);
+            if (!result.valid()) {
+                sol::error err = result;
+                cerr << "LuaAnimationNode update error on target '" << name << "': " << err.what() << endl;
+                continue;
+            }
+        }
+        mTargetNodeName = saved;
     }
 }
 
 void LuaAnimationNode::onLinkChanged() {
-    auto* td = mSpec.getParam("target_entity");
-    mTargetNodeName = td ? td->stringVal : "";
+    // Build target list from the DAG graph (source of truth)
+    mTargetNodeNames.clear();
+    auto* animator = Animator::instance();
+    if (animator) {
+        auto& inputs = getInputs();
+        auto it = inputs.find("entity");
+        if (it != inputs.end()) {
+            auto sources = animator->getSourceNodes(it->second);
+            for (auto* srcNode : sources) {
+                if (srcNode && !srcNode->getName().empty())
+                    mTargetNodeNames.push_back(srcNode->getName());
+            }
+        }
+    }
+    mTargetNodeName = mTargetNodeNames.empty() ? "" : mTargetNodeNames.front();
 }
 
 Ogre::SceneNode* LuaAnimationNode::getTargetSceneNode() const {
@@ -52,6 +85,20 @@ Ogre::SceneNode* LuaAnimationNode::getTargetSceneNode() const {
     if (!node) return nullptr;
     auto* sceneObj = dynamic_cast<SceneObjectNode*>(node);
     return sceneObj ? sceneObj->getSceneNode() : nullptr;
+}
+
+std::vector<Ogre::SceneNode*> LuaAnimationNode::getTargetSceneNodes() const {
+    std::vector<Ogre::SceneNode*> result;
+    auto* animator = Animator::instance();
+    if (!animator) return result;
+    for (auto& name : mTargetNodeNames) {
+        auto* node = animator->getRegisteredNode(name);
+        if (!node) continue;
+        auto* sceneObj = dynamic_cast<SceneObjectNode*>(node);
+        if (sceneObj && sceneObj->getSceneNode())
+            result.push_back(sceneObj->getSceneNode());
+    }
+    return result;
 }
 
 // ── AnimableValuePort ───────────────────────────────────────────────────────
@@ -132,6 +179,26 @@ void RootTimeNode::reset() {
     fireUpdate();
 }
 
+void RootTimeNode::resume() {
+    mLastTime = std::chrono::steady_clock::now();
+}
+
+void RootTimeNode::seekTo(float totalTime) {
+    mTotalTime = totalTime;
+    mLastTime = std::chrono::steady_clock::now();
+
+    float bpm = mBPMPort->getValue();
+    if (bpm > 0.0f) {
+        float beatsPerSec = bpm / 60.0f;
+        float currentBeat = mTotalTime * beatsPerSec;
+        mBeatPort->setValue(currentBeat);
+        mBeatFracPort->setValue(currentBeat - std::floor(currentBeat));
+    }
+    mTotalTimePort->setValue(mTotalTime);
+    mFrameTimePort->setValue(0.0f);
+    fireUpdate();
+}
+
 Ogre::Real RootTimeNode::getTotalTime() const {
     return mTotalTime;
 }
@@ -148,6 +215,7 @@ void RootTimeNode::update() {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration<float>(now - mLastTime).count();
     mLastTime = now;
+    if (elapsed > 0.1f) elapsed = 0.1f;  // Clamp max dt to prevent time jumps
     mTotalTime += elapsed;
     mFrameTimePort->setValue(elapsed);
     mTotalTimePort->setValue(mTotalTime);

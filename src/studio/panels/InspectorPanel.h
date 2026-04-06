@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 #include <sol/forward.hpp>
 
 namespace bbfx {
@@ -12,6 +13,17 @@ public:
 
     void render();
     void setSelectedNode(const std::string& name) { mSelectedNode = name; }
+
+    /// Callback for "Add to Timeline" context menu on float params
+    using AddToTimelineCb = std::function<void(const std::string& nodeName,
+        const std::string& portName, float minVal, float maxVal)>;
+    void setAddToTimelineCallback(AddToTimelineCb cb) { mAddToTimelineCb = std::move(cb); }
+
+    /// Callback for recording slider changes to automation
+    using RecordValueCb = std::function<void(const std::string& nodeName,
+        const std::string& portName, float value, float beat)>;
+    void setRecordValueCallback(RecordValueCb cb) { mRecordValueCb = std::move(cb); }
+    void setRecordingState(bool rec, float beat) { mIsRecording = rec; mCurrentBeat = beat; }
 
 private:
     void renderParamSpec();
@@ -33,6 +45,10 @@ private:
         float oldValue = 0.0f;
     };
     CoalescingState mCoalescing;
+    AddToTimelineCb mAddToTimelineCb;
+    RecordValueCb mRecordValueCb;
+    bool mIsRecording = false;
+    float mCurrentBeat = 0.0f;
 };
 
 } // namespace bbfx

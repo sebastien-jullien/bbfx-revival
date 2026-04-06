@@ -28,15 +28,20 @@ public:
     void setSource(const std::string& src) { mSource = src; }
     const std::string& getSource() const { return mSource; }
     std::string getTypeName() const override { return "LuaAnimationNode"; }
-    /// Returns the name of the linked target SceneObjectNode (empty if none).
+    /// Returns the name of the first linked target SceneObjectNode (empty if none).
     const std::string& getTargetNodeName() const { return mTargetNodeName; }
-    /// Resolves target_entity → SceneObjectNode → OGRE SceneNode (nullptr if unlinked).
+    /// Returns all linked target node names.
+    const std::vector<std::string>& getTargetNodeNames() const { return mTargetNodeNames; }
+    /// Resolves first target_entity → SceneObjectNode → OGRE SceneNode (nullptr if unlinked).
     Ogre::SceneNode* getTargetSceneNode() const;
+    /// Resolves all target entities → SceneNodes.
+    std::vector<Ogre::SceneNode*> getTargetSceneNodes() const;
 protected:
     sol::function mUpdateHook;
     std::string mSource; // Lua source code (for serialization)
     ParamSpec mSpec;
-    std::string mTargetNodeName;
+    std::string mTargetNodeName;                // first target (compat)
+    std::vector<std::string> mTargetNodeNames;  // all targets
 };
 
 class AnimableValuePort : public AnimationPort {
@@ -72,6 +77,8 @@ public:
     static RootTimeNode* instance();
     void update() override;
     void reset();
+    void resume();                    // Reset mLastTime without resetting mTotalTime (for unpause)
+    void seekTo(float totalTime);     // Seek to a specific time position
     Ogre::Real getTotalTime() const;
     void setBPM(float bpm);
     float getBPM() const;

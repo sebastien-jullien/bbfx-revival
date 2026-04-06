@@ -553,3 +553,7 @@ Aucune nouvelle dependance ajoutee en v3.2.2. Stack inchangee depuis v3.2.0 :
 | imgui-node-editor | 0.9+ | Node editor visuel |
 | nlohmann/json | 3.x | Serialisation projet |
 | libtheora/libogg | 1.x | Video Theora |
+
+## Etat des dependances v3.2.3 (Avril 2026)
+
+Aucune nouvelle dependance ajoutee en v3.2.3. Stack inchangee. Le systeme d'automation (AutomationData, AutomationEngine, AutomationCommands) utilise exclusivement nlohmann/json pour la serialisation et les structures STL standard (vector, map, set, lower_bound). Le port multiLink dans le DAG est implemente avec les memes structures Boost.Graph existantes.

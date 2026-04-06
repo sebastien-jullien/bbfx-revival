@@ -44,7 +44,7 @@ public:
         mSelectedNode = name;
     }
 
-    struct NodePosition { std::string name; float x, y; };
+    struct NodePosition { std::string name; float x, y; int attempts = 0; };
     std::vector<NodePosition> getNodePositions() const;
     void setNodePositions(const std::vector<NodePosition>& positions);
 
@@ -103,6 +103,7 @@ private:
     char mPresetNameBuf[128] = {};
 
     std::vector<NodePosition> mPendingPositions;
+    std::vector<std::string> mNewNodes;  // nodes added in current syncFromDAG call
 
     // Deferred drop position (screen coords, converted to canvas in next ned::Begin scope)
     ImVec2 mDropScreenPos = {0, 0};

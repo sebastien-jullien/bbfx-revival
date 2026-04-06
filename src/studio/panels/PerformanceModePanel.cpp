@@ -200,7 +200,13 @@ void PerformanceModePanel::renderFaders() {
             if (node) {
                 auto& inputs = node->getInputs();
                 auto it = inputs.find(slot.portName);
-                if (it != inputs.end()) it->second->setValue(slot.value);
+                if (it != inputs.end()) {
+                    it->second->setValue(slot.value);
+                    // Record to automation if recording
+                    if (mIsRecording && mRecordValueCb && ImGui::IsItemActive()) {
+                        mRecordValueCb(slot.nodeName, slot.portName, slot.value, mCurrentBeat);
+                    }
+                }
             }
         }
 

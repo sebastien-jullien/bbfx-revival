@@ -16,6 +16,7 @@
 #include "SettingsManager.h"
 #include "project/ProjectSerializer.h"
 #include "project/ExportDialog.h"
+#include "../core/AutomationEngine.h"
 
 #include <sol/sol.hpp>
 #include <memory>
@@ -97,6 +98,7 @@ private:
     std::unique_ptr<ConsolePanel>          mConsolePanel;
     std::unique_ptr<SetEditorPanel>        mSetEditorPanel;
     std::unique_ptr<SceneHierarchyPanel>  mSceneHierarchyPanel;
+    std::unique_ptr<AutomationEngine>     mAutomationEngine;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;

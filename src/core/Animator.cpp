@@ -191,6 +191,26 @@ std::vector<Animator::LinkInfo> Animator::getLinks() const {
     return result;
 }
 
+std::vector<AnimationNode*> Animator::getSourceNodes(AnimationPort* targetPort) const {
+    std::vector<AnimationNode*> result;
+    auto vi = mVertexMap.find(targetPort);
+    if (vi == mVertexMap.end()) return result;
+    Vertex targetVertex = vi->second;
+
+    // Iterate all edges to find those pointing TO targetVertex
+    auto edges = boost::edges(mGraph);
+    for (auto ei = edges.first; ei != edges.second; ++ei) {
+        if (boost::target(*ei, mGraph) == targetVertex) {
+            auto sv = boost::source(*ei, mGraph);
+            auto si = mPortMap.find(sv);
+            if (si != mPortMap.end() && si->second->getNode()) {
+                result.push_back(si->second->getNode());
+            }
+        }
+    }
+    return result;
+}
+
 void Animator::exportDOT(const string& filename) const {
     std::ofstream out(filename);
     if (!out.is_open()) return;

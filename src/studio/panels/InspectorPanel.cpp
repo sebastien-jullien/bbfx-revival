@@ -84,7 +84,23 @@ void InspectorPanel::renderParamSpec() {
                     // Sync to DAG port if exists
                     auto& inputs = node->getInputs();
                     auto it = inputs.find(param.name);
-                    if (it != inputs.end()) it->second->setValue(param.floatVal);
+                    if (it != inputs.end()) {
+                        it->second->setValue(param.floatVal);
+                        // Record to automation if recording
+                        if (mIsRecording && mRecordValueCb) {
+                            mRecordValueCb(mSelectedNode, param.name, param.floatVal, mCurrentBeat);
+                        }
+                    }
+                }
+                // Right-click context menu: Add to Timeline
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                    ImGui::OpenPopup(("##paramCtx_" + param.name).c_str());
+                }
+                if (ImGui::BeginPopup(("##paramCtx_" + param.name).c_str())) {
+                    if (ImGui::MenuItem("Add to Timeline") && mAddToTimelineCb) {
+                        mAddToTimelineCb(mSelectedNode, param.name, param.minVal, param.maxVal);
+                    }
+                    ImGui::EndPopup();
                 }
                 break;
             }

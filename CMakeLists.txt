@@ -95,6 +95,8 @@ add_library(bbfx-core
     src/fx/ShaderFxNode.cpp
     src/bindings/bbfx_bindings.cpp
     src/core/ParamSpec.cpp
+    src/core/AutomationData.cpp
+    src/core/AutomationEngine.cpp
     src/input/KeyboardManager.cpp
     src/input/MouseManager.cpp
     src/input/JoystickManager.cpp

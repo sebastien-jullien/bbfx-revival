@@ -3,6 +3,7 @@
 #include "CommandManager.h"
 #include <string>
 #include <vector>
+#include <map>
 
 namespace bbfx {
 
@@ -11,6 +12,8 @@ struct ChordBlock {
     float startBeat;
     float endBeat;
     float hue;
+    std::map<std::string, float> snapshot;  // portFullName → value (chord snapshot)
+    float transitionBeats = 1.0f;           // crossfade duration when entering chord
 };
 
 class AddChordCommand : public Command {

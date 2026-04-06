@@ -124,6 +124,23 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mConsolePanel         = std::make_unique<ConsolePanel>(mLua);
     mSetEditorPanel       = std::make_unique<SetEditorPanel>(mLua);
     mSceneHierarchyPanel  = std::make_unique<SceneHierarchyPanel>(Animator::instance());
+    mAutomationEngine     = std::make_unique<AutomationEngine>(&mTimelinePanel->getAutomation());
+
+    // Wire fader recording callback
+    mPerformanceModePanel->setRecordValueCallback(
+        [this](const std::string& nodeName, const std::string& portName, float value, float beat) {
+            if (mTimelinePanel) mTimelinePanel->recordValue(nodeName, portName, value, beat);
+        });
+
+    // Wire Inspector callbacks
+    mInspectorPanel->setAddToTimelineCallback(
+        [this](const std::string& nodeName, const std::string& portName, float minVal, float maxVal) {
+            if (mTimelinePanel) mTimelinePanel->addLaneForPort(nodeName, portName, minVal, maxVal);
+        });
+    mInspectorPanel->setRecordValueCallback(
+        [this](const std::string& nodeName, const std::string& portName, float value, float beat) {
+            if (mTimelinePanel) mTimelinePanel->recordValue(nodeName, portName, value, beat);
+        });
 
     initNodeTypeRegistry();
     SettingsManager::instance().load();
@@ -424,6 +441,88 @@ void StudioApp::run() {
 
         // ── Animation DAG ─────────────────────────────────────────────────────
         if (time && !mTimelinePanel->isPaused()) time->update();
+        // Automation: loop region wrap + evaluation
+        if (time && !mTimelinePanel->isPaused()) {
+            float bpm = time->getBPM();
+            float currentBeat = (bpm > 0.0f) ? time->getTotalTime() * bpm / 60.0f : 0.0f;
+
+            // Loop region wrap
+            auto& loop = mTimelinePanel->getAutomation().loopRegion;
+            if (loop.active && loop.endBeat > loop.startBeat && currentBeat >= loop.endBeat) {
+                float seekTime = loop.startBeat * 60.0f / bpm;
+                time->seekTo(seekTime);
+                currentBeat = loop.startBeat;
+            }
+
+            // Chord snapshot auto-restore + crossfade
+            {
+                float prevBeat2 = currentBeat - (time->getOutputs().at("dt")->getValue() * bpm / 60.0f);
+                for (auto& cb : mTimelinePanel->getChordBlocks()) {
+                    if (!cb.snapshot.empty() && prevBeat2 < cb.startBeat && currentBeat >= cb.startBeat) {
+                        // Entering chord with snapshot — inject values (with crossfade if transitionBeats > 0)
+                        if (animator) {
+                            for (auto& [key, targetVal] : cb.snapshot) {
+                                auto dot = key.find('.');
+                                if (dot == std::string::npos) continue;
+                                std::string nodeName = key.substr(0, dot);
+                                std::string portName = key.substr(dot + 1);
+                                auto* n = animator->getRegisteredNode(nodeName);
+                                if (!n) continue;
+                                auto& inputs = n->getInputs();
+                                auto it = inputs.find(portName);
+                                if (it == inputs.end()) continue;
+                                // Immediate restore (crossfade would need per-frame state tracking)
+                                it->second->setValue(targetVal);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Trigger events
+            float prevBeat = currentBeat - (time->getOutputs().at("dt")->getValue() * bpm / 60.0f);
+            for (auto& te : mTimelinePanel->getAutomation().triggerEvents) {
+                if (prevBeat < te.beat && currentBeat >= te.beat) {
+                    // Parse and execute action
+                    if (te.action.substr(0, 6) == "chord:" && te.action.size() > 6) {
+                        std::string chordName = te.action.substr(6);
+                        mLua["ChordSystem"]["toggle"](chordName);
+                    } else if (te.action.substr(0, 7) == "enable:" && te.action.size() > 7) {
+                        std::string nodeName = te.action.substr(7);
+                        if (animator) {
+                            auto* n = animator->getRegisteredNode(nodeName);
+                            if (n) n->setEnabled(true);
+                        }
+                    } else if (te.action.substr(0, 8) == "disable:" && te.action.size() > 8) {
+                        std::string nodeName = te.action.substr(8);
+                        if (animator) {
+                            auto* n = animator->getRegisteredNode(nodeName);
+                            if (n) n->setEnabled(false);
+                        }
+                    } else if (te.action.substr(0, 11) == "chord_jump:" && te.action.size() > 11) {
+                        std::string chordName = te.action.substr(11);
+                        if (mTimelinePanel) {
+                            for (auto& cb : mTimelinePanel->getChordBlocks()) {
+                                if (cb.name == chordName) {
+                                    float seekTime = cb.startBeat * 60.0f / bpm;
+                                    time->seekTo(seekTime);
+                                    break;
+                                }
+                            }
+                        }
+                    } else if (te.action.substr(0, 7) == "preset:" && te.action.size() > 7) {
+                        std::string presetName = te.action.substr(7);
+                        std::string cmd = "instantiatePreset('" + presetName + "')";
+                        mLua.safe_script(cmd, sol::script_pass_on_error);
+                    }
+                }
+            }
+
+            // Automation injection
+            if (mAutomationEngine) {
+                mAutomationEngine->evaluate(currentBeat, animator);
+            }
+        }
         if (animator) animator->renderOneFrame();
 
         // ── Update all registered nodes (DAG only updates connected ones) ────
@@ -917,6 +1016,15 @@ void StudioApp::renderMenuBar() {
 }
 
 void StudioApp::renderPanels() {
+    // Pass recording state to fader + inspector panels each frame
+    if (mTimelinePanel) {
+        auto* time = RootTimeNode::instance();
+        float beat = 0.0f;
+        if (time) { float bpm = time->getBPM(); if (bpm > 0) beat = time->getTotalTime() * bpm / 60.0f; }
+        bool rec = mTimelinePanel->isRecording();
+        if (mPerformanceModePanel) mPerformanceModePanel->setRecordingState(rec, beat);
+        if (mInspectorPanel) mInspectorPanel->setRecordingState(rec, beat);
+    }
     if (mPerformanceMode) {
         mPerformanceModePanel->render(mEngine.get());
         return;
@@ -1001,8 +1109,17 @@ void StudioApp::saveProject(const std::string& path) {
     // Collect chord blocks from timeline
     if (mTimelinePanel) {
         for (auto& cb : mTimelinePanel->getChordBlocks()) {
-            state.chords.push_back({cb.name, cb.startBeat, cb.endBeat, cb.hue});
+            ProjectSerializer::ChordData cd;
+            cd.name = cb.name; cd.startBeat = cb.startBeat;
+            cd.endBeat = cb.endBeat; cd.hue = cb.hue;
+            cd.snapshot = cb.snapshot; cd.transitionBeats = cb.transitionBeats;
+            state.chords.push_back(cd);
         }
+    }
+
+    // Collect automation data from timeline
+    if (mTimelinePanel) {
+        state.automation = mTimelinePanel->getAutomation();
     }
 
     if (mSerializer.save(path, state)) {
@@ -1058,9 +1175,18 @@ void StudioApp::loadProject(const std::string& path) {
         if (mTimelinePanel && !state.chords.empty()) {
             std::vector<ChordBlock> chords;
             for (auto& cd : state.chords) {
-                chords.push_back({cd.name, cd.startBeat, cd.endBeat, cd.hue});
+                ChordBlock cb;
+                cb.name = cd.name; cb.startBeat = cd.startBeat;
+                cb.endBeat = cd.endBeat; cb.hue = cd.hue;
+                cb.snapshot = cd.snapshot; cb.transitionBeats = cd.transitionBeats;
+                chords.push_back(cb);
             }
             mTimelinePanel->setChordBlocks(chords);
+        }
+
+        // Restore automation data
+        if (mTimelinePanel) {
+            mTimelinePanel->getAutomation() = state.automation;
         }
 
         std::cout << "[Studio] Loaded: " << path << std::endl;
@@ -1084,8 +1210,13 @@ void StudioApp::tickAutoSave() {
         }
         if (mTimelinePanel) {
             for (auto& cb : mTimelinePanel->getChordBlocks()) {
-                autoState.chords.push_back({cb.name, cb.startBeat, cb.endBeat, cb.hue});
+                ProjectSerializer::ChordData cd;
+                cd.name = cb.name; cd.startBeat = cb.startBeat;
+                cd.endBeat = cb.endBeat; cd.hue = cb.hue;
+                cd.snapshot = cb.snapshot; cd.transitionBeats = cb.transitionBeats;
+                autoState.chords.push_back(cd);
             }
+            autoState.automation = mTimelinePanel->getAutomation();
         }
         if (mSerializer.save(autoPath, autoState)) {
             std::cout << "[Studio] Auto-saved → " << autoPath << std::endl;
@@ -1149,14 +1280,9 @@ void StudioApp::initNodeTypeRegistry() {
     // FX nodes — use the SAME factory as LuaAnimationNode (proven safe)
     reg.registerType({"PerlinFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
         [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
-            auto* sceneMgr = Engine::instance()->getSceneManager();
-            if (!sceneMgr) return nullptr;
-            std::string cloneName = uniqueName("studio_perlin");
-            auto* node = new PerlinFxNode("ogrehead.mesh", cloneName);
-            node->enable();
-            auto entName = uniqueName("studio_ent");
-            auto snName = uniqueName("studio_sn");
-            node->setStudioSceneNode(entName, snName);
+            std::string clonePrefix = uniqueName("studio_perlin");
+            auto* node = new PerlinFxNode("ogrehead.mesh", clonePrefix);
+            // Clones are created dynamically in resolveTargets() when entity links are made
             auto* animator = Animator::instance();
             if (animator) {
                 for (auto& [pname, port] : node->getInputs()) animator->add(port);
@@ -1169,7 +1295,7 @@ void StudioApp::initNodeTypeRegistry() {
                 if (rootTime && node->getInputs().count("dt"))
                     animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
             }
-            std::cout << "[Studio] PerlinFxNode: " << name << " (real Perlin)" << std::endl;
+            std::cout << "[Studio] PerlinFxNode: " << name << " (multi-target)" << std::endl;
             return node;
         }});
 
@@ -1234,6 +1360,8 @@ void StudioApp::initNodeTypeRegistry() {
                 for (auto& [pname, port] : node->getOutputs()) animator->add(port);
                 node->setListener(animator);
                 animator->registerNode(node);
+                if (!name.empty() && name != node->getName())
+                    animator->renameNode(node->getName(), name);
                 // Link dt from RootTimeNode so waves animate
                 auto* rootTime = RootTimeNode::instance();
                 if (rootTime && node->getInputs().count("dt"))

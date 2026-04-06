@@ -106,7 +106,7 @@ void NodeEditorPanel::syncFromDAG() {
 
         NodeData nd;
         nd.name     = name;
-        nd.typeName = node->getTypeName(); // requires getTypeName() in AnimationNode
+        nd.typeName = node->getTypeName();
         nd.id       = ned::NodeId(allocId());
 
         for (auto& [pname, _] : node->getInputs()) {
@@ -238,13 +238,77 @@ void NodeEditorPanel::render() {
         // For multi-node presets, node names are "presetName_xxx".
         // Queue positions for all nodes that match the prefix.
         std::string prefix = mDropPresetName + "_";
-        float yOff = 0.0f;
         bool anyMatch = false;
+
+        // Collect all nodes belonging to this preset
+        std::vector<std::string> presetNodes;
         for (auto& [name, nd] : mNodes) {
-            if (name == mDropPresetName || name.rfind(prefix, 0) == 0) {
-                mPendingPositions.push_back({name, canvasPos.x, canvasPos.y + yOff});
-                yOff += 150.0f;
-                anyMatch = true;
+            if (name == mDropPresetName || name.rfind(prefix, 0) == 0)
+                presetNodes.push_back(name);
+        }
+        anyMatch = !presetNodes.empty();
+
+        if (anyMatch) {
+            // Build adjacency from DAG links between these preset nodes
+            auto* animator = Animator::instance();
+            std::map<std::string, std::vector<std::string>> children; // parent → [children]
+            std::set<std::string> hasParent;
+            if (animator) {
+                auto links = animator->getLinks();
+                std::set<std::string> presetSet(presetNodes.begin(), presetNodes.end());
+                for (auto& lk : links) {
+                    if (presetSet.count(lk.fromNode) && presetSet.count(lk.toNode)) {
+                        // Reverse direction: FX (target) is root, mesh (source) is child
+                        // This matches the visual flow: FX on left, mesh on right
+                        children[lk.toNode].push_back(lk.fromNode);
+                        hasParent.insert(lk.fromNode);
+                    }
+                }
+            }
+
+            // Find roots (nodes with no parent within the preset)
+            std::vector<std::string> roots;
+            for (auto& n : presetNodes) {
+                if (!hasParent.count(n)) roots.push_back(n);
+            }
+            if (roots.empty()) roots.push_back(presetNodes[0]); // fallback
+
+            // BFS layout: horizontal = depth level, vertical = branch index
+            constexpr float kLevelSpacingX = 300.0f;
+            constexpr float kBranchSpacingY = 200.0f;
+            std::set<std::string> visited;
+            std::queue<std::pair<std::string, int>> bfsQueue; // (node, depth)
+            std::map<int, int> depthCount; // how many nodes at each depth (for Y offset)
+
+            for (auto& r : roots) {
+                bfsQueue.push({r, 0});
+                visited.insert(r);
+            }
+
+            while (!bfsQueue.empty()) {
+                auto [nodeName, depth] = bfsQueue.front();
+                bfsQueue.pop();
+
+                int yIdx = depthCount[depth]++;
+                float px = canvasPos.x + depth * kLevelSpacingX;
+                float py = canvasPos.y + yIdx * kBranchSpacingY;
+                mPendingPositions.push_back({nodeName, px, py});
+
+                for (auto& child : children[nodeName]) {
+                    if (!visited.count(child)) {
+                        visited.insert(child);
+                        bfsQueue.push({child, depth + 1});
+                    }
+                }
+            }
+
+            // Position any orphan nodes (not reached by BFS)
+            float orphanX = canvasPos.x + static_cast<int>(depthCount.size()) * kLevelSpacingX;
+            for (auto& n : presetNodes) {
+                if (!visited.count(n)) {
+                    mPendingPositions.push_back({n, orphanX, canvasPos.y});
+                    orphanX += kLevelSpacingX;
+                }
             }
         }
         if (!anyMatch) {
@@ -252,33 +316,6 @@ void NodeEditorPanel::render() {
             mPendingPositions.push_back({mDropPresetName, canvasPos.x, canvasPos.y});
         }
         mDropPresetName.clear();
-    }
-
-    // Apply pending positions (deferred — needs active editor context after ned::Begin)
-    if (!mPendingPositions.empty()) {
-        std::vector<NodePosition> remaining;
-        for (auto& np : mPendingPositions) {
-            auto it = mNodes.find(np.name);
-            if (it != mNodes.end()) {
-                ned::SetNodePosition(it->second.id, {np.x, np.y});
-            } else {
-                // Check if this is a preset prefix — expand to matching nodes
-                std::string prefix = np.name + "_";
-                float yOff = 0.0f;
-                bool expanded = false;
-                for (auto& [name, nd] : mNodes) {
-                    if (name.rfind(prefix, 0) == 0) {
-                        ned::SetNodePosition(nd.id, {np.x, np.y + yOff});
-                        yOff += 150.0f;
-                        expanded = true;
-                    }
-                }
-                if (!expanded) {
-                    remaining.push_back(np); // retry next frame
-                }
-            }
-        }
-        mPendingPositions = std::move(remaining);
     }
 
     auto* animator = Animator::instance();
@@ -478,6 +515,37 @@ void NodeEditorPanel::render() {
     ned::End();
     ned::SetCurrentEditor(nullptr);
 
+    // Apply pending positions AFTER ned::End — SetNodePosition works outside Begin/End scope
+    if (!mPendingPositions.empty()) {
+        ned::SetCurrentEditor(mEditorContext);
+        std::vector<NodePosition> remaining;
+        for (auto& np : mPendingPositions) {
+            auto it = mNodes.find(np.name);
+            if (it != mNodes.end()) {
+                ned::SetNodePosition(it->second.id, {np.x, np.y});
+                np.attempts++;
+                if (np.attempts < 3) remaining.push_back(np);
+            } else {
+                std::string prefix = np.name + "_";
+                int nodeIdx = 0;
+                bool expanded = false;
+                for (auto& [name, nd] : mNodes) {
+                    if (name.rfind(prefix, 0) == 0) {
+                        float px = np.x + nodeIdx * 350.0f;
+                        float py = np.y + (nodeIdx % 2) * 100.0f;
+                        ned::SetNodePosition(nd.id, {px, py});
+                        nodeIdx++;
+                        expanded = true;
+                    }
+                }
+                if (!expanded) remaining.push_back(np);
+                else { np.attempts++; if (np.attempts < 3) remaining.push_back(np); }
+            }
+        }
+        mPendingPositions = std::move(remaining);
+        ned::SetCurrentEditor(nullptr);
+    }
+
     // ── Save as Preset modal ─────────────────────────────────────────────────
     if (mShowSavePresetDialog) {
         ImGui::OpenPopup("Save as Preset");
@@ -527,7 +595,9 @@ void NodeEditorPanel::render() {
     }
 
     // ── Drag-drop target for presets ─────────────────────────────────────
-    if (ImGui::BeginDragDropTarget()) {
+    // Use window-level drop target (works even after ned::End)
+    if (ImGui::BeginDragDropTargetCustom(ImGui::GetCurrentWindow()->ContentRegionRect,
+                                          ImGui::GetCurrentWindow()->ID)) {
         if (auto* payload = ImGui::AcceptDragDropPayload("PRESET_NAME")) {
             std::string presetName(static_cast<const char*>(payload->Data));
             // Save drop screen position — will be converted to canvas in next frame

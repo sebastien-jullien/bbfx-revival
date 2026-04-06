@@ -112,6 +112,14 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
         c["startBeat"] = cb.startBeat;
         c["endBeat"]   = cb.endBeat;
         c["hue"]       = cb.hue;
+        if (!cb.snapshot.empty()) {
+            json snap;
+            for (auto& [k, v] : cb.snapshot) snap[k] = v;
+            c["snapshot"] = snap;
+        }
+        if (cb.transitionBeats != 1.0f) {
+            c["transitionBeats"] = cb.transitionBeats;
+        }
         chords.push_back(c);
     }
     j["chords"] = chords;
@@ -144,6 +152,9 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
         quickAccess.push_back(qa);
     }
     j["performance"]["quickAccess"] = quickAccess;
+
+    // ── Automation ──────────────────────────────────────────────────────────
+    j["automation"] = state.automation.toJson();
 
     // ── Media paths ──────────────────────────────────────────────────────────
     j["media"]["videos"]  = json::array();
@@ -316,12 +327,8 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     auto ii = ins.find(toPort);
                     if (oi != outs.end() && ii != ins.end()) {
                         animator->link(oi->second, ii->second);
-                        // Entity→entity links: fill target_entity ParamSpec + notify
+                        // Entity→entity links: notify target to rebuild from DAG
                         if (fromPort == "entity" && toPort == "entity") {
-                            if (tn->getParamSpec()) {
-                                auto* td = tn->getParamSpec()->getParam("target_entity");
-                                if (td) td->stringVal = fromNode;
-                            }
                             tn->onLinkChanged();
                         }
                     }
@@ -350,10 +357,6 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 auto tIt = tg->getInputs().find("entity");
                 if (sIt == sn->getOutputs().end() || tIt == tg->getInputs().end()) return;
                 animator->link(sIt->second, tIt->second);
-                if (tg->getParamSpec()) {
-                    auto* td = tg->getParamSpec()->getParam("target_entity");
-                    if (td) td->stringVal = sceneNodeName;
-                }
                 tg->onLinkChanged();
                 std::cout << "[ProjectSerializer] Auto-created entity link: "
                           << sceneNodeName << " -> " << targetNodeName << std::endl;
@@ -400,6 +403,12 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 cd.startBeat = c.value("startBeat", 0.0f);
                 cd.endBeat   = c.value("endBeat", 4.0f);
                 cd.hue       = c.value("hue", 0.0f);
+                cd.transitionBeats = c.value("transitionBeats", 1.0f);
+                if (c.contains("snapshot")) {
+                    for (auto& [k, v] : c["snapshot"].items()) {
+                        cd.snapshot[k] = v.get<float>();
+                    }
+                }
                 outState->chords.push_back(cd);
             }
         }
@@ -433,6 +442,11 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     outState->quickAccess[i].target = qa[i].value("target", "");
                 }
             }
+        }
+
+        // ── Restore automation (v3.2.3+) ─────────────────────────────────────
+        if (outState && j.contains("automation")) {
+            outState->automation.fromJson(j["automation"]);
         }
 
         std::cout << "[ProjectSerializer] Loaded ← " << path

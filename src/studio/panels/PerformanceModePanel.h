@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 #include <sol/forward.hpp>
 
 namespace bbfx { class StudioEngine; }
@@ -12,6 +13,12 @@ public:
     explicit PerformanceModePanel(sol::state& lua);
 
     void render(StudioEngine* engine);
+
+    /// Callback for recording fader values to automation
+    using RecordValueCb = std::function<void(const std::string& nodeName,
+        const std::string& portName, float value, float beat)>;
+    void setRecordValueCallback(RecordValueCb cb) { mRecordValueCb = std::move(cb); }
+    void setRecordingState(bool rec, float beat) { mIsRecording = rec; mCurrentBeat = beat; }
 
 private:
     void renderTriggerGrid();
@@ -28,6 +35,9 @@ private:
         float value = 0.0f;
     };
     FaderSlot mFaders[8];
+    RecordValueCb mRecordValueCb;
+    bool mIsRecording = false;
+    float mCurrentBeat = 0.0f;
 
     float mBPM = 120.0f;
     float mRMS = 0.0f;

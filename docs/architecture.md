@@ -1636,7 +1636,7 @@ Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infi
 
 ---
 
-## BBFx Studio — Architecture v3.0 → v3.2.2
+## BBFx Studio — Architecture v3.0 → v3.2.3
 
 Le BBFx Revival v3.x ajoute une couche Studio GUI complete au-dessus du moteur headless v2.x :
 
@@ -1654,3 +1654,24 @@ ViewportCameraController (orbit/pan/zoom/FPS). ViewportPicker (ray query, outlin
 
 ### v3.2.2 — Multi-Object Scene
 SceneHierarchyPanel (F8, visibility/lock par objet). SceneObjectNamer (nommage Blender-style). DuplicateNodeCommand (Ctrl+D). Viewport context menus (Add Object, Apply FX). Drag-drop mesh/FX. Reparenting OGRE (parent_node ParamSpec, transform conversion). FX badge. Entity link unifie (auto-creation 3 passes, getTargetSceneNode() Lua API, resolution dynamique). Visibilite 3 sources (mEnabled && mUserVisible && port visible).
+
+### v3.2.3 — Timeline Automation
+**58 iterations (I-492 → I-549), 9 lots (A-I), 9 epics (EPIC-101 → EPIC-109)**
+
+**Lot A — Foundation + Pause Fix :** Fix pause/resume/seekTo sur RootTimeNode (resume() reset mLastTime sans toucher mTotalTime, seekTo() repositionne, clamp dt 0.1s). AutomationData (src/core/) : structures Keyframe, AutomationLane, CueMarker, TriggerEvent, LoopRegion, InterpolationMode enum. Methode evaluate() avec binary search (std::lower_bound) et interpolation multi-mode (Step, Linear, Smooth/Hermite, EaseIn, EaseOut, Bezier). AutomationEngine (src/core/) : evaluation par frame de toutes les lanes actives, injection port->setValue() entre time->update() et renderOneFrame(). Serialisation toJson/fromJson (nlohmann). ProjectSerializer section "automation" retrocompatible. TimelinePanel possede AutomationData, StudioApp wire l'AutomationEngine.
+
+**Lot B — Automation Lanes UI :** renderAutomationLanes() zone scrollable sous les chord blocks. Headers de lane (displayName, mute M, collapse triangle). Rendu virtualise (skip lanes hors viewport). Keyframes dessines en losanges 8x8px (ImGui DrawList, HSV couleur par lane). Courbes d'interpolation (Linear=AddLine, Step=stairstep, Smooth=polyline 16 points). Assignation lane→port via dropdown (getRegisteredNodeNames + sous-menu ports). Bouton "+" AddLaneCommand. Suppression lane DeleteLaneCommand. "Add to Timeline" depuis InspectorPanel (right-click parametre). AutomationCommands.h/cpp (src/studio/commands/).
+
+**Lot C — Keyframe Editing :** Creation par double-clic (AddKeyframeCommand). Drag horizontal/vertical (MoveKeyframeCommand au relache). Suppression Delete/right-click (DeleteKeyframeCommand). Popup edition (beat, value, mode). Selecteur mode interpolation par right-click (SetInterpolationModeCommand). Quantize Ctrl+Q (QuantizeKeyframesCommand = CompoundCommand). Multi-selection rubber band + Shift+clic. Operations groupees (drag/delete en CompoundCommand).
+
+**Lot D — Cue Markers, Loop, Triggers :** Cue markers (lignes jaunes pointillees, triangle + label). Touche M = AddCueMarkerCommand. Navigation Ctrl+Left/Right via seekTo(). Loop region (Shift+drag, overlay vert, SetLoopRegionCommand). Lecture en boucle (seekTo au wrap, toggle L). Trigger events (right-click barre temps, actions chord/enable/disable/preset, fire quand prevBeat < triggerBeat <= currentBeat, lastFiredBeat anti-retrigger).
+
+**Lot E — Recording :** Arm lane (bouton R, fond rouge). Record depuis faders (RecordValueCb callback, filtre dedup delta < 0.01). Record depuis Inspector (meme mecanisme). Post-record thinRedundantKeyframes() (suppression intermediaires interpolables, CompoundCommand). Modes Overdub (coexistence) / Replace (suppression plage avant enregistrement).
+
+**Lot F — Should-Have :** Mode Bezier (evaluation cubique De Casteljau, handles cercles + lignes). Drag tangentes (SetTangentCommand). Copy-paste Ctrl+C/V (PasteKeyframesCommand avec beats relatifs). LFO presets (sine/square/triangle/sawtooth, GenerateLFOCommand). Zoom vertical Ctrl+molette (0.3x..2.5x). Chord snapshot (Store/Recall, map<string,float>, serialise dans chords). Transitions chord crossfade (N beats configurable). Chord as cue (chord_jump: trigger action).
+
+**Lot G — Non-regression & Final :** Non-regression v3.2.2 complete. Test round-trip complexe (20+ lanes, 100+ keyframes). Build final 0 warnings.
+
+**Lot H — Hotfixes & Complements :** 9 fixes post-audit (serialisation snapshots, wiring recording, chord_jump/preset triggers, auto-restore snapshot, Inspector recording, box select, bezier handles rendu, post-record cleanup). Bezier tangent drag interactif (hit-test, state machine, conversion pixel→tangent, SetTangentCommand).
+
+**Lot I — Multi-target DAG natif :** AnimationPort::multiLink flag pour ports acceptant N sources. Animator::getSourceNodes() helper (parcours graphe DAG). Port entity passe en multiLink sur tous les nodes (SceneObject, LuaAnimation, Perlin, Shader, Wave). Suppression target_entity ParamSpec — source de verite = graphe DAG. linkPorts/unlinkPorts ne manipulent plus target_entity. LuaAnimationNode::onLinkChanged() construit la liste des targets depuis le graphe, update() itere (getTargetNodeNames(), getTargetSceneNodes()). PerlinFxNode resolveTargets() multi-clone (un clone par SceneObjectNode source). ShaderFxNode resolveTargets() multi-target. WaveVertexShader resolveTargets() multi-target. Serialisation : migration target_entity → liens DAG, retrocompat anciens fichiers.

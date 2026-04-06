@@ -1,4 +1,5 @@
 #pragma once
+#include "../../core/AutomationData.h"
 #include <string>
 #include <vector>
 #include <sol/forward.hpp>
@@ -20,7 +21,12 @@ public:
     /// bpm, timeSignature: timeline settings.
     /// triggers, faders, quickAccess: performance mode state.
     struct NodePosition { std::string name; float x, y; };
-    struct ChordData { std::string name; float startBeat, endBeat, hue; };
+    struct ChordData {
+        std::string name;
+        float startBeat, endBeat, hue;
+        std::map<std::string, float> snapshot;
+        float transitionBeats = 1.0f;
+    };
     struct FaderData { std::string nodeName, portName; };
     struct QuickAccessData { std::string label, target; };
 
@@ -32,6 +38,7 @@ public:
         std::string triggerChords[16];
         FaderData faders[8];
         QuickAccessData quickAccess[8];
+        AutomationData automation;
     };
 
     bool save(const std::string& path, const ProjectState& state = {});

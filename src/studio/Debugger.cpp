@@ -1,5 +1,6 @@
 #include "Debugger.h"
 #include "StudioApp.h"
+#include <sstream>
 #include "NodeTypeRegistry.h"
 #include "commands/CommandManager.h"
 #include "commands/NodeCommands.h"
@@ -346,12 +347,8 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
             return false;
         }
         animator->link(oit->second, iit->second);
-        // Auto-fill target_entity ParamSpec when entity→entity link is created
+        // Notify target node to rebuild targets from DAG
         if (fromPort == "entity" && toPort == "entity") {
-            if (tn->getParamSpec()) {
-                auto* td = tn->getParamSpec()->getParam("target_entity");
-                if (td) td->stringVal = fromNode;
-            }
             tn->onLinkChanged();
         }
         // Auto-create entity→entity link when connecting data ports between
@@ -377,10 +374,6 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                         auto tIt = tg->getInputs().find("entity");
                         if (sIt != sn->getOutputs().end() && tIt != tg->getInputs().end()) {
                             animator->link(sIt->second, tIt->second);
-                            if (tg->getParamSpec()) {
-                                auto* td = tg->getParamSpec()->getParam("target_entity");
-                                if (td) td->stringVal = sceneNode;
-                            }
                             tg->onLinkChanged();
                             std::cout << "[dbg] Auto-linked " << sceneNode
                                       << ".entity -> " << targetNode << ".entity" << std::endl;
@@ -408,12 +401,8 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         auto iit = ins.find(toPort);
         if (oit == outs.end() || iit == ins.end()) return false;
         animator->unlink(oit->second, iit->second);
-        // Clear target_entity ParamSpec when entity→entity link is removed
+        // Notify target node to rebuild targets from DAG
         if (fromPort == "entity" && toPort == "entity") {
-            if (tn->getParamSpec()) {
-                auto* td = tn->getParamSpec()->getParam("target_entity");
-                if (td) td->stringVal.clear();
-            }
             tn->onLinkChanged();
         }
         std::cout << "[dbg] Unlinked " << fromNode << "." << fromPort

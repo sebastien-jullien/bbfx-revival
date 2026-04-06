@@ -79,6 +79,9 @@ public:
     };
     std::vector<LinkInfo> getLinks() const;
 
+    /// Returns all source AnimationNodes whose output ports are connected to the given input port.
+    std::vector<AnimationNode*> getSourceNodes(AnimationPort* targetPort) const;
+
     void renderOneFrame();
 
 protected:
