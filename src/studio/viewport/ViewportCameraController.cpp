@@ -25,9 +25,15 @@ ViewportCameraController::ViewportCameraController(Ogre::SceneManager* sm, Ogre:
     auto pos = mCamNode->getPosition();
     // Derive orbit params from current camera position
     mOrbitDistance = pos.length();
-    if (mOrbitDistance < kMinDistance) mOrbitDistance = 50.0f;
-    mOrbitYaw   = Ogre::Math::ATan2(pos.x, pos.z).valueDegrees();
-    mOrbitPitch = Ogre::Math::ASin(std::clamp(pos.y / mOrbitDistance, -1.0f, 1.0f)).valueDegrees();
+    if (mOrbitDistance < kMinDistance) {
+        // Default: comfortable viewing distance with slight elevation
+        mOrbitDistance = 150.0f;
+        mOrbitYaw = 0.0f;
+        mOrbitPitch = 15.0f;
+    } else {
+        mOrbitYaw   = Ogre::Math::ATan2(pos.x, pos.z).valueDegrees();
+        mOrbitPitch = Ogre::Math::ASin(std::clamp(pos.y / mOrbitDistance, -1.0f, 1.0f)).valueDegrees();
+    }
     mOrbitCenter = Ogre::Vector3::ZERO;
 
     mDefaultYaw      = mOrbitYaw;

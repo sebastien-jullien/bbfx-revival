@@ -32,6 +32,11 @@ public:
     /// Returns the name of the currently selected node, or "".
     const std::string& getSelectedNodeName() const { return mSelectedNode; }
 
+    /// Callback for creating nodes from drops (texture, material) with optional entity link.
+    using CreateNodeFn = std::function<void(const std::string& nodeType, const std::string& paramValue,
+                                             const std::string& targetNode)>;
+    void setCreateNodeCallback(CreateNodeFn fn) { mCreateNodeFn = std::move(fn); }
+
     /// Programmatically select a node (triggers selection callback for Inspector)
     void selectNode(const std::string& name) {
         mSelectedNode = name;
@@ -47,6 +52,19 @@ public:
     struct NodePosition { std::string name; float x, y; int attempts = 0; };
     std::vector<NodePosition> getNodePositions() const;
     void setNodePositions(const std::vector<NodePosition>& positions);
+
+    /// Position a newly created node next to a target node (for viewport drops)
+    void positionNodeNextTo(const std::string& newNodeName, const std::string& targetNodeName);
+
+    /// Get the last drop screen position (set during drag-drop accept)
+    ImVec2 getDropScreenPos() const { return mDropScreenPos; }
+
+    /// Schedule positioning of a dropped asset node (texture/material) at the drop screen position
+    void scheduleDropPosition(const std::string& nodeName, const std::string& target, ImVec2 screenPos) {
+        mDropAssetNodeName = nodeName;
+        mDropAssetTarget = target;
+        mDropAssetScreenPos = screenPos;
+    }
 
     /// Re-sync node/link data from the Animator DAG. Call after deferred deletes.
     void syncFromDAG();
@@ -94,6 +112,23 @@ private:
 
     std::string mSelectedNode;
     std::function<void(const std::string&)> mSelectionCallback;
+    CreateNodeFn mCreateNodeFn;
+
+    // Cached node rects + mouse canvas pos for hit-test during drag-drop
+    struct NodeRect { float x, y, w, h; };
+    std::map<std::string, NodeRect> mCachedNodeRects;
+    // Cached screen→canvas transform
+    ImVec2 mCanvasRef0 = {0, 0};
+    ImVec2 mCanvasRef1 = {1, 0};
+    ImVec2 screenToCanvasCached(ImVec2 sp) const {
+        float sx = mCanvasRef1.x - mCanvasRef0.x; // scale per screen pixel
+        return {mCanvasRef0.x + sp.x * sx, mCanvasRef0.y + sp.y * sx};
+    }
+
+    // Deferred drop positioning for texture/material nodes (same pattern as mDropPresetName)
+    std::string mDropAssetNodeName;  // name of the TextureNode/MaterialNode to position
+    std::string mDropAssetTarget;    // SceneObjectNode target (for positioning next to it)
+    ImVec2 mDropAssetScreenPos = {0, 0};
 
     bool mShowCreateMenu = false;
     ImVec2 mCreateMenuPos;

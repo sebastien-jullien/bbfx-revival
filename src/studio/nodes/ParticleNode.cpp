@@ -1,4 +1,5 @@
 #include "ParticleNode.h"
+#include "SceneObjectNode.h"
 #include <OgreParticleEmitter.h>
 namespace bbfx {
 static int sPsysCounter = 0;
@@ -17,6 +18,10 @@ ParticleNode::ParticleNode(const std::string& name, Ogre::SceneManager* scene)
     addInput(new AnimationPort("position.y", 0.0f));
     addInput(new AnimationPort("position.z", 0.0f));
     addInput(new AnimationPort("enabled", 1.0f));
+    addInput(new AnimationPort("entity", 0.0f, true));
+
+    ParamDef tgt; tgt.name = "target_entity"; tgt.label = "Target Entity"; tgt.type = ParamType::STRING; tgt.stringVal = "";
+    mSpec.addParam(tgt);
 
     mTemplateName = tmpl.stringVal;
     if (mScene) {
@@ -50,6 +55,7 @@ void ParticleNode::update() {
         } catch (...) { mPsys = nullptr; }
     }
 
+    resolveTarget();
     if (!mPsys || !mSceneNode) return;
     auto& in = getInputs();
     mSceneNode->setPosition(in.at("position.x")->getValue(),
@@ -85,4 +91,41 @@ void ParticleNode::cleanup() {
         mSceneNode = nullptr; mPsys = nullptr;
     }
 }
+void ParticleNode::resolveTarget() {
+    auto* animator = Animator::instance();
+    if (!animator || !mSceneNode) return;
+    auto& inputs = getInputs();
+    auto it = inputs.find("entity");
+    if (it != inputs.end()) {
+        auto sources = animator->getSourceNodes(it->second);
+        if (!sources.empty()) {
+            auto* srcNode = sources[0];
+            if (srcNode && srcNode->getTypeName() == "SceneObjectNode") {
+                auto* soNode = dynamic_cast<SceneObjectNode*>(srcNode);
+                if (soNode && soNode->getSceneNode()) {
+                    if (mSceneNode->getParentSceneNode() != soNode->getSceneNode()) {
+                        auto* oldParent = mSceneNode->getParentSceneNode();
+                        if (oldParent) oldParent->removeChild(mSceneNode);
+                        soNode->getSceneNode()->addChild(mSceneNode);
+                        mSceneNode->setPosition(0, 0, 0);
+                    }
+                    mTargetNodeName = srcNode->getName();
+                    return;
+                }
+            }
+        }
+    }
+    // No target: reparent to root
+    if (!mTargetNodeName.empty() && mSceneNode) {
+        auto* oldParent = mSceneNode->getParentSceneNode();
+        if (oldParent && oldParent != mScene->getRootSceneNode()) {
+            oldParent->removeChild(mSceneNode);
+            mScene->getRootSceneNode()->addChild(mSceneNode);
+        }
+        mTargetNodeName.clear();
+    }
+}
+
+void ParticleNode::onLinkChanged() { resolveTarget(); }
+
 } // namespace bbfx

@@ -27,6 +27,8 @@ public:
     using Ports = std::map<string, AnimationPort*>;
     const Ports& getInputs() const;
     const Ports& getOutputs() const;
+    Ports& getInputs();
+    Ports& getOutputs();
 
     virtual void update();
 

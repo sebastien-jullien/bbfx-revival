@@ -12,6 +12,11 @@
 #include "../core/Engine.h"
 #include "nodes/SceneObjectNode.h"
 #include "panels/ViewportPanel.h"
+#include <OgreCompositorManager.h>
+#include <OgreCompositorChain.h>
+#include <OgreCompositorInstance.h>
+#include <OgreCompositor.h>
+#include <SDL3/SDL.h>
 
 #include <iostream>
 #include <filesystem>
@@ -32,7 +37,11 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     // Node creation via TCP crashes due to Lua re-entrancy (the TCP shell
     // callback is inside a Lua call, and the factory also calls lua.safe_script).
     // Solution: queue the operation and process it at the start of the next frame.
-    struct PendingOp { std::string action, arg1, arg2; };
+    struct PendingOp {
+        std::string action, arg1, arg2;
+        std::string paramName, paramValue;   // optional post-create ParamSpec injection
+        std::string preParamName, preParamValue; // optional pre-create _preset_params injection
+    };
     static std::vector<PendingOp> sPending;
 
     lua.set_function("_dbg_process_pending", [&lua]() {
@@ -41,10 +50,33 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         sPending.clear();
         for (auto& op : ops) {
             if (op.action == "create") {
+                // Pre-create: inject _preset_params if provided (for ShaderFxNode factory)
+                if (!op.preParamName.empty()) {
+                    sol::table pp = lua.create_table();
+                    pp[op.preParamName] = op.preParamValue;
+                    // Also inject the second shader path if present in paramName/paramValue
+                    if (!op.paramName.empty() && op.paramName.find("_shader") != std::string::npos) {
+                        pp[op.paramName] = op.paramValue;
+                        op.paramName.clear(); // consumed, don't inject post-create
+                        op.paramValue.clear();
+                    }
+                    lua["_preset_params"] = pp;
+                    std::cout << "[dbg] Pre-create: _preset_params set with "
+                              << op.preParamName << "=" << op.preParamValue << std::endl;
+                }
                 CommandManager::instance().execute(
                     std::make_unique<CreateNodeCommand>(op.arg1, op.arg2, lua));
+                // Clear _preset_params after factory execution
+                if (!op.preParamName.empty()) {
+                    lua["_preset_params"] = sol::nil;
+                }
                 auto* node = Animator::instance()
                     ? Animator::instance()->getRegisteredNode(op.arg2) : nullptr;
+                // Post-create param injection (v3.2.4)
+                if (node && !op.paramName.empty() && node->getParamSpec()) {
+                    auto* p = node->getParamSpec()->getParam(op.paramName);
+                    if (p) p->stringVal = op.paramValue;
+                }
                 std::cout << "[dbg] Created " << op.arg1 << " '" << op.arg2 << "': "
                           << (node ? "OK" : "FAILED") << std::endl;
             } else if (op.action == "preset") {
@@ -137,7 +169,48 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                         if (!nname || !ntype) continue;
                         std::string fullName = presetPrefix + "_" + *nname;
                         groupNames.push_back(fullName);
+
+                        // For ShaderFxNode: inject shader paths into _preset_params
+                        // BEFORE creation (the factory reads them in the constructor)
+                        if (*ntype == "ShaderFxNode") {
+                            std::string vs = "perlin_deform.glsl";
+                            std::string fs = "passthrough.frag";
+                            // Read from per-node params
+                            sol::optional<sol::table> nodeParams2 = nspec["params"];
+                            if (nodeParams2) {
+                                sol::optional<std::string> nvs = (*nodeParams2)["vert_shader"];
+                                sol::optional<std::string> nfs = (*nodeParams2)["frag_shader"];
+                                if (nvs && !nvs->empty()) vs = *nvs;
+                                if (nfs && !nfs->empty()) fs = *nfs;
+                            }
+                            // Read from preset-level defaults
+                            if (hasDefaults) {
+                                sol::optional<std::string> dvs = presetDefaults["vert_shader"];
+                                sol::optional<std::string> dfs = presetDefaults["frag_shader"];
+                                if (dvs && !dvs->empty()) vs = *dvs;
+                                if (dfs && !dfs->empty()) fs = *dfs;
+                            }
+                            // Insert a LambdaCommand to set _preset_params JUST BEFORE the create
+                            compound->add(std::make_unique<LambdaCommand>("Set shader params",
+                                [&lua, vs, fs]() {
+                                    sol::table pp = lua.create_table();
+                                    pp["vert_shader"] = vs;
+                                    pp["frag_shader"] = fs;
+                                    lua["_preset_params"] = pp;
+                                },
+                                [&lua]() { lua["_preset_params"] = sol::nil; }
+                            ));
+                        }
+
                         compound->add(std::make_unique<CreateNodeCommand>(*ntype, fullName, lua));
+
+                        // Clear _preset_params after ShaderFxNode creation
+                        if (*ntype == "ShaderFxNode") {
+                            compound->add(std::make_unique<LambdaCommand>("Clear shader params",
+                                [&lua]() { lua["_preset_params"] = sol::nil; },
+                                []() {}
+                            ));
+                        }
                         // Collect per-node params for deferred application
                         sol::optional<sol::table> nodeParams = nspec["params"];
                         if (nodeParams) {
@@ -264,14 +337,38 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
 
     // ── Node creation (deferred) ───────────────────────────────────────
     dbg["create"] = [](const std::string& typeName, const std::string& nodeName) -> bool {
-        sPending.push_back({"create", typeName, nodeName});
+        sPending.push_back({"create", typeName, nodeName, "", "", "", ""});
         std::cout << "[dbg] Queued: create " << typeName << " '" << nodeName << "'" << std::endl;
+        return true;
+    };
+
+    // ── Node creation with post-create param injection (v3.2.4) ──
+    dbg["create_with_param"] = [](const std::string& typeName, const std::string& nodeName,
+                                   const std::string& paramName, const std::string& paramValue) -> bool {
+        sPending.push_back({"create", typeName, nodeName, paramName, paramValue, "", ""});
+        std::cout << "[dbg] Queued: create " << typeName << " '" << nodeName
+                  << "' + set " << paramName << "=" << paramValue << std::endl;
+        return true;
+    };
+
+    // ── Node creation with pre-create _preset_params (v3.2.4 — for ShaderFxNode factory) ──
+    dbg["create_with_shader"] = [](const std::string& nodeName,
+                                    const std::string& vertShader, const std::string& fragShader) -> bool {
+        sPending.push_back({"create", "ShaderFxNode", nodeName,
+                            "", "",
+                            "vert_shader", vertShader});
+        // Store frag_shader in paramName/paramValue (will be consumed pre-create)
+        auto& op = sPending.back();
+        op.paramName = "frag_shader";
+        op.paramValue = fragShader;
+        std::cout << "[dbg] Queued: create ShaderFxNode '" << nodeName
+                  << "' vert=" << vertShader << " frag=" << fragShader << std::endl;
         return true;
     };
 
     // ── Node deletion (deferred — same as create) ──
     dbg["delete"] = [](const std::string& nodeName) -> bool {
-        sPending.push_back({"delete", nodeName, ""});
+        sPending.push_back({"delete", nodeName, "", "", "", "", ""});
         std::cout << "[dbg] Queued: delete '" << nodeName << "'" << std::endl;
         return true;
     };
@@ -322,7 +419,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     // ── Preset instantiation (deferred) ──────────────────────────────
     dbg["preset"] = [](const std::string& presetName) -> bool {
         // Deferred: loads preset file and creates node at start of next frame
-        sPending.push_back({"preset", presetName, ""});
+        sPending.push_back({"preset", presetName, "", "", "", "", ""});
         std::cout << "[dbg] Queued: preset '" << presetName << "'" << std::endl;
         return false;
     };
@@ -567,6 +664,134 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         }
         sPresetGroups.clear();
         std::cout << "[dbg] DAG cleared" << std::endl;
+    };
+
+    // ── Set ParamSpec string value (v3.2.4) ──────────────────────────────
+    dbg["set_param"] = [](const std::string& nodeName, const std::string& paramName,
+                          const std::string& value) -> bool {
+        auto* animator = Animator::instance();
+        if (!animator) return false;
+        auto* node = animator->getRegisteredNode(nodeName);
+        if (!node || !node->getParamSpec()) {
+            std::cerr << "[dbg] set_param: node '" << nodeName << "' not found or no ParamSpec" << std::endl;
+            return false;
+        }
+        auto* p = node->getParamSpec()->getParam(paramName);
+        if (!p) {
+            std::cerr << "[dbg] set_param: param '" << paramName << "' not found on '" << nodeName << "'" << std::endl;
+            return false;
+        }
+        p->stringVal = value;
+        std::cout << "[dbg] set_param: " << nodeName << "." << paramName << " = '" << value << "'" << std::endl;
+        return true;
+    };
+
+    // ── Switch mode (v3.2.4) ──────────────────────────────────────────────
+    dbg["mode"] = [app](const std::string& modeName) {
+        if (!app) return;
+        if (modeName == "performance" || modeName == "perf" || modeName == "f5") {
+            // Access StudioApp's mPerformanceMode via a public setter
+            // For now, simulate F5 by using the app pointer
+            std::cout << "[dbg] mode: switching to Performance Mode" << std::endl;
+            // We can't directly set mPerformanceMode from here (it's private)
+            // But we can use SDL to simulate the F5 key press
+            SDL_Event evt = {};
+            evt.type = SDL_EVENT_KEY_DOWN;
+            evt.key.key = SDLK_F5;
+            evt.key.mod = 0;
+            SDL_PushEvent(&evt);
+        } else if (modeName == "studio" || modeName == "design") {
+            std::cout << "[dbg] mode: switching to Studio Mode" << std::endl;
+            SDL_Event evt = {};
+            evt.type = SDL_EVENT_KEY_DOWN;
+            evt.key.key = SDLK_ESCAPE;
+            evt.key.mod = 0;
+            SDL_PushEvent(&evt);
+        }
+    };
+
+    // ── Compositor status (v3.2.4) ────────────────────────────────────────
+    dbg["compositor_status"] = [app]() {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] compositor_status: no animator" << std::endl; return; }
+
+        // List CompositorNodes in DAG
+        int count = 0;
+        for (auto& name : animator->getRegisteredNodeNames()) {
+            auto* node = animator->getRegisteredNode(name);
+            if (node && node->getTypeName() == "CompositorNode") {
+                count++;
+                auto* spec = node->getParamSpec();
+                std::string compName = "?";
+                bool enabled = true;
+                if (spec) {
+                    auto* cp = spec->getParam("compositor");
+                    auto* ep = spec->getParam("enabled");
+                    if (cp) compName = cp->stringVal;
+                    if (ep) enabled = ep->boolVal;
+                }
+                std::cout << "  CompositorNode '" << name << "' → compositor='" << compName
+                          << "' enabled=" << (enabled ? "yes" : "no") << std::endl;
+            }
+        }
+        std::cout << "[dbg] compositor_status: " << count << " CompositorNodes in DAG" << std::endl;
+
+        // Check OGRE compositor chain on RT1
+        if (app && app->getEngine()) {
+            auto* rt1 = app->getEngine()->getRenderTarget();
+            if (rt1 && rt1->getNumViewports() > 0) {
+                auto* vp1 = rt1->getViewport(0);
+                auto* chain1 = Ogre::CompositorManager::getSingleton().getCompositorChain(vp1);
+                int numInst1 = chain1 ? static_cast<int>(chain1->getNumCompositors()) : 0;
+                std::cout << "  RT1 viewport compositor chain: " << numInst1 << " instances" << std::endl;
+            }
+        }
+    };
+
+    // ── Detailed node + link trace (v3.2.4) ───────────────────────────────
+    dbg["trace"] = [](const std::string& nodeName) {
+        auto* animator = Animator::instance();
+        if (!animator) return;
+        auto* node = animator->getRegisteredNode(nodeName);
+        if (!node) {
+            std::cout << "[dbg] trace: node '" << nodeName << "' not found" << std::endl;
+            return;
+        }
+        std::cout << "=== TRACE: " << nodeName << " (" << node->getTypeName() << ") ===" << std::endl;
+        std::cout << "  enabled=" << (node->isEnabled() ? "yes" : "no") << std::endl;
+
+        // Inputs + their sources
+        std::cout << "  Inputs:" << std::endl;
+        for (auto& [pname, port] : node->getInputs()) {
+            auto sources = animator->getSourceNodes(port);
+            std::cout << "    " << pname << " = " << port->getValue();
+            if (!sources.empty()) {
+                std::cout << " ← [";
+                for (auto* src : sources) std::cout << src->getName() << " ";
+                std::cout << "]";
+            }
+            std::cout << std::endl;
+        }
+
+        // Outputs
+        std::cout << "  Outputs:" << std::endl;
+        for (auto& [pname, port] : node->getOutputs())
+            std::cout << "    " << pname << " = " << port->getValue() << std::endl;
+
+        // ParamSpec
+        if (node->getParamSpec() && !node->getParamSpec()->empty()) {
+            std::cout << "  ParamSpec:" << std::endl;
+            for (auto& p : node->getParamSpec()->getParams()) {
+                std::cout << "    " << p.name << " = ";
+                switch (p.type) {
+                    case ParamType::FLOAT: std::cout << p.floatVal; break;
+                    case ParamType::INT: std::cout << p.intVal; break;
+                    case ParamType::BOOL: std::cout << (p.boolVal ? "true" : "false"); break;
+                    default: std::cout << "'" << p.stringVal << "'"; break;
+                }
+                std::cout << std::endl;
+            }
+        }
     };
 
     // ── Save/Load project ──────────────────────────────────────────────

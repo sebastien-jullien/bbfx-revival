@@ -8,6 +8,7 @@
 #include "../commands/NodeCommands.h"
 #include "../commands/LinkCommands.h"
 #include "../commands/EditCommands.h"
+#include "../../core/ParamSpec.h"
 
 #include <imgui.h>
 #include <imgui_node_editor.h>
@@ -318,6 +319,43 @@ void NodeEditorPanel::render() {
         mDropPresetName.clear();
     }
 
+    // Deferred positioning for texture/material asset drops (same pattern)
+    if (!mDropAssetNodeName.empty()) {
+        auto canvasPos = ned::ScreenToCanvas(mDropAssetScreenPos);
+        if (!mDropAssetTarget.empty()) {
+            auto tIt = mNodes.find(mDropAssetTarget);
+            if (tIt != mNodes.end()) {
+                auto tpos = ned::GetNodePosition(tIt->second.id);
+                auto tsz = ned::GetNodeSize(tIt->second.id);
+                canvasPos.x = tpos.x + tsz.x + 50;
+                canvasPos.y = tpos.y;  // align horizontally with target
+
+                // Avoid stacking: shift down iteratively until no overlap
+                constexpr float kNodeH = 80.0f;
+                bool shifted = true;
+                while (shifted) {
+                    shifted = false;
+                    for (auto& [name, nd] : mNodes) {
+                        auto npos = ned::GetNodePosition(nd.id);
+                        if (std::abs(npos.x - canvasPos.x) < 50 && std::abs(npos.y - canvasPos.y) < kNodeH) {
+                            canvasPos.y = npos.y + kNodeH;
+                            shifted = true;
+                        }
+                    }
+                    for (auto& pp : mPendingPositions) {
+                        if (std::abs(pp.x - canvasPos.x) < 50 && std::abs(pp.y - canvasPos.y) < kNodeH) {
+                            canvasPos.y = pp.y + kNodeH;
+                            shifted = true;
+                        }
+                    }
+                }
+            }
+        }
+        mPendingPositions.push_back({mDropAssetNodeName, canvasPos.x, canvasPos.y});
+        mDropAssetNodeName.clear();
+        mDropAssetTarget.clear();
+    }
+
     auto* animator = Animator::instance();
 
     // ── Draw nodes ────────────────────────────────────────────────────────────
@@ -512,6 +550,19 @@ void NodeEditorPanel::render() {
         }
     }
 
+    // Cache node rects + mouse canvas position for hit-test during drag-drop
+    // (drag-drop target is processed AFTER ned::End, so we can't call ned:: API there)
+    mCachedNodeRects.clear();
+    for (auto& [name, nd] : mNodes) {
+        auto npos = ned::GetNodePosition(nd.id);
+        auto nsz = ned::GetNodeSize(nd.id);
+        mCachedNodeRects[name] = {npos.x, npos.y, nsz.x, nsz.y};
+    }
+    // Cache screen→canvas transformation for use after ned::End
+    // Store two reference points to compute the linear transform
+    mCanvasRef0 = ned::ScreenToCanvas({0, 0});
+    mCanvasRef1 = ned::ScreenToCanvas({1, 0});
+
     ned::End();
     ned::SetCurrentEditor(nullptr);
 
@@ -610,6 +661,97 @@ void NodeEditorPanel::render() {
                 if (presetFn) {
                     (*presetFn)(presetName);
                 }
+            }
+        }
+        // Accept particle drag → create ParticleNode
+        if (auto* payload = ImGui::AcceptDragDropPayload("PARTICLE_NAME")) {
+            std::string particleName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            sol::optional<sol::table> dbg = mLua["dbg"];
+            if (dbg) {
+                sol::optional<sol::function> createFn = (*dbg)["create"];
+                if (createFn) (*createFn)("ParticleNode", particleName);
+            }
+        }
+        // Accept compositor drag → create CompositorNode with correct compositor name
+        if (auto* payload = ImGui::AcceptDragDropPayload("COMPOSITOR_NAME")) {
+            std::string compName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            // Generate a clean node name from the compositor name
+            std::string nodeName = "comp_" + compName;
+            // Replace dots/spaces with underscores for valid node name
+            for (auto& ch : nodeName) { if (ch == '.' || ch == ' ') ch = '_'; }
+            sol::optional<sol::table> dbg = mLua["dbg"];
+            if (dbg) {
+                sol::optional<sol::function> cwpFn = (*dbg)["create_with_param"];
+                if (cwpFn) (*cwpFn)("CompositorNode", nodeName, "compositor", compName);
+            }
+        }
+        // Accept shader drag → create ShaderFxNode with the dropped shader
+        if (auto* payload = ImGui::AcceptDragDropPayload("SHADER_NAME")) {
+            std::string shaderName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            // Determine vert/frag paths by extension
+            bool isFrag = (shaderName.find(".frag") != std::string::npos);
+            std::string vertShader = isFrag ? "passthrough.vert" : shaderName;
+            std::string fragShader = isFrag ? shaderName : "passthrough.frag";
+            // Generate a clean node name
+            std::string nodeName = "shader_" + shaderName;
+            for (auto& ch : nodeName) { if (ch == '.' || ch == ' ') ch = '_'; }
+            // Use deferred creation with shader paths (injected into _preset_params at creation time)
+            sol::optional<sol::table> dbg = mLua["dbg"];
+            if (dbg) {
+                sol::optional<sol::function> cwsFn = (*dbg)["create_with_shader"];
+                if (cwsFn) (*cwsFn)(nodeName, vertShader, fragShader);
+            }
+        }
+        // Helper: find SceneObjectNode under cursor using cached transform + node rects
+        auto findSceneObjUnderCursor = [this]() -> std::string {
+            auto* anim = Animator::instance();
+            if (!anim) return "";
+            // Convert drop screen position to canvas coords using cached transform
+            auto canvasPos = screenToCanvasCached(mDropScreenPos);
+            for (auto& [name, rect] : mCachedNodeRects) {
+                if (canvasPos.x >= rect.x && canvasPos.x <= rect.x + rect.w &&
+                    canvasPos.y >= rect.y && canvasPos.y <= rect.y + rect.h) {
+                    auto* node = anim->getRegisteredNode(name);
+                    if (node && node->getTypeName() == "SceneObjectNode")
+                        return name;
+                }
+            }
+            return "";
+        };
+
+        // Accept texture → create TextureNode + auto-link to SceneObjectNode under cursor
+        if (auto* payload = ImGui::AcceptDragDropPayload("TEXTURE_NAME")) {
+            std::string texName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            // Hit-test: find SceneObjectNode under cursor via cached rects
+            std::string linkTarget = findSceneObjUnderCursor();
+            // Fallback: use selected node
+            if (linkTarget.empty() && !mSelectedNode.empty()) {
+                auto* anim = Animator::instance();
+                auto* selNode = anim ? anim->getRegisteredNode(mSelectedNode) : nullptr;
+                if (selNode && selNode->getTypeName() == "SceneObjectNode")
+                    linkTarget = mSelectedNode;
+            }
+            if (mCreateNodeFn) {
+                mCreateNodeFn("TextureNode", texName, linkTarget);
+            }
+        }
+        // Accept material → create MaterialNode + auto-link to SceneObjectNode under cursor
+        if (auto* payload = ImGui::AcceptDragDropPayload("MATERIAL_NAME")) {
+            std::string matName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            std::string linkTarget = findSceneObjUnderCursor();
+            if (linkTarget.empty() && !mSelectedNode.empty()) {
+                auto* anim = Animator::instance();
+                auto* selNode = anim ? anim->getRegisteredNode(mSelectedNode) : nullptr;
+                if (selNode && selNode->getTypeName() == "SceneObjectNode")
+                    linkTarget = mSelectedNode;
+            }
+            if (mCreateNodeFn) {
+                mCreateNodeFn("MaterialNode", matName, linkTarget);
             }
         }
         ImGui::EndDragDropTarget();
@@ -795,6 +937,32 @@ void NodeEditorPanel::showNodeContextMenu() {
                 ImGui::Separator();
             }
         }
+        // Detach Particle (v3.2.4) — only for ParticleNodes with entity links
+        if (!mSelectedNode.empty()) {
+            auto* animator2 = Animator::instance();
+            auto* selNode = animator2 ? animator2->getRegisteredNode(mSelectedNode) : nullptr;
+            if (selNode && selNode->getTypeName() == "ParticleNode") {
+                auto& inputs = selNode->getInputs();
+                auto entityIt = inputs.find("entity");
+                if (entityIt != inputs.end()) {
+                    auto* entityPort = entityIt->second;
+                    auto sourceNodes = animator2->getSourceNodes(entityPort);
+                    if (!sourceNodes.empty()) {
+                        if (ImGui::MenuItem("Detach Particle")) {
+                            // Find and unlink all source entity ports connected to this particle's entity port
+                            for (auto* srcNode : sourceNodes) {
+                                auto& srcOuts = srcNode->getOutputs();
+                                auto srcEntityIt = srcOuts.find("entity");
+                                if (srcEntityIt != srcOuts.end()) {
+                                    animator2->unlink(srcEntityIt->second, entityPort);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Save as Preset")) {
             mShowSavePresetDialog = true;
             std::memset(mPresetNameBuf, 0, sizeof(mPresetNameBuf));
@@ -832,6 +1000,43 @@ void NodeEditorPanel::setNodePositions(const std::vector<NodePosition>& position
         if (it != mNodes.end()) {
             ned::SetNodePosition(it->second.id, {np.x, np.y});
         }
+    }
+    ned::SetCurrentEditor(nullptr);
+}
+
+void NodeEditorPanel::positionNodeNextTo(const std::string& newNodeName, const std::string& targetNodeName) {
+    ned::SetCurrentEditor(mEditorContext);
+    auto tIt = mNodes.find(targetNodeName);
+    if (tIt != mNodes.end()) {
+        auto tpos = ned::GetNodePosition(tIt->second.id);
+        auto tsz = ned::GetNodeSize(tIt->second.id);
+        float px = tpos.x + tsz.x + 50;
+        float py = tpos.y;  // align horizontally with target node
+
+        // Avoid stacking: check ALL nodes (existing + pending) and shift down
+        constexpr float kNodeHeight = 80.0f;
+        bool shifted = true;
+        while (shifted) {
+            shifted = false;
+            for (auto& [name, nd] : mNodes) {
+                if (name == newNodeName) continue;
+                auto npos = ned::GetNodePosition(nd.id);
+                if (std::abs(npos.x - px) < 50 && std::abs(npos.y - py) < kNodeHeight) {
+                    py = npos.y + kNodeHeight;
+                    shifted = true;
+                }
+            }
+            for (auto& pp : mPendingPositions) {
+                if (std::abs(pp.x - px) < 50 && std::abs(pp.y - py) < kNodeHeight) {
+                    py = pp.y + kNodeHeight;
+                    shifted = true;
+                }
+            }
+        }
+
+        mPendingPositions.push_back({newNodeName, px, py});
+    } else {
+        mPendingPositions.push_back({newNodeName, 0, 0});
     }
     ned::SetCurrentEditor(nullptr);
 }

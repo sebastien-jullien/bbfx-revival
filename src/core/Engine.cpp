@@ -65,6 +65,7 @@ std::filesystem::path findProjectRoot(const std::filesystem::path& start) {
 namespace bbfx {
 
 Engine* Engine::sInstance = nullptr;
+std::string Engine::sRendererOverride;
 
 // ── Standard headless constructor ─────────────────────────────────────────────
 Engine::Engine(sol::state& lua)
@@ -99,15 +100,28 @@ void Engine::initOGRE(bool externalGLContext) {
     mRoot = new Ogre::Root("", "", "bbfx.log");
     loadOgrePlugins();
 
-    // For external GL context (Studio), use GL3Plus explicitly.
-    // For headless mode, try the platform default, then GL3Plus fallback.
+    // If --d3d11 was requested at runtime but D3D11 plugin wasn't compiled in,
+    // try to load it dynamically now (before renderer selection).
+    if (!sRendererOverride.empty() && sRendererOverride.find("Direct3D11") != std::string::npos) {
+        if (!mRoot->getRenderSystemByName("Direct3D11 Rendering Subsystem")) {
+            try { mRoot->loadPlugin("RenderSystem_Direct3D11"); }
+            catch (...) { std::cerr << "[Engine] Could not load RenderSystem_Direct3D11 plugin" << std::endl; }
+        }
+    }
+
+    // Renderer selection:
+    //  1. If --d3d11 was passed (sRendererOverride set), use that.
+    //  2. For external GL context (Studio), use GL3Plus.
+    //  3. For headless, use platform default (GL3Plus on Windows, Vulkan on Linux).
     Ogre::RenderSystem* rs = nullptr;
-    if (externalGLContext) {
+    if (!sRendererOverride.empty()) {
+        rs = mRoot->getRenderSystemByName(sRendererOverride);
+    } else if (externalGLContext) {
         rs = mRoot->getRenderSystemByName("OpenGL 3+ Rendering Subsystem");
     } else {
         rs = mRoot->getRenderSystemByName(BBFX_OGRE_RENDERER);
-        if (!rs) rs = mRoot->getRenderSystemByName("OpenGL 3+ Rendering Subsystem");
     }
+    if (!rs) rs = mRoot->getRenderSystemByName("OpenGL 3+ Rendering Subsystem");
     if (!rs) {
         throw Exception("No render system available");
     }

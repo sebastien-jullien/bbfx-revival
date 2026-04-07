@@ -7,6 +7,7 @@
 #include <OgrePass.h>
 #include <OgreEntity.h>
 #include <OgreSubEntity.h>
+#include <OgreTextureUnitState.h>
 #include <OgreSceneManager.h>
 #include <OgreResourceGroupManager.h>
 #include <fstream>
@@ -92,6 +93,17 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
     pass->setVertexProgram(vpName);
     pass->setFragmentProgram(fpName);
 
+    // If fragment shader uses sampler2D tex0, add a TextureUnitState
+    // so post-process shaders can read the mesh's original texture
+    if (fragSource.find("sampler2D tex0") != std::string::npos ||
+        fragSource.find("sampler2D rt0") != std::string::npos) {
+        auto* tus = pass->createTextureUnitState();
+        tus->setTextureAddressingMode(Ogre::TextureUnitState::TAM_CLAMP);
+        // The texture will be inherited from the entity's original material
+        // when applyToEntity() is called
+        mNeedsTex0 = true;
+    }
+
     // Set OGRE auto-params
     mVertParams = pass->getVertexProgramParameters();
     mVertParams->setNamedAutoConstant("worldViewProj",
@@ -111,7 +123,9 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
         // Fragment shader may not use all auto-params
     }
 
-    std::cout << "[ShaderFxNode] Loaded: " << vertPath << " (" << mUniforms.size() << " uniforms)" << std::endl;
+    std::cout << "[ShaderFxNode] Loaded: " << vertPath << " + " << fragPath
+              << " (" << mUniforms.size() << " uniforms"
+              << (mNeedsTex0 ? ", needs tex0" : "") << ")" << std::endl;
 }
 
 void ShaderFxNode::setEnabled(bool en) {
@@ -120,6 +134,10 @@ void ShaderFxNode::setEnabled(bool en) {
         detachFromEntity();
     }
     // On re-enable, resolveTarget() in next update() will re-attach
+}
+
+void ShaderFxNode::onLinkChanged() {
+    resolveTarget();
 }
 
 void ShaderFxNode::resolveTarget() {
@@ -136,6 +154,26 @@ void ShaderFxNode::resolveTarget() {
         }
     }
 
+    // Diagnostic log (once per target change)
+    static std::string sLastDiag;
+    std::string diag = getName() + "→" + targetName;
+    if (diag != sLastDiag) {
+        sLastDiag = diag;
+        if (targetName.empty()) {
+            std::cout << "[ShaderFx DIAG] " << getName() << ": no entity source found in DAG" << std::endl;
+        } else {
+            auto* targetNode = animator ? animator->getRegisteredNode(targetName) : nullptr;
+            auto* sceneObj = targetNode ? dynamic_cast<SceneObjectNode*>(targetNode) : nullptr;
+            std::cout << "[ShaderFx DIAG] " << getName() << ": target='" << targetName
+                      << "' node=" << (targetNode ? "found" : "NULL")
+                      << " isSceneObj=" << (sceneObj ? "yes" : "no")
+                      << " entity=" << (sceneObj && sceneObj->getEntity() ? "present" : "NULL")
+                      << " enabled=" << (sceneObj ? (sceneObj->isEnabled() ? "yes" : "no") : "N/A")
+                      << " material=" << (mMaterial ? mMaterial->getName() : "NULL")
+                      << std::endl;
+        }
+    }
+
     // No target configured — detach if we were attached
     if (targetName.empty()) {
         if (mEntity) detachFromEntity();
@@ -147,7 +185,6 @@ void ShaderFxNode::resolveTarget() {
     if (!animator) return;
     auto* targetNode = animator->getRegisteredNode(targetName);
     if (!targetNode) {
-        // Target was deleted — detach gracefully
         if (mEntity) detachFromEntity();
         mTargetNodeName.clear();
         return;
@@ -174,6 +211,8 @@ void ShaderFxNode::resolveTarget() {
 
     // Apply if not yet applied
     if (!mEntity) {
+        std::cout << "[ShaderFx] Applying material '" << mMaterial->getName()
+                  << "' to entity of '" << targetName << "'" << std::endl;
         applyToEntity(sceneObj->getEntity());
     }
 }
@@ -184,6 +223,22 @@ void ShaderFxNode::applyToEntity(Ogre::Entity* entity) {
 
     mEntity = entity;
     mOriginalMaterials.clear();
+
+    // If shader needs tex0, copy the original diffuse texture to our material
+    if (mNeedsTex0) {
+        auto* pass = mMaterial->getTechnique(0)->getPass(0);
+        if (pass->getNumTextureUnitStates() > 0 && entity->getNumSubEntities() > 0) {
+            auto origMat = entity->getSubEntity(0)->getMaterial();
+            if (origMat && origMat->getNumTechniques() > 0) {
+                auto* origPass = origMat->getTechnique(0)->getPass(0);
+                if (origPass && origPass->getNumTextureUnitStates() > 0) {
+                    auto* origTus = origPass->getTextureUnitState(0);
+                    pass->getTextureUnitState(0)->setTextureName(origTus->getTextureName());
+                }
+            }
+        }
+    }
+
     for (unsigned i = 0; i < mEntity->getNumSubEntities(); ++i) {
         mOriginalMaterials.push_back(mEntity->getSubEntity(i)->getMaterialName());
         mEntity->getSubEntity(i)->setMaterial(mMaterial);

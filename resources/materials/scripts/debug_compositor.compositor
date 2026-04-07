@@ -1,0 +1,33 @@
+// Debug compositor — should turn the entire screen red
+fragment_program Debug_Red_fp glsl
+{
+    source debug_red.frag
+}
+
+compositor DebugRed
+{
+    technique
+    {
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material Debug_Red_Mat
+            }
+        }
+    }
+}
+
+material Debug_Red_Mat
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref Debug_Red_fp {}
+        }
+    }
+}

@@ -1,4 +1,4 @@
-# BBFx Revival — v3.2.3
+# BBFx Revival — v3.2.4
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -23,7 +23,7 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 ### Core
 - **Animation DAG** — Boost.Graph directed acyclic graph, BFS propagation, pre/post operation queues
 - **Lua scripting** — Lua 5.4+ via sol2 (type-safe, no code generation)
-- **OGRE 14.5** — D3D11 (Windows), Vulkan/OpenGL (Linux), full resource pipeline
+- **OGRE 14.5** — GL3Plus default, D3D11 via `--d3d11` (Windows), Vulkan (Linux), full resource pipeline
 - **SDL3** — Window, keyboard, mouse, gamepad with hotplug support
 - **ogre-lua** — Standalone library exposing 50+ OGRE types to Lua (SceneManager, Entities, Particles, Compositors…)
 - **Cross-platform** — Windows 10+ and Linux
@@ -157,6 +157,28 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **AutomationCommands** — 17 undoable commands (AddKeyframe, MoveKeyframe, DeleteKeyframe, SetInterpolationMode, SetTangent, AddLane, DeleteLane, AssignLanePort, AddCueMarker, DeleteCueMarker, RenameCueMarker, AddTriggerEvent, DeleteTriggerEvent, SetLoopRegion, QuantizeKeyframes, PasteKeyframes, GenerateLFO)
 - **Native multi-target DAG** — `AnimationPort::multiLink` flag, `Animator::getSourceNodes()` helper, FX nodes `resolveTargets()` multi-clone from graph, `target_entity` ParamSpec removed, serialization migration
 
+### BBFx Studio Asset Pipeline (v3.2.4)
+- **Asset Browser unified** — 7 sections (Meshes, Textures, Particles, Compositors, Shaders, Materials, Presets), unified search bar, texture thumbnail grid (64x64 via TextureThumbnailCache), preview tooltips, 7 drag-drop payloads (MESH/TEXTURE/PARTICLE/COMPOSITOR/SHADER/MATERIAL/PRESET)
+- **Visual pickers** — TEXTURE popup grid with thumbnails and live preview (hover=temporary change, leave=restore), MATERIAL/COMPOSITOR/PARTICLE searchable popups in Inspector
+- **TextureNode** — new DAG node for texture application via entity-link, creates material clones (TexNode_ prefix), per-sub-entity save/restore, cascade detection, setEnabled detach/re-attach
+- **MaterialNode** — same entity-link pattern for OGRE material application with per-sub-entity save/restore
+- **CompositorStackPanel** — dockable panel scanning DAG for CompositorNodes, drag-reorder, inline float params, solo/bypass (Shift+click), drop from browser, syncStackOrder() independent of render
+- **Compositor Performance Mode** — `setClearEveryFrame(false)` fix enables OGRE compositor chain on F5 viewport, mCompositorsPending for deferred application after resize, proper cleanup on F5 exit
+- **ParticleNode entity port** — multiLink input port, resolveTarget(), onLinkChanged(), detach via context menu
+- **Triggers Pro** — TriggerSlot replaces triggerChords[16]: 7 polymorphic actions (chord/enable/disable/compositor/chord_jump/preset/reset), right-click assignment UI with categories, momentary/toggle mode, per-trigger hue color, multiple pages (Tab navigation)
+- **Faders Pro** — learn mode (click param in Inspector → auto-assign), intelligent labels (nodeName.portName), numeric value display, min/max range from ParamSpec, persistent in save/load
+- **Visual feedback** — node activity indicators (green/gray/orange), beat flash border in Performance Mode
+- **Auto-detect drop** — viewport drop uses raycast at release point (no pre-selection needed), node editor drop uses cached canvas transform (mCachedNodeRects + screenToCanvasCached)
+- **Anti-stacking** — iterative while-loop positioning (50x80px tolerance), horizontal alignment with target SceneObjectNode, checks both existing nodes and pending positions
+- **Renderer selection** — GL3Plus default, `--d3d11` runtime argument, `BBFX_USE_D3D11` CMake option, dynamic plugin loading, only GL3Plus loaded by default (no D3D11/GL legacy overhead)
+- **Debugger extensions** — `dbg.create_with_shader()`, `dbg.create_with_param()`, `dbg.set_param()`, `dbg.compositor_status()`, `dbg.trace()`, `dbg.mode()`, PendingOp with preParam injection
+- **ShaderFxNode tex0** — auto-binding for post-process shaders using `sampler2D tex0`
+- **ShaderFxNode onLinkChanged** — uniform entity-link pattern across all 5 FX node types
+- **Resource filter** — `isBBFxShader()` filters ~25 OGRE internal shader prefixes from browser
+- **API mutable** — `getParams()` non-const on ParamSpec, `getInputs()`/`getOutputs()` non-const on AnimationNode (0 const_cast)
+- **Bridge save/load** — StudioApp copies faders (8 + minVal/maxVal), triggerPages (N x 16 slots), compositorStack between panels and ProjectState
+- **Camera default** — orbit distance 150 units, pitch 15 degrees for comfortable viewing
+
 ---
 
 ## Architecture
@@ -178,8 +200,8 @@ C++ core
   ├── Network         -- TcpServer (remote REPL)
   ├── Record          -- InputRecorder, InputPlayer, VideoExporter
   └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
-       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, ...
-       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf
+       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, ...
+       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack
        ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
        ├── Hierarchy  -- SceneHierarchyPanel (v3.2.2)
        ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform/Scene/Reparent commands)
@@ -210,8 +232,9 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/network/TcpServer` | TCP REPL server, WinSock2/POSIX |
 | `src/record/` | InputRecorder, InputPlayer, VideoExporter |
 | `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
-| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode |
-| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel |
+| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode, TextureNode, MaterialNode |
+| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel, CompositorStackPanel |
+| `src/studio/TextureThumbnailCache` | Lazy-load OGRE textures as ImGui GL texture IDs (64x64), single-thread only |
 | `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
 | `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands, AutomationCommands |
 | `src/studio/generators/` | MeshGenerator (plane, sphere, cube, cylinder, torus, cone) |
@@ -399,7 +422,7 @@ ctest --preset windows-release
 
 ## History
 
-BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, and v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG.
+BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG, and v3.2.4 delivers the asset pipeline with unified browser, visual pickers, TextureNode/MaterialNode DAG entity-link, compositor stack with Performance Mode rendering, triggers/faders pro with 7 action types and learn mode, auto-detect drop, and runtime renderer selection.
 
 ---
 

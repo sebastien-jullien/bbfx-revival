@@ -1,5 +1,6 @@
 #pragma once
 #include "NodeEditorPanel.h"
+#include <imgui.h>
 #include <string>
 #include <vector>
 #include <set>
@@ -32,6 +33,17 @@ private:
     QuickSlot mQuickSlots[8];
     std::set<std::string> mBypassedNodes;
     std::map<std::string, std::string> mPresetCategories; // name -> category cache
+
+    // Asset browser search & filter (v3.2.4)
+    char mAssetSearchBuf[128] = {};
+    int mAssetTypeFilter = 0; // 0=All, 1=Meshes, 2=Textures, 3=Particles, 4=Compositors, 5=Shaders, 6=Materials
+    bool mTextureGridView = true;
+
+    class TextureThumbnailCache* mThumbCache = nullptr; // owned by StudioApp
+
+    bool matchesSearch(const std::string& name) const;
+public:
+    void setThumbCache(class TextureThumbnailCache* cache) { mThumbCache = cache; }
 };
 
 } // namespace bbfx

@@ -57,6 +57,7 @@ private:
 
     Ogre::TexturePtr mRenderTex;
     Ogre::RenderTexture* mRenderTarget = nullptr;
+
     uint32_t mRTWidth = 1280;
     uint32_t mRTHeight = 720;
     int mCachedFBO = -1; // cached GL FBO ID for the RenderTexture

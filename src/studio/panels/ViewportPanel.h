@@ -59,6 +59,12 @@ public:
     using DuplicateFn = std::function<void(const std::string& nodeName)>;
     void setDuplicateCallback(DuplicateFn fn) { mDuplicateFn = std::move(fn); }
 
+    /// Set callback for creating an arbitrary node type from viewport (particle, compositor, texture, material).
+    /// targetNode is optional — if set, an entity link is created from targetNode to the new node.
+    using CreateNodeFn = std::function<void(const std::string& nodeType, const std::string& paramValue,
+                                             const std::string& targetNode)>;
+    void setCreateNodeCallback(CreateNodeFn fn) { mCreateNodeFn = std::move(fn); }
+
     /// Compute the 3D position from viewport coordinates by ray-plane intersection (XZ plane).
     Ogre::Vector3 viewportDropPosition(float normalizedX, float normalizedY) const;
 
@@ -90,6 +96,7 @@ private:
     CreateSceneObjectFn mCreateSceneObjectFn;
     ApplyFxFn mApplyFxFn;
     DuplicateFn mDuplicateFn;
+    CreateNodeFn mCreateNodeFn;
 };
 
 } // namespace bbfx

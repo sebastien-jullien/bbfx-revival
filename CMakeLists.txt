@@ -5,6 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ── Renderer selection ──────────────────────────────────────────────────────
+# Default: OpenGL 3+ (cross-platform). Use -DBBFX_USE_D3D11=ON for Direct3D11.
+option(BBFX_USE_D3D11 "Use Direct3D11 renderer instead of OpenGL 3+" OFF)
+if(BBFX_USE_D3D11)
+    add_compile_definitions(BBFX_USE_D3D11)
+    message(STATUS "BBFx: Using Direct3D11 renderer")
+else()
+    message(STATUS "BBFx: Using OpenGL 3+ renderer (default)")
+endif()
+
 # ── MSVC: /bigobj for sol2 heavy template instantiation ──────────────────────
 if(MSVC)
     add_compile_options(/bigobj)
@@ -157,12 +167,15 @@ add_executable(bbfx-studio
     src/studio/NodeTypeRegistry.cpp
     src/studio/SettingsManager.cpp
     src/studio/ResourceEnumerator.cpp
+    src/studio/TextureThumbnailCache.cpp
     src/studio/Debugger.cpp
     src/studio/generators/MeshGenerator.cpp
     src/studio/nodes/SceneObjectNode.cpp
     src/studio/nodes/LightNode.cpp
     src/studio/nodes/ParticleNode.cpp
     src/studio/nodes/CompositorNode.cpp
+    src/studio/nodes/TextureNode.cpp
+    src/studio/nodes/MaterialNode.cpp
     src/studio/nodes/CameraNode.cpp
     src/studio/nodes/SkyboxNode.cpp
     src/studio/nodes/FogNode.cpp
@@ -185,6 +198,7 @@ add_executable(bbfx-studio
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
     src/studio/panels/SetEditorPanel.cpp
+    src/studio/panels/CompositorStackPanel.cpp
     src/studio/viewport/ViewportCameraController.cpp
     src/studio/viewport/ViewportPicker.cpp
     src/studio/viewport/ViewportGrid.cpp

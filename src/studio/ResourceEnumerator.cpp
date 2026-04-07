@@ -91,12 +91,33 @@ std::vector<std::string> ResourceEnumerator::listCompositors() {
     return sCompositors;
 }
 
+static bool isBBFxShader(const std::string& name) {
+    // Filter out OGRE internal / compositor shaders — keep only BBFx effect shaders
+    static const char* internalPrefixes[] = {
+        "SGXLib_", "RTSLib_", "RTSS",
+        "Shadow", "StdQuad_", "GLSL_GL3",
+        "Ogre", "OldTV", "Glass",
+        "selection_highlight",
+        "BlackAndWhite", "Blur", "DOF_",
+        "Embossed", "FFPLib_", "FFPTransform",
+        "Laplace", "Tiling", "HeatVision",
+        "Invert_", "Posterize_",
+        "ASCII_", "Halftone_"
+    };
+    for (auto* prefix : internalPrefixes) {
+        if (name.find(prefix) == 0) return false;
+    }
+    return true;
+}
+
 std::vector<std::string> ResourceEnumerator::listShaders() {
     if (sCacheDirty || sShaders.empty()) {
         sShaders.clear();
-        for (auto& ext : {"*.glsl", "*.frag", "*.vert"}) {
+        for (auto& ext : {"*.frag", "*.vert", "*.glsl"}) {
             auto files = scanResourceGroup(ext);
-            sShaders.insert(sShaders.end(), files.begin(), files.end());
+            for (auto& f : files) {
+                if (isBBFxShader(f)) sShaders.push_back(f);
+            }
         }
         std::sort(sShaders.begin(), sShaders.end());
         sShaders.erase(std::unique(sShaders.begin(), sShaders.end()), sShaders.end());

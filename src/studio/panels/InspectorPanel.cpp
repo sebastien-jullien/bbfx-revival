@@ -7,6 +7,8 @@
 #include "../commands/EditCommands.h"
 #include "../commands/NodeCommands.h"
 #include "../../core/ParamSpec.h"
+#include "../ResourceEnumerator.h"
+#include "../TextureThumbnailCache.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -71,7 +73,7 @@ void InspectorPanel::renderParamSpec() {
     auto* spec = node->getParamSpec();
     ImGui::TextDisabled("Parameters");
 
-    for (auto& param : const_cast<std::vector<ParamDef>&>(spec->getParams())) {
+    for (auto& param : spec->getParams()) {
         const std::string& label = param.displayLabel();
         std::string id = "##ps_" + param.name;
 
@@ -118,11 +120,7 @@ void InspectorPanel::renderParamSpec() {
             }
             case ParamType::STRING:
             case ParamType::MESH:
-            case ParamType::TEXTURE:
-            case ParamType::MATERIAL:
-            case ParamType::SHADER:
-            case ParamType::PARTICLE:
-            case ParamType::COMPOSITOR: {
+            case ParamType::SHADER: {
                 ImGui::Text("%s", label.c_str());
                 ImGui::SameLine(120.0f);
                 ImGui::SetNextItemWidth(-1.0f);
@@ -131,6 +129,134 @@ void InspectorPanel::renderParamSpec() {
                 buf[sizeof(buf) - 1] = '\0';
                 if (ImGui::InputText(id.c_str(), buf, sizeof(buf))) {
                     param.stringVal = buf;
+                }
+                if (mLearnCb && ImGui::IsItemActive()) {
+                    mLearnCb(mSelectedNode, param.name);
+                }
+                break;
+            }
+            case ParamType::TEXTURE: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                std::string btnLbl = param.stringVal.empty() ? "(none)" : param.stringVal;
+                if (btnLbl.size() > 20) btnLbl = btnLbl.substr(0, 19) + "~";
+                std::string popupId = "TexPicker##" + param.name;
+                if (mThumbCache) {
+                    ImTextureID thumb = mThumbCache->getThumbnail(param.stringVal);
+                    ImGui::Image(thumb, {20, 20}); ImGui::SameLine();
+                }
+                if (ImGui::Button((btnLbl + "##btn" + param.name).c_str())) {
+                    ImGui::OpenPopup(popupId.c_str());
+                    mPickerSearch[0] = '\0';
+                    // Save original texture for preview restore
+                    mPreviewOriginalTexture = param.stringVal;
+                    mPreviewActive = false;
+                    mPreviewCurrentTexture.clear();
+                }
+                if (ImGui::BeginPopup(popupId.c_str())) {
+                    ImGui::InputTextWithHint("##texSearch", "Search...", mPickerSearch, sizeof(mPickerSearch));
+                    auto textures = ResourceEnumerator::listTextures();
+                    std::string query = mPickerSearch;
+                    std::transform(query.begin(), query.end(), query.begin(), ::tolower);
+                    bool anyHovered = false;
+                    ImGui::BeginChild("##texGrid", {320, 280});
+                    float panelW = ImGui::GetContentRegionAvail().x;
+                    for (auto& t : textures) {
+                        if (!query.empty()) {
+                            std::string lower = t;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                            if (lower.find(query) == std::string::npos) continue;
+                        }
+                        if (mThumbCache) {
+                            ImTextureID th = mThumbCache->getThumbnail(t);
+                            bool isCurrent = (t == param.stringVal);
+                            if (isCurrent) ImGui::PushStyleColor(ImGuiCol_Border, {1.0f, 0.6f, 0.0f, 1.0f});
+                            ImGui::BeginGroup();
+                            ImGui::Image(th, {48, 48});
+                            if (ImGui::IsItemClicked()) {
+                                // Commit selection — no restore needed
+                                param.stringVal = t;
+                                mPreviewActive = false;
+                                ImGui::CloseCurrentPopup();
+                            }
+                            if (ImGui::IsItemHovered()) {
+                                anyHovered = true;
+                                // Preview live: temporarily set the texture on the object
+                                if (t != mPreviewCurrentTexture) {
+                                    param.stringVal = t;
+                                    mPreviewCurrentTexture = t;
+                                    mPreviewActive = true;
+                                }
+                                ImGui::BeginTooltip();
+                                ImGui::Image(th, {128, 128});
+                                ImGui::Text("%s", t.c_str());
+                                ImGui::EndTooltip();
+                            }
+                            ImGui::EndGroup();
+                            if (isCurrent) ImGui::PopStyleColor();
+                            float nextX = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + 4 + 48;
+                            if (nextX < panelW) ImGui::SameLine(0, 4);
+                        } else {
+                            if (ImGui::Selectable(t.c_str(), t == param.stringVal)) {
+                                param.stringVal = t;
+                                mPreviewActive = false;
+                                ImGui::CloseCurrentPopup();
+                            }
+                        }
+                    }
+                    // If nothing hovered and preview was active, restore original
+                    if (!anyHovered && mPreviewActive) {
+                        param.stringVal = mPreviewOriginalTexture;
+                        mPreviewActive = false;
+                        mPreviewCurrentTexture.clear();
+                    }
+                    ImGui::EndChild();
+                    ImGui::EndPopup();
+                } else {
+                    // Popup closed (escape or click outside) — restore if preview was active
+                    if (mPreviewActive) {
+                        param.stringVal = mPreviewOriginalTexture;
+                        mPreviewActive = false;
+                        mPreviewCurrentTexture.clear();
+                    }
+                }
+                break;
+            }
+            case ParamType::MATERIAL:
+            case ParamType::PARTICLE:
+            case ParamType::COMPOSITOR: {
+                ImGui::Text("%s", label.c_str());
+                ImGui::SameLine(120.0f);
+                std::string btnLbl2 = param.stringVal.empty() ? "(none)" : param.stringVal;
+                if (btnLbl2.size() > 24) btnLbl2 = btnLbl2.substr(0, 23) + "~";
+                std::string popId = "Picker##" + param.name;
+                if (ImGui::Button((btnLbl2 + "##btn" + param.name).c_str())) {
+                    ImGui::OpenPopup(popId.c_str());
+                    mPickerSearch[0] = '\0';
+                }
+                if (ImGui::BeginPopup(popId.c_str())) {
+                    ImGui::InputTextWithHint("##pickSearch", "Search...", mPickerSearch, sizeof(mPickerSearch));
+                    std::vector<std::string> items;
+                    if (param.type == ParamType::MATERIAL) items = ResourceEnumerator::listMaterials();
+                    else if (param.type == ParamType::PARTICLE) items = ResourceEnumerator::listParticleTemplates();
+                    else items = ResourceEnumerator::listCompositors();
+                    std::string q = mPickerSearch;
+                    std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+                    ImGui::BeginChild("##pickList", {250, 200});
+                    for (auto& item : items) {
+                        if (!q.empty()) {
+                            std::string lower = item;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                            if (lower.find(q) == std::string::npos) continue;
+                        }
+                        bool sel = (item == param.stringVal);
+                        if (ImGui::Selectable(item.c_str(), sel)) {
+                            param.stringVal = item;
+                            ImGui::CloseCurrentPopup();
+                        }
+                    }
+                    ImGui::EndChild();
+                    ImGui::EndPopup();
                 }
                 break;
             }

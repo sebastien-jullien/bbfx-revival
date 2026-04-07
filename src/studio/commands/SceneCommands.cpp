@@ -115,7 +115,7 @@ void DuplicateNodeCommand::execute() {
     }
 
     // Offset position
-    auto& inputs = const_cast<AnimationNode::Ports&>(newNode->getInputs());
+    auto& inputs = newNode->getInputs();
     auto posIt = inputs.find("position.x");
     if (posIt != inputs.end()) {
         float srcX = 0;
@@ -218,7 +218,7 @@ static void doReparent(const std::string& childName, const std::string& parentNa
     }
 
     // Update DAG ports to match local position
-    auto& inputs = const_cast<AnimationNode::Ports&>(childNode->getInputs());
+    auto& inputs = childNode->getInputs();
     auto pos = childSN->getPosition();
     if (inputs.count("position.x")) inputs["position.x"]->setValue(pos.x);
     if (inputs.count("position.y")) inputs["position.y"]->setValue(pos.y);

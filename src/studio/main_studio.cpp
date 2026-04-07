@@ -91,6 +91,9 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
                 std::cout << "[Studio] Build OK, continuing..." << std::endl;
+            } else if (arg == "--d3d11") {
+                bbfx::Engine::setRendererOverride("Direct3D11 Rendering Subsystem");
+                std::cout << "[Studio] --d3d11: using Direct3D11 renderer" << std::endl;
             } else if (arg == "--fullscreen" || arg == "-f") {
                 fullscreen = true;
             } else if (arg[0] != '-') {

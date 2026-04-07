@@ -557,3 +557,7 @@ Aucune nouvelle dependance ajoutee en v3.2.2. Stack inchangee depuis v3.2.0 :
 ## Etat des dependances v3.2.3 (Avril 2026)
 
 Aucune nouvelle dependance ajoutee en v3.2.3. Stack inchangee. Le systeme d'automation (AutomationData, AutomationEngine, AutomationCommands) utilise exclusivement nlohmann/json pour la serialisation et les structures STL standard (vector, map, set, lower_bound). Le port multiLink dans le DAG est implemente avec les memes structures Boost.Graph existantes.
+
+## Etat des dependances v3.2.4 (Avril 2026)
+
+Aucune nouvelle dependance ajoutee en v3.2.4. Stack inchangee. Les nouveaux modules (TextureThumbnailCache, CompositorStackPanel, TextureNode, MaterialNode) utilisent exclusivement les APIs OGRE 14 existantes (TextureManager, MaterialManager, CompositorManager, RenderTexture) et ImGui (Image, DragDropSource/Target). Le renderer passe en GL3Plus par defaut avec option runtime --d3d11 via le plugin RenderSystem_GL3Plus deja present dans la stack.

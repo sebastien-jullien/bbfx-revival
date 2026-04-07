@@ -49,6 +49,21 @@ private:
     RecordValueCb mRecordValueCb;
     bool mIsRecording = false;
     float mCurrentBeat = 0.0f;
+
+    // Asset pickers (v3.2.4)
+    class TextureThumbnailCache* mThumbCache = nullptr;
+    char mPickerSearch[128] = {};
+    std::string mPreviewOriginalTexture;
+    bool mPreviewActive = false;
+    std::string mPreviewCurrentTexture;
+
+    // Fader learn mode callback (v3.2.4)
+    using LearnCb = std::function<void(const std::string& nodeName, const std::string& portName)>;
+    LearnCb mLearnCb;
+
+public:
+    void setThumbCache(class TextureThumbnailCache* cache) { mThumbCache = cache; }
+    void setLearnCallback(LearnCb cb) { mLearnCb = std::move(cb); }
 };
 
 } // namespace bbfx

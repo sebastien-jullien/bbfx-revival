@@ -73,6 +73,18 @@ int main(int argc, char* argv[]) {
         // Register bbfx bindings (bbfx.Engine, bbfx.Animator, etc.)
         bbfx::register_bbfx_bindings(lua);
 
+        // Parse arguments (before Engine construction so --d3d11 takes effect)
+        std::string scriptArg;
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--d3d11") {
+                bbfx::Engine::setRendererOverride("Direct3D11 Rendering Subsystem");
+                std::cout << "[BBFx] --d3d11: using Direct3D11 renderer" << std::endl;
+            } else if (arg[0] != '-') {
+                scriptArg = arg;
+            }
+        }
+
         // Create core singletons
         bbfx::Animator animator;
         bbfx::RootTimeNode timeNode;
@@ -86,8 +98,8 @@ int main(int argc, char* argv[]) {
         lua["arg"] = luaArg;
 
         // Run Lua script if provided
-        if (argc > 1) {
-            auto scriptPath = resolveLuaScriptPath(projectRoot, exePath, argv[1]);
+        if (!scriptArg.empty()) {
+            auto scriptPath = resolveLuaScriptPath(projectRoot, exePath, scriptArg);
             auto result = lua.safe_script_file(scriptPath.string(), sol::script_pass_on_error);
             if (!result.valid()) {
                 sol::error err = result;

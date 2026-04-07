@@ -1,5 +1,6 @@
 #include "EditCommands.h"
 #include "../../core/Animator.h"
+#include "../../core/ParamSpec.h"
 
 namespace bbfx {
 

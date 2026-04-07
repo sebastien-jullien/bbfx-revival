@@ -4,6 +4,7 @@
 #include "../../core/PrimitiveNodes.h"
 
 #include "../ResourceEnumerator.h"
+#include "../TextureThumbnailCache.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -11,6 +12,8 @@
 #include <cstring>
 #include <filesystem>
 #include <vector>
+#include <algorithm>
+#include <cctype>
 
 namespace bbfx {
 
@@ -107,70 +110,225 @@ void PresetBrowserPanel::renderPresetTree() {
     }
 }
 
+bool PresetBrowserPanel::matchesSearch(const std::string& name) const {
+    if (mAssetSearchBuf[0] == '\0') return true;
+    std::string lower = name;
+    std::string query = mAssetSearchBuf;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::transform(query.begin(), query.end(), query.begin(), ::tolower);
+    return lower.find(query) != std::string::npos;
+}
+
 void PresetBrowserPanel::renderAssetBrowser() {
     ImGui::TextDisabled("Assets");
 
-    // Meshes
-    if (ImGui::TreeNode("Meshes")) {
-        auto meshes = ResourceEnumerator::listMeshes();
-        for (auto& m : meshes) {
-            ImGui::Selectable(m.c_str());
-            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                ImGui::SetDragDropPayload("MESH_NAME", m.c_str(), m.size() + 1);
-                ImGui::Text("Mesh: %s", m.c_str());
-                ImGui::EndDragDropSource();
+    // Search bar
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##assetSearch", "Search assets...", mAssetSearchBuf, sizeof(mAssetSearchBuf));
+
+    // Type filter tabs
+    if (ImGui::BeginTabBar("##assetTypeFilter")) {
+        static const char* tabNames[] = {"All","Meshes","Textures","Particles","Compositors","Shaders","Materials"};
+        for (int i = 0; i < 7; ++i) {
+            if (ImGui::BeginTabItem(tabNames[i])) {
+                mAssetTypeFilter = i;
+                ImGui::EndTabItem();
             }
         }
-        ImGui::TreePop();
+        ImGui::EndTabBar();
+    }
+
+    bool anyResults = false;
+
+    // Meshes
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 1) {
+        auto meshes = ResourceEnumerator::listMeshes();
+        bool hasMatch = false;
+        for (auto& m : meshes) { if (matchesSearch(m)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Meshes")) {
+            for (auto& m : meshes) {
+                if (!matchesSearch(m)) continue;
+                anyResults = true;
+                ImGui::Selectable(m.c_str());
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("MESH_NAME", m.c_str(), m.size() + 1);
+                    ImGui::Text("Mesh: %s", m.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("3D Mesh: %s", m.c_str());
+                }
+            }
+            ImGui::TreePop();
+        }
     }
 
     // Textures
-    if (ImGui::TreeNode("Textures")) {
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 2) {
         auto textures = ResourceEnumerator::listTextures();
-        for (auto& t : textures) {
-            ImGui::Selectable(t.c_str());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Texture: %s", t.c_str());
+        bool hasMatch = false;
+        for (auto& t : textures) { if (matchesSearch(t)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Textures")) {
+            // Toggle grid/list button
+            if (ImGui::SmallButton(mTextureGridView ? "List" : "Grid")) {
+                mTextureGridView = !mTextureGridView;
             }
+
+            if (mTextureGridView && mThumbCache) {
+                // Grid view with thumbnails
+                float thumbSz = 64.0f;
+                float padding = 4.0f;
+                float panelW = ImGui::GetContentRegionAvail().x;
+                for (auto& t : textures) {
+                    if (!matchesSearch(t)) continue;
+                    anyResults = true;
+
+                    ImTextureID thumb = mThumbCache->getThumbnail(t);
+                    ImGui::BeginGroup();
+                    ImGui::Image(thumb, {thumbSz, thumbSz});
+                    // Drag source on the image (SourceAllowNullID needed for Image items)
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                        ImGui::SetDragDropPayload("TEXTURE_NAME", t.c_str(), t.size() + 1);
+                        ImGui::Image(thumb, {32, 32});
+                        ImGui::SameLine();
+                        ImGui::Text("%s", t.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    // Tooltip with larger preview
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::BeginTooltip();
+                        ImGui::Image(thumb, {128, 128});
+                        ImGui::Text("%s", t.c_str());
+                        ImGui::EndTooltip();
+                    }
+                    // Truncated name under thumbnail
+                    std::string shortName = t.size() > 10 ? t.substr(0, 9) + "~" : t;
+                    ImGui::TextDisabled("%s", shortName.c_str());
+                    ImGui::EndGroup();
+
+                    // Wrap: SameLine if next item fits
+                    float nextX = ImGui::GetCursorPosX() + thumbSz + padding;
+                    float itemX = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + padding + thumbSz;
+                    if (itemX < panelW) ImGui::SameLine(0, padding);
+                }
+                ImGui::NewLine();
+            } else {
+                // List view (fallback or no thumb cache)
+                for (auto& t : textures) {
+                    if (!matchesSearch(t)) continue;
+                    anyResults = true;
+                    ImGui::Selectable(t.c_str());
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                        ImGui::SetDragDropPayload("TEXTURE_NAME", t.c_str(), t.size() + 1);
+                        ImGui::Text("Texture: %s", t.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    if (ImGui::IsItemHovered() && mThumbCache) {
+                        ImGui::BeginTooltip();
+                        ImGui::Image(mThumbCache->getThumbnail(t), {128, 128});
+                        ImGui::Text("%s", t.c_str());
+                        ImGui::EndTooltip();
+                    }
+                }
+            }
+            ImGui::TreePop();
         }
-        ImGui::TreePop();
     }
 
     // Particles
-    if (ImGui::TreeNode("Particles")) {
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 3) {
         auto particles = ResourceEnumerator::listParticleTemplates();
-        for (auto& p : particles) {
-            ImGui::Selectable(p.c_str());
-            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                ImGui::SetDragDropPayload("PARTICLE_NAME", p.c_str(), p.size() + 1);
-                ImGui::Text("Particle: %s", p.c_str());
-                ImGui::EndDragDropSource();
+        bool hasMatch = false;
+        for (auto& p : particles) { if (matchesSearch(p)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Particles")) {
+            for (auto& p : particles) {
+                if (!matchesSearch(p)) continue;
+                anyResults = true;
+                ImGui::Selectable(p.c_str());
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("PARTICLE_NAME", p.c_str(), p.size() + 1);
+                    ImGui::Text("Particle: %s", p.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Particle: %s", p.c_str());
+                }
             }
+            ImGui::TreePop();
         }
-        ImGui::TreePop();
     }
 
     // Compositors
-    if (ImGui::TreeNode("Compositors")) {
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 4) {
         auto comps = ResourceEnumerator::listCompositors();
-        for (auto& c : comps) {
-            ImGui::Selectable(c.c_str());
+        bool hasMatch = false;
+        for (auto& c : comps) { if (matchesSearch(c)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Compositors")) {
+            for (auto& c : comps) {
+                if (!matchesSearch(c)) continue;
+                anyResults = true;
+                ImGui::Selectable(c.c_str());
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("COMPOSITOR_NAME", c.c_str(), c.size() + 1);
+                    ImGui::Text("Compositor: %s", c.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Post-process: %s", c.c_str());
+                }
+            }
+            ImGui::TreePop();
         }
-        ImGui::TreePop();
     }
 
     // Shaders
-    if (ImGui::TreeNode("Shaders")) {
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 5) {
         auto shaders = ResourceEnumerator::listShaders();
-        for (auto& s : shaders) {
-            ImGui::Selectable(s.c_str());
-            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
-                ImGui::Text("Shader: %s", s.c_str());
-                ImGui::EndDragDropSource();
+        bool hasMatch = false;
+        for (auto& s : shaders) { if (matchesSearch(s)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Shaders")) {
+            for (auto& s : shaders) {
+                if (!matchesSearch(s)) continue;
+                anyResults = true;
+                ImGui::Selectable(s.c_str());
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
+                    ImGui::Text("Shader: %s", s.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Shader: %s", s.c_str());
+                }
             }
+            ImGui::TreePop();
         }
-        ImGui::TreePop();
+    }
+
+    // Materials
+    if (mAssetTypeFilter == 0 || mAssetTypeFilter == 6) {
+        auto materials = ResourceEnumerator::listMaterials();
+        bool hasMatch = false;
+        for (auto& m : materials) { if (matchesSearch(m)) { hasMatch = true; break; } }
+        if (hasMatch && ImGui::TreeNode("Materials")) {
+            for (auto& m : materials) {
+                if (!matchesSearch(m)) continue;
+                anyResults = true;
+                ImGui::Selectable(m.c_str());
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("MATERIAL_NAME", m.c_str(), m.size() + 1);
+                    ImGui::Text("Material: %s", m.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Material: %s", m.c_str());
+                }
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    if (!anyResults && mAssetSearchBuf[0] != '\0') {
+        ImGui::TextDisabled("No results");
     }
 }
 

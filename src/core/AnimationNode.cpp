@@ -19,6 +19,8 @@ AnimationNode::~AnimationNode() {
 const string& AnimationNode::getName() const { return mName; }
 const AnimationNode::Ports& AnimationNode::getInputs() const { return mInputs; }
 const AnimationNode::Ports& AnimationNode::getOutputs() const { return mOutputs; }
+AnimationNode::Ports& AnimationNode::getInputs() { return mInputs; }
+AnimationNode::Ports& AnimationNode::getOutputs() { return mOutputs; }
 
 void AnimationNode::update() {}
 

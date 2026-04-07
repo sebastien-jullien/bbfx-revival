@@ -11,7 +11,7 @@ local scene = engine:getSceneManager()
 -- Ambient light (scene-level, not a node)
 scene:setAmbientLight(ColourValue(0.3, 0.3, 0.35))
 
--- Camera: managed by ViewportCameraController in Studio mode.
--- No manual attach needed — the controller handles position and orientation.
+-- Camera: managed by ViewportCameraController (default orbit: distance=25, pitch=15°).
+-- No manual positioning needed — the controller handles everything.
 
 print("[demo_studio] Minimal scene ready. Content will be loaded from project.")

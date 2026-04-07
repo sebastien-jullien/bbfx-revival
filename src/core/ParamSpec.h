@@ -40,6 +40,7 @@ public:
     ParamDef* getParam(const std::string& name);
     const ParamDef* getParam(const std::string& name) const;
     const std::vector<ParamDef>& getParams() const { return mParams; }
+    std::vector<ParamDef>& getParams() { return mParams; }
     bool empty() const { return mParams.empty(); }
 
     nlohmann::json toJson() const;

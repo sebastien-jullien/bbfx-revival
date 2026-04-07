@@ -477,7 +477,10 @@ void register_bbfx_bindings(sol::state& lua) {
     lua.new_usertype<Ogre::Viewport>("Ogre_Viewport",
         sol::no_constructor,
         "setBackgroundColour", &Ogre::Viewport::setBackgroundColour,
-        "getBackgroundColour", &Ogre::Viewport::getBackgroundColour
+        "getBackgroundColour", &Ogre::Viewport::getBackgroundColour,
+        "setClearEveryFrame", [](Ogre::Viewport* vp, bool clear) { vp->setClearEveryFrame(clear); },
+        "getActualWidth", &Ogre::Viewport::getActualWidth,
+        "getActualHeight", &Ogre::Viewport::getActualHeight
     );
 
     lua.new_usertype<Ogre::RenderWindow>("Ogre_RenderWindow",
@@ -485,7 +488,8 @@ void register_bbfx_bindings(sol::state& lua) {
         "getViewport", &Ogre::RenderWindow::getViewport,
         "getNumViewports", &Ogre::RenderWindow::getNumViewports,
         "getWidth", &Ogre::RenderWindow::getWidth,
-        "getHeight", &Ogre::RenderWindow::getHeight
+        "getHeight", &Ogre::RenderWindow::getHeight,
+        "writeContentsToFile", &Ogre::RenderWindow::writeContentsToFile
     );
 
     // ── Ogre::ParticleSystem bindings ──────────────────────────────────

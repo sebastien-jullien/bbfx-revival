@@ -17,6 +17,8 @@
 #include "nodes/LightNode.h"
 #include "nodes/ParticleNode.h"
 #include "nodes/CompositorNode.h"
+#include "nodes/TextureNode.h"
+#include "nodes/MaterialNode.h"
 #include "nodes/CameraNode.h"
 #include "nodes/SkyboxNode.h"
 #include "nodes/FogNode.h"
@@ -119,11 +121,17 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     setNodeEditorForCommands(mNodeEditorPanel.get());
     mInspectorPanel       = std::make_unique<InspectorPanel>(lua);
     mTimelinePanel        = std::make_unique<TimelinePanel>();
+    mThumbCache           = std::make_unique<TextureThumbnailCache>();
     mPresetBrowserPanel   = std::make_unique<PresetBrowserPanel>(mNodeEditorPanel.get(), lua);
+    mPresetBrowserPanel->setThumbCache(mThumbCache.get());
+    mInspectorPanel->setThumbCache(mThumbCache.get());
     mPerformanceModePanel = std::make_unique<PerformanceModePanel>(lua);
     mConsolePanel         = std::make_unique<ConsolePanel>(mLua);
     mSetEditorPanel       = std::make_unique<SetEditorPanel>(mLua);
     mSceneHierarchyPanel  = std::make_unique<SceneHierarchyPanel>(Animator::instance());
+    mCompositorStackPanel = std::make_unique<CompositorStackPanel>();
+    mCompositorStackPanel->setAnimator(Animator::instance());
+    mPerformanceModePanel->setCompositorStack(mCompositorStackPanel.get());
     mAutomationEngine     = std::make_unique<AutomationEngine>(&mTimelinePanel->getAutomation());
 
     // Wire fader recording callback
@@ -140,6 +148,12 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mInspectorPanel->setRecordValueCallback(
         [this](const std::string& nodeName, const std::string& portName, float value, float beat) {
             if (mTimelinePanel) mTimelinePanel->recordValue(nodeName, portName, value, beat);
+        });
+
+    // Wire fader learn callback: Inspector → PerformanceMode
+    mInspectorPanel->setLearnCallback(
+        [this](const std::string& nodeName, const std::string& portName) {
+            if (mPerformanceModePanel) mPerformanceModePanel->onLearnParam(nodeName, portName);
         });
 
     initNodeTypeRegistry();
@@ -206,7 +220,7 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
                         auto* mp = node->getParamSpec()->getParam("mesh_file");
                         if (mp) mp->stringVal = meshFile;
                     }
-                    auto& inputs = const_cast<AnimationNode::Ports&>(node->getInputs());
+                    auto& inputs = node->getInputs();
                     if (inputs.count("position.x")) inputs["position.x"]->setValue(x);
                     if (inputs.count("position.y")) inputs["position.y"]->setValue(y);
                     if (inputs.count("position.z")) inputs["position.z"]->setValue(z);
@@ -221,6 +235,106 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
         mViewportPanel->setDuplicateCallback([this](const std::string& nodeName) {
             CommandManager::instance().execute(
                 std::make_unique<DuplicateNodeCommand>(nodeName, mLua));
+        });
+
+        // Create arbitrary node from viewport drop (particle, compositor)
+        mViewportPanel->setCreateNodeCallback([this](const std::string& nodeType, const std::string& paramValue,
+                                                       const std::string& targetNode) {
+            auto* animator = Animator::instance();
+            if (!animator) return;
+            std::string name = generateSceneObjectName(paramValue + ".mesh", animator);
+            auto compound = std::make_unique<CompoundCommand>("Create " + nodeType);
+            compound->add(std::make_unique<CreateNodeCommand>(nodeType, name, mLua));
+            compound->add(std::make_unique<LambdaCommand>("Set param + link",
+                [name, nodeType, paramValue, targetNode]() {
+                    auto* animator2 = Animator::instance();
+                    if (!animator2) return;
+                    auto* n = animator2->getRegisteredNode(name);
+                    if (!n || !n->getParamSpec()) return;
+                    if (nodeType == "ParticleNode") {
+                        auto* p = n->getParamSpec()->getParam("template");
+                        if (p) p->stringVal = paramValue;
+                    } else if (nodeType == "CompositorNode") {
+                        auto* p = n->getParamSpec()->getParam("compositor");
+                        if (p) p->stringVal = paramValue;
+                    } else if (nodeType == "TextureNode") {
+                        auto* p = n->getParamSpec()->getParam("texture");
+                        if (p) p->stringVal = paramValue;
+                    } else if (nodeType == "MaterialNode") {
+                        auto* p = n->getParamSpec()->getParam("material");
+                        if (p) p->stringVal = paramValue;
+                    }
+                    // Create entity link if target is specified
+                    if (!targetNode.empty()) {
+                        auto* srcNode = animator2->getRegisteredNode(targetNode);
+                        if (srcNode && n) {
+                            auto srcIt = srcNode->getOutputs().find("entity");
+                            auto dstIt = n->getInputs().find("entity");
+                            if (srcIt != srcNode->getOutputs().end() &&
+                                dstIt != n->getInputs().end()) {
+                                animator2->link(srcIt->second, dstIt->second);
+                                n->onLinkChanged();
+                                std::cout << "[CreateNode] Linked " << targetNode
+                                          << ".entity → " << name << ".entity" << std::endl;
+                            }
+                        }
+                    }
+                },
+                []() {}
+            ));
+            CommandManager::instance().execute(std::move(compound));
+
+            // Position texture/material nodes next to their target in the node editor
+            if (!targetNode.empty() && (nodeType == "TextureNode" || nodeType == "MaterialNode")) {
+                if (mNodeEditorPanel) {
+                    mNodeEditorPanel->positionNodeNextTo(name, targetNode);
+                }
+            }
+        });
+
+        // Same callback for NodeEditorPanel drops
+        mNodeEditorPanel->setCreateNodeCallback([this](const std::string& nodeType, const std::string& paramValue,
+                                                        const std::string& targetNode) {
+            auto* animator = Animator::instance();
+            if (!animator) return;
+            std::string name = generateSceneObjectName(paramValue + ".mesh", animator);
+            auto compound = std::make_unique<CompoundCommand>("Create " + nodeType);
+            compound->add(std::make_unique<CreateNodeCommand>(nodeType, name, mLua));
+            compound->add(std::make_unique<LambdaCommand>("Set param + link",
+                [name, nodeType, paramValue, targetNode]() {
+                    auto* anim2 = Animator::instance();
+                    if (!anim2) return;
+                    auto* n = anim2->getRegisteredNode(name);
+                    if (!n || !n->getParamSpec()) return;
+                    if (nodeType == "TextureNode") {
+                        auto* p = n->getParamSpec()->getParam("texture");
+                        if (p) p->stringVal = paramValue;
+                    } else if (nodeType == "MaterialNode") {
+                        auto* p = n->getParamSpec()->getParam("material");
+                        if (p) p->stringVal = paramValue;
+                    }
+                    if (!targetNode.empty()) {
+                        auto* srcNode = anim2->getRegisteredNode(targetNode);
+                        if (srcNode && n) {
+                            auto srcIt = srcNode->getOutputs().find("entity");
+                            auto dstIt = n->getInputs().find("entity");
+                            if (srcIt != srcNode->getOutputs().end() &&
+                                dstIt != n->getInputs().end()) {
+                                anim2->link(srcIt->second, dstIt->second);
+                                n->onLinkChanged();
+                            }
+                        }
+                    }
+                },
+                []() {}
+            ));
+            CommandManager::instance().execute(std::move(compound));
+
+            // Schedule deferred positioning in the node editor
+            if (mNodeEditorPanel) {
+                mNodeEditorPanel->scheduleDropPosition(name, targetNode,
+                    mNodeEditorPanel->getDropScreenPos());
+            }
         });
 
         mViewportPanel->setApplyFxCallback([this](const std::string& fxType, const std::string& targetName) {
@@ -535,6 +649,9 @@ void StudioApp::run() {
             }
         }
 
+        // NOTE: Compositors are NOT applied in Studio Mode (FBO corruption with ImGui).
+        // They are applied in Performance Mode only, via PerformanceModePanel::applyCompositorChain().
+
         // ── OGRE: render to RenderTexture ─────────────────────────────────────
         mViewportPanel->updateOgreRender();
 
@@ -568,6 +685,10 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         if (evt.key.key == SDLK_ESCAPE) {
             if (mPerformanceMode) {
                 mPerformanceMode = false;
+                if (mPerformanceModePanel && mEngine)
+                    mPerformanceModePanel->removeCompositorChain(mEngine.get());
+                if (mViewportPanel)
+                    mViewportPanel->invalidateSize();
             } else if (mViewportPanel && mViewportPanel->getGizmo() &&
                        mViewportPanel->getGizmo()->isInKeyboardMode()) {
                 mViewportPanel->getGizmo()->cancelKeyboardTransform();
@@ -582,8 +703,17 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         }
         if (evt.key.key == SDLK_F5) {
             mPerformanceMode = !mPerformanceMode;
-            if (!mPerformanceMode && mViewportPanel)
-                mViewportPanel->invalidateSize(); // force resize after perf mode
+            if (mPerformanceMode) {
+                // Entering Performance Mode: apply compositors
+                if (mPerformanceModePanel && mEngine)
+                    mPerformanceModePanel->applyCompositorChain(mEngine.get());
+            } else {
+                // Exiting Performance Mode: remove compositors and restore viewport
+                if (mPerformanceModePanel && mEngine)
+                    mPerformanceModePanel->removeCompositorChain(mEngine.get());
+                if (mViewportPanel)
+                    mViewportPanel->invalidateSize();
+            }
             return;
         }
         bool ctrl = (evt.key.mod & SDL_KMOD_CTRL) != 0;
@@ -978,6 +1108,7 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Console",       nullptr, &mShowConsole);
         ImGui::MenuItem("Set Editor",    nullptr, &mShowSetEditor);
         ImGui::MenuItem("Scene Hierarchy", nullptr, &mShowSceneHierarchy);
+        ImGui::MenuItem("Compositor Stack", nullptr, &mShowCompositorStack);
         ImGui::Separator();
         // Editor Camera toggle
         bool editorCam = CameraNode::sEditorCameraActive;
@@ -993,7 +1124,15 @@ void StudioApp::renderMenuBar() {
         bool pm = mPerformanceMode;
         if (ImGui::MenuItem("Performance Mode", "F5", &pm)) {
             mPerformanceMode = pm;
-            if (!pm && mViewportPanel) mViewportPanel->invalidateSize();
+            if (pm) {
+                if (mPerformanceModePanel && mEngine)
+                    mPerformanceModePanel->applyCompositorChain(mEngine.get());
+            } else {
+                if (mPerformanceModePanel && mEngine)
+                    mPerformanceModePanel->removeCompositorChain(mEngine.get());
+                if (mViewportPanel)
+                    mViewportPanel->invalidateSize();
+            }
         }
         ImGui::EndMenu();
     }
@@ -1039,6 +1178,7 @@ void StudioApp::renderPanels() {
     if (mShowConsole) mConsolePanel->render();
     if (mShowSetEditor) mSetEditorPanel->render();
     if (mShowSceneHierarchy && mSceneHierarchyPanel) mSceneHierarchyPanel->render();
+    if (mShowCompositorStack && mCompositorStackPanel) mCompositorStackPanel->render();
 
     // ── Status Bar ─────────────────────────────────────────────────────
     {
@@ -1122,6 +1262,31 @@ void StudioApp::saveProject(const std::string& path) {
         state.automation = mTimelinePanel->getAutomation();
     }
 
+    // Collect performance mode data (faders, triggers, compositor stack)
+    if (mPerformanceModePanel) {
+        auto& faders = mPerformanceModePanel->getFaders();
+        for (int i = 0; i < 8; ++i) {
+            state.faders[i].nodeName = faders[i].nodeName;
+            state.faders[i].portName = faders[i].portName;
+            state.faders[i].minVal = faders[i].minVal;
+            state.faders[i].maxVal = faders[i].maxVal;
+        }
+        auto& pages = mPerformanceModePanel->getTriggerPages();
+        state.triggerPages.resize(pages.size());
+        for (size_t p = 0; p < pages.size(); ++p) {
+            state.triggerPages[p].resize(16);
+            for (int i = 0; i < 16; ++i) {
+                state.triggerPages[p][i].label = pages[p][i].label;
+                state.triggerPages[p][i].action = pages[p][i].action;
+                state.triggerPages[p][i].momentary = pages[p][i].momentary;
+                state.triggerPages[p][i].hue = pages[p][i].hue;
+            }
+        }
+    }
+    if (mCompositorStackPanel) {
+        state.compositorStack = mCompositorStackPanel->getStackOrder();
+    }
+
     if (mSerializer.save(path, state)) {
         mProjectPath = path;
         mProjectDirty = false;
@@ -1187,6 +1352,32 @@ void StudioApp::loadProject(const std::string& path) {
         // Restore automation data
         if (mTimelinePanel) {
             mTimelinePanel->getAutomation() = state.automation;
+        }
+
+        // Restore performance mode data (faders, triggers, compositor stack)
+        if (mPerformanceModePanel) {
+            auto& faders = mPerformanceModePanel->getFaders();
+            for (int i = 0; i < 8; ++i) {
+                faders[i].nodeName = state.faders[i].nodeName;
+                faders[i].portName = state.faders[i].portName;
+                faders[i].minVal = state.faders[i].minVal;
+                faders[i].maxVal = state.faders[i].maxVal;
+            }
+            auto& pages = mPerformanceModePanel->getTriggerPages();
+            if (!state.triggerPages.empty()) {
+                pages.resize(state.triggerPages.size());
+                for (size_t p = 0; p < state.triggerPages.size(); ++p) {
+                    for (int i = 0; i < 16 && i < static_cast<int>(state.triggerPages[p].size()); ++i) {
+                        pages[p][i].label = state.triggerPages[p][i].label;
+                        pages[p][i].action = state.triggerPages[p][i].action;
+                        pages[p][i].momentary = state.triggerPages[p][i].momentary;
+                        pages[p][i].hue = state.triggerPages[p][i].hue;
+                    }
+                }
+            }
+        }
+        if (mCompositorStackPanel && !state.compositorStack.empty()) {
+            mCompositorStackPanel->setStackOrder(state.compositorStack);
         }
 
         std::cout << "[Studio] Loaded: " << path << std::endl;
@@ -1313,6 +1504,9 @@ void StudioApp::initNodeTypeRegistry() {
                 if (vs && !vs->empty()) vertShader = *vs;
                 if (fs && !fs->empty()) fragShader = *fs;
             }
+            std::cout << "[ShaderFxNode Factory] name='" << name
+                      << "' vert='" << vertShader << "' frag='" << fragShader
+                      << "' _preset_params=" << (pp ? "present" : "nil") << std::endl;
             auto* node = new ShaderFxNode(name,
                 vertShader, fragShader,
                 sceneMgr);
@@ -1639,6 +1833,22 @@ void StudioApp::initNodeTypeRegistry() {
                     vp = rt->getViewport(0);
             }
             auto* node = new CompositorNode(name, vp);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // ── TextureNode ──────────────────────────────────────────────────────
+    reg.registerType({"TextureNode", "Scene", {0.2f, 0.8f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TextureNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // ── MaterialNode ─────────────────────────────────────────────────────
+    reg.registerType({"MaterialNode", "Scene", {0.6f, 0.2f, 0.8f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MaterialNode(name);
             registerInAnimator(node);
             return node;
         }});

@@ -8,6 +8,8 @@
 #include <OgreViewport.h>
 #include <OgreColourValue.h>
 #include <OgreRoot.h>
+#include <OgreCompositorManager.h>
+#include <OgreCompositorChain.h>
 
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
@@ -112,17 +114,17 @@ StudioEngine::~StudioEngine() {
 void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
     if (!mRoot) return;
 
-    // Destroy previous texture if it exists.
+    // Destroy previous textures if they exist.
     if (mRenderTex) {
         Ogre::TextureManager::getSingleton().remove("StudioRenderTexture",
             Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         mRenderTarget = nullptr;
         mRenderTex.reset();
     }
-
     mRTWidth  = width;
     mRTHeight = height;
 
+    // ── RT1: Scene RenderTexture (no compositors) ─────────────────────────
     mRenderTex = Ogre::TextureManager::getSingleton().createManual(
         "StudioRenderTexture",
         Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
@@ -138,28 +140,25 @@ void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
     }
     mRenderTarget->setAutoUpdated(false);
 
-    // Attach main camera to the RenderTexture viewport.
+    // Attach main camera to RT1 viewport.
     if (mSceneManager && mSceneManager->hasCamera("MainCamera")) {
         Ogre::Camera* cam = mSceneManager->getCamera("MainCamera");
         auto* vp = mRenderTarget->addViewport(cam);
         vp->setBackgroundColour(Ogre::ColourValue(0.12f, 0.12f, 0.12f));
         vp->setOverlaysEnabled(true);
-        // Disable auto-aspect (it reads from the wrong viewport — the RenderWindow one)
-        // and force the correct aspect ratio for this RenderTexture.
         cam->setAutoAspectRatio(false);
         Ogre::Real ar = static_cast<Ogre::Real>(width) / static_cast<Ogre::Real>(height);
         cam->setAspectRatio(ar);
-        std::cout << "[StudioEngine] initRenderTexture " << width << "x" << height
-                  << " aspect=" << ar << " cam=" << cam->getName()
-                  << " vp=" << vp->getActualWidth() << "x" << vp->getActualHeight()
-                  << std::endl;
     }
+
+    std::cout << "[StudioEngine] initRenderTexture " << width << "x" << height
+              << std::endl;
 }
 
 void StudioEngine::resizeRenderTexture(uint32_t width, uint32_t height) {
     if (width == mRTWidth && height == mRTHeight) return;
     initRenderTexture(width, height);
-    mCachedFBO = -1; // new FBO — must re-discover ID
+    mCachedFBO = -1;       // new FBO — must re-discover ID
 }
 
 void StudioEngine::updateRenderTarget() {
@@ -191,6 +190,16 @@ void StudioEngine::updateRenderTarget() {
     }
 #else
     mRenderTarget->update();
+#endif
+
+    // Re-bind our FBO after render (compositors may have changed it)
+#ifdef _WIN32
+    if (mCachedFBO >= 0) {
+        using BindFBOFunc = void(APIENTRY*)(unsigned int, unsigned int);
+        static auto sBindFBO2 = reinterpret_cast<BindFBOFunc>(wglGetProcAddress("glBindFramebuffer"));
+        if (sBindFBO2)
+            sBindFBO2(0x8D40 /*GL_FRAMEBUFFER*/, static_cast<unsigned int>(mCachedFBO));
+    }
 #endif
 }
 

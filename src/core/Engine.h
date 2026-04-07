@@ -22,6 +22,10 @@ public:
     virtual ~Engine();
     static Engine* instance();
 
+    /// Set renderer name override (e.g. "Direct3D11 Rendering Subsystem").
+    /// Must be called before Engine construction. Empty = use platform default.
+    static void setRendererOverride(const std::string& name) { sRendererOverride = name; }
+
     virtual void startRendering();
     void stopRendering();
     void screenshot();
@@ -67,6 +71,7 @@ protected:
 
 private:
     static Engine* sInstance;
+    static std::string sRendererOverride;
 };
 
 } // namespace bbfx

@@ -1,6 +1,6 @@
 # BBFx Demos
 
-## BBFx Studio v3.2 (GUI Application)
+## BBFx Studio v3.2.4 (GUI Application)
 
 Launch the graphical studio interface:
 ```
@@ -13,16 +13,19 @@ bbfx-studio.exe lua/demos/demo_studio.lua
 - `--reset` — Reset settings to defaults
 - `--clear` — Start with empty graph
 - `--fullscreen` — Start in fullscreen
+- `--d3d11` — Use Direct3D11 renderer instead of OpenGL 3+
+- `--build` — Rebuild before launching
 
 **Panels:**
 - **Viewport** — Live OGRE render, resizable, FPS/resolution/mode overlay
 - **Node Editor** — Interactive DAG: drag pins to create links, Delete to remove, color by type, real-time port values, flow animation on links
 - **Inspector** — Auto-generated widgets from ParamSpec: float sliders, int spinners, bool checkboxes, enum dropdowns, color pickers, vec3 editors, mesh/texture/material/shader/particle/compositor selectors. Rename/delete nodes.
 - **Timeline** — Beat/bar markers, chord state blocks, BPM, transport, 8-band audio spectrum
-- **Preset Browser** — 41 presets in 6 categories (Geometry, Color, PostProcess, Particle, Camera, Composition), collapsible accordions, drag-to-graph instantiation
+- **Preset Browser** — 41 presets in 6 categories, 7 asset sections (Meshes, Textures, Particles, Compositors, Shaders, Materials), texture thumbnail grid, search bar, drag-drop to viewport/node editor
 - **Console** — Lua REPL + debugger commands (`dbg.help()`, `dbg.list()`, `dbg.inspect()`, etc.)
 - **Set Editor** — Hidden by default (F4)
-- **Performance Mode** — F5 toggle, fullscreen viewport 80%, 4x4 trigger grid, 8 faders, VU meters, BPM overlay, PANIC button
+- **Compositor Stack** — List of active CompositorNodes, drag-reorder, inline params, solo/bypass
+- **Performance Mode** — F5 toggle, fullscreen viewport with compositors active, 4x4 trigger grid (7 action types, pages, colors, momentary/toggle), 8 faders (learn mode, range, labels), VU meters, BPM overlay, beat flash, PANIC button
 
 **Keyboard shortcuts:**
 - **F1** — Toggle Node Editor

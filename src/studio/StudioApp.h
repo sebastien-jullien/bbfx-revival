@@ -10,12 +10,14 @@
 #include "panels/ConsolePanel.h"
 #include "panels/SetEditorPanel.h"
 #include "panels/SceneHierarchyPanel.h"
+#include "panels/CompositorStackPanel.h"
 #include "Debugger.h"
 #include "commands/CommandManager.h"
 #include "NodeTypeRegistry.h"
 #include "SettingsManager.h"
 #include "project/ProjectSerializer.h"
 #include "project/ExportDialog.h"
+#include "TextureThumbnailCache.h"
 #include "../core/AutomationEngine.h"
 
 #include <sol/sol.hpp>
@@ -99,6 +101,8 @@ private:
     std::unique_ptr<SetEditorPanel>        mSetEditorPanel;
     std::unique_ptr<SceneHierarchyPanel>  mSceneHierarchyPanel;
     std::unique_ptr<AutomationEngine>     mAutomationEngine;
+    std::unique_ptr<TextureThumbnailCache> mThumbCache;
+    std::unique_ptr<CompositorStackPanel>  mCompositorStackPanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -109,6 +113,7 @@ private:
     bool mShowConsole       = false;
     bool mShowSetEditor     = false;
     bool mShowSceneHierarchy = true;
+    bool mShowCompositorStack = false;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;

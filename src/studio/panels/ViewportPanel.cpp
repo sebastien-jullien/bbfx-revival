@@ -1,12 +1,22 @@
 #include "ViewportPanel.h"
 #include "../../core/Animator.h"
+#include "../../core/ParamSpec.h"
 #include "../nodes/SceneObjectNode.h"
 #include "../ResourceEnumerator.h"
 #include "../commands/NodeCommands.h"
+#include "../commands/CommandManager.h"
+#include "../commands/EditCommands.h"
 #include <imgui.h>
 #include <OgreRoot.h>
 #include <OgreFrameListener.h>
 #include <OgrePlane.h>
+#include <OgreEntity.h>
+#include <OgreSubEntity.h>
+#include <OgreMaterial.h>
+#include <OgreMaterialManager.h>
+#include <OgreTechnique.h>
+#include <OgrePass.h>
+#include <OgreTextureUnitState.h>
 #include <SDL3/SDL.h>
 #include <cmath>
 
@@ -81,6 +91,10 @@ void ViewportPanel::render() {
     } else {
         ImGui::TextDisabled("(OGRE RenderTexture not ready)");
     }
+
+    // Store viewport image rect for picking during drag-drop
+    ImVec2 mImgRectMin = ImGui::GetItemRectMin();
+    ImVec2 mImgRectMax = ImGui::GetItemRectMax();
 
     // ── Viewport interaction ──────────────────────────────────────────────────
     mIsHovered = ImGui::IsItemHovered();
@@ -313,6 +327,72 @@ void ViewportPanel::render() {
             std::string presetName(static_cast<const char*>(payload->Data));
             if (mPicker && !mPicker->getSelectedNodeName().empty() && mApplyFxFn) {
                 mApplyFxFn(presetName, mPicker->getSelectedNodeName());
+            }
+        }
+        // Accept texture drag → create TextureNode + entity link
+        if (auto* payload = ImGui::AcceptDragDropPayload("TEXTURE_NAME")) {
+            std::string texName(static_cast<const char*>(payload->Data));
+            // Pick at drop position to find the object under the cursor
+            std::string targetName;
+            if (mPicker) {
+                ImVec2 mousePos = ImGui::GetMousePos();
+                float imgW = mImgRectMax.x - mImgRectMin.x;
+                float imgH = mImgRectMax.y - mImgRectMin.y;
+                if (imgW > 0 && imgH > 0) {
+                    float nx = (mousePos.x - mImgRectMin.x) / imgW;
+                    float ny = (mousePos.y - mImgRectMin.y) / imgH;
+                    if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) {
+                        auto* hit = mPicker->pick(nx, ny);
+                        if (hit) mPicker->select(hit); // update selected node name
+                    }
+                }
+                targetName = mPicker->getSelectedNodeName();
+            }
+            if (mCreateNodeFn) {
+                mCreateNodeFn("TextureNode", texName, targetName);
+            }
+        }
+        // Accept material drag → create MaterialNode + entity link
+        if (auto* payload = ImGui::AcceptDragDropPayload("MATERIAL_NAME")) {
+            std::string matName(static_cast<const char*>(payload->Data));
+            std::string matTarget;
+            if (mPicker) {
+                ImVec2 mp = ImGui::GetMousePos();
+                float imgW = mImgRectMax.x - mImgRectMin.x;
+                float imgH = mImgRectMax.y - mImgRectMin.y;
+                if (imgW > 0 && imgH > 0) {
+                    float nx = (mp.x - mImgRectMin.x) / imgW;
+                    float ny = (mp.y - mImgRectMin.y) / imgH;
+                    if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) {
+                        auto* hit = mPicker->pick(nx, ny);
+                        if (hit) mPicker->select(hit);
+                    }
+                }
+                matTarget = mPicker->getSelectedNodeName();
+            }
+            if (mCreateNodeFn) {
+                mCreateNodeFn("MaterialNode", matName, matTarget);
+            }
+        }
+        // Accept shader drag → apply FX via the same path as presets
+        if (auto* payload = ImGui::AcceptDragDropPayload("SHADER_NAME")) {
+            std::string shaderName(static_cast<const char*>(payload->Data));
+            if (mPicker && !mPicker->getSelectedNodeName().empty() && mApplyFxFn) {
+                mApplyFxFn(shaderName, mPicker->getSelectedNodeName());
+            }
+        }
+        // Accept particle drag → create ParticleNode
+        if (auto* payload = ImGui::AcceptDragDropPayload("PARTICLE_NAME")) {
+            std::string particleName(static_cast<const char*>(payload->Data));
+            if (mCreateNodeFn) {
+                mCreateNodeFn("ParticleNode", particleName, "");
+            }
+        }
+        // Accept compositor drag → create CompositorNode
+        if (auto* payload = ImGui::AcceptDragDropPayload("COMPOSITOR_NAME")) {
+            std::string compName(static_cast<const char*>(payload->Data));
+            if (mCreateNodeFn) {
+                mCreateNodeFn("CompositorNode", compName, "");
             }
         }
         ImGui::EndDragDropTarget();

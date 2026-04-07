@@ -129,17 +129,43 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     j["timeline"]["time_signature"] = state.timeSignature;
 
     // ── Performance ──────────────────────────────────────────────────────────
+    // Legacy triggers (backward compat)
     json triggers = json::array();
     for (int i = 0; i < 16; ++i) {
         triggers.push_back(state.triggerChords[i]);
     }
     j["performance"]["triggers"] = triggers;
 
+    // Trigger pages (v3.2.4+)
+    if (!state.triggerPages.empty()) {
+        json pages = json::array();
+        for (auto& page : state.triggerPages) {
+            json p = json::array();
+            for (auto& slot : page) {
+                json s;
+                s["label"] = slot.label;
+                s["action"] = slot.action;
+                s["momentary"] = slot.momentary;
+                s["hue"] = slot.hue;
+                p.push_back(s);
+            }
+            pages.push_back(p);
+        }
+        j["performance"]["triggerPages"] = pages;
+    }
+
+    // Compositor stack (v3.2.4+)
+    if (!state.compositorStack.empty()) {
+        j["performance"]["compositorStack"] = state.compositorStack;
+    }
+
     json faders = json::array();
     for (int i = 0; i < 8; ++i) {
         json f;
         f["nodeName"] = state.faders[i].nodeName;
         f["portName"] = state.faders[i].portName;
+        f["minVal"] = state.faders[i].minVal;
+        f["maxVal"] = state.faders[i].maxVal;
         faders.push_back(f);
     }
     j["performance"]["faders"] = faders;
@@ -422,17 +448,57 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
         // ── Restore performance (v3.1+) ──────────────────────────────────────
         if (outState && j.contains("performance")) {
             auto& perf = j["performance"];
+
+            // Legacy triggers (v3.2.3 format)
             if (perf.contains("triggers")) {
                 auto& trigs = perf["triggers"];
                 for (int i = 0; i < 16 && i < static_cast<int>(trigs.size()); ++i) {
                     outState->triggerChords[i] = trigs[i].get<std::string>();
                 }
             }
+
+            // Trigger pages (v3.2.4+) — overrides legacy if present
+            if (perf.contains("triggerPages")) {
+                outState->triggerPages.clear();
+                for (auto& pageJson : perf["triggerPages"]) {
+                    std::vector<ProjectSerializer::TriggerSlotData> page;
+                    for (auto& slotJson : pageJson) {
+                        ProjectSerializer::TriggerSlotData slot;
+                        slot.label = slotJson.value("label", "");
+                        slot.action = slotJson.value("action", "");
+                        slot.momentary = slotJson.value("momentary", false);
+                        slot.hue = slotJson.value("hue", 0.0f);
+                        page.push_back(slot);
+                    }
+                    outState->triggerPages.push_back(page);
+                }
+            } else if (perf.contains("triggers")) {
+                // Backward compat: migrate legacy triggerChords to triggerPages
+                std::vector<ProjectSerializer::TriggerSlotData> page(16);
+                for (int i = 0; i < 16; ++i) {
+                    if (!outState->triggerChords[i].empty()) {
+                        page[i].label = outState->triggerChords[i];
+                        page[i].action = "chord:" + outState->triggerChords[i];
+                    }
+                }
+                outState->triggerPages.push_back(page);
+            }
+
+            // Compositor stack (v3.2.4+)
+            if (perf.contains("compositorStack")) {
+                outState->compositorStack.clear();
+                for (auto& name : perf["compositorStack"]) {
+                    outState->compositorStack.push_back(name.get<std::string>());
+                }
+            }
+
             if (perf.contains("faders")) {
                 auto& fads = perf["faders"];
                 for (int i = 0; i < 8 && i < static_cast<int>(fads.size()); ++i) {
                     outState->faders[i].nodeName = fads[i].value("nodeName", "");
                     outState->faders[i].portName = fads[i].value("portName", "");
+                    outState->faders[i].minVal = fads[i].value("minVal", 0.0f);
+                    outState->faders[i].maxVal = fads[i].value("maxVal", 1.0f);
                 }
             }
             if (perf.contains("quickAccess")) {
