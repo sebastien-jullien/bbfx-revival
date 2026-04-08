@@ -40,10 +40,22 @@ private:
     bool mTextureGridView = true;
 
     class TextureThumbnailCache* mThumbCache = nullptr; // owned by StudioApp
+    class ShaderPreviewRenderer* mPreviewRenderer = nullptr; // owned by StudioApp (v3.2.5)
 
     bool matchesSearch(const std::string& name) const;
 public:
     void setThumbCache(class TextureThumbnailCache* cache) { mThumbCache = cache; }
+    void setPreviewRenderer(class ShaderPreviewRenderer* renderer) { mPreviewRenderer = renderer; }
+
+    // Preset wheel integration (v3.2.5)
+    using WheelToggleCb = std::function<void(const std::string& presetName, bool add)>;
+    using WheelCheckCb = std::function<bool(const std::string& presetName)>;
+    void setWheelCallbacks(WheelToggleCb toggle, WheelCheckCb check) {
+        mWheelToggle = std::move(toggle); mWheelCheck = std::move(check);
+    }
+private:
+    WheelToggleCb mWheelToggle;
+    WheelCheckCb mWheelCheck;
 };
 
 } // namespace bbfx

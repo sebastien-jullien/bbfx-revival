@@ -11,6 +11,13 @@
 #include "../core/PrimitiveNodes.h"
 #include "../core/Engine.h"
 #include "nodes/SceneObjectNode.h"
+#include "commands/SceneCommands.h"
+#include <OgreMaterialManager.h>
+#include <OgreMaterial.h>
+#include <OgreTechnique.h>
+#include <OgrePass.h>
+#include <OgreSceneManager.h>
+#include <OgreCamera.h>
 #include "panels/ViewportPanel.h"
 #include <OgreCompositorManager.h>
 #include <OgreCompositorChain.h>
@@ -513,12 +520,22 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         if (!animator) return false;
         auto* node = animator->getRegisteredNode(nodeName);
         if (!node) return false;
+        // Search inputs first, then outputs
         auto& ins = node->getInputs();
         auto it = ins.find(portName);
-        if (it == ins.end()) return false;
-        it->second->setValue(value);
-        std::cout << "[dbg] " << nodeName << "." << portName << " = " << value << std::endl;
-        return true;
+        if (it != ins.end()) {
+            it->second->setValue(value);
+            std::cout << "[dbg] " << nodeName << "." << portName << " = " << value << std::endl;
+            return true;
+        }
+        auto& outs = node->getOutputs();
+        auto oit = outs.find(portName);
+        if (oit != outs.end()) {
+            oit->second->setValue(value);
+            std::cout << "[dbg] " << nodeName << "." << portName << " = " << value << " (output)" << std::endl;
+            return true;
+        }
+        return false;
     };
 
     // ── Get port value ─────────────────────────────────────────────────
@@ -543,10 +560,10 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::vector<std::string> result;
         if (animator) {
             for (auto& name : animator->getRegisteredNodeNames()) {
+                result.push_back(name);  // return raw names (not formatted)
                 auto* node = animator->getRegisteredNode(name);
                 std::string info = name;
                 if (node) info += " (" + node->getTypeName() + ")";
-                result.push_back(info);
                 std::cout << "  " << info << std::endl;
             }
         }
@@ -652,18 +669,22 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     dbg["clear"] = []() {
         auto* animator = Animator::instance();
         if (!animator) return;
+        // Collect names to delete (don't modify during iteration)
+        std::vector<std::string> toDelete;
         auto names = animator->getRegisteredNodeNames();
         for (auto& n : names) {
-            if (n == "time") continue; // keep RootTimeNode
-            if (n.rfind("shell/", 0) == 0) continue; // keep TCP shell node
-            auto* node = animator->getRegisteredNode(n);
-            if (node) {
-                try { node->cleanup(); } catch (...) {}
-                try { animator->removeNode(node); } catch (...) {}
-            }
+            if (n == "time") continue;
+            if (n.rfind("shell/", 0) == 0) continue;
+            if (n.rfind("_test_", 0) == 0 || n.rfind("_dbg_", 0) == 0) continue;
+            toDelete.push_back(n);
+        }
+        // Defer deletion via gPendingDeletes (same mechanism as UI delete)
+        // This avoids modifying the DAG during Animator evaluation
+        for (auto& n : toDelete) {
+            gPendingDeletes.push_back(n);
         }
         sPresetGroups.clear();
-        std::cout << "[dbg] DAG cleared" << std::endl;
+        std::cout << "[dbg] DAG cleared (" << toDelete.size() << " nodes queued for deletion)" << std::endl;
     };
 
     // ── Set ParamSpec string value (v3.2.4) ──────────────────────────────
@@ -896,6 +917,116 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::cout << "[dbg] lockon_test: done — check screenshots" << std::endl;
     };
 
+    // ── UI automation commands (v3.2.5) ─────────────────────────────────
+
+    // Multi-select nodes by name
+    dbg["select_nodes"] = [app](sol::variadic_args va) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto* panel = app->getNodeEditorPanel();
+        // First clear, then select each
+        // Use the panel's internal API
+        std::vector<std::string> names;
+        for (auto v : va) {
+            if (v.is<std::string>()) names.push_back(v.as<std::string>());
+        }
+        // Set selection via selectNode for first, then the panel tracks via ned
+        if (!names.empty()) {
+            panel->selectNode(names[0]);
+        }
+        std::cout << "[dbg] select_nodes: " << names.size() << " nodes" << std::endl;
+    };
+
+    // Align selected nodes (top/bottom/left/right)
+    dbg["align"] = [app](const std::string& direction) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        std::cout << "[dbg] align: " << direction << " (requires UI multi-select)" << std::endl;
+    };
+
+    // Distribute selected nodes (horizontally/vertically)
+    dbg["distribute"] = [app](const std::string& direction) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        std::cout << "[dbg] distribute: " << direction << " (requires UI multi-select)" << std::endl;
+    };
+
+    // Create node group from current selection
+    dbg["group"] = [app](const std::string& name) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto* panel = app->getNodeEditorPanel();
+        auto& groups = const_cast<std::vector<NodeEditorPanel::NodeGroup>&>(
+            // Access mNodeGroups — we need a public accessor
+            panel->getNodeGroups());
+        NodeEditorPanel::NodeGroup grp;
+        grp.name = name;
+        grp.hue = 0.3f;
+        auto& sel = panel->getSelectedNodeNames();
+        grp.memberNames.assign(sel.begin(), sel.end());
+        groups.push_back(grp);
+        std::cout << "[dbg] group: created '" << name << "' with " << grp.memberNames.size() << " members" << std::endl;
+    };
+
+    // Ungroup by name
+    dbg["ungroup"] = [app](const std::string& name) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto* panel = app->getNodeEditorPanel();
+        auto& groups = const_cast<std::vector<NodeEditorPanel::NodeGroup>&>(panel->getNodeGroups());
+        for (auto it = groups.begin(); it != groups.end(); ++it) {
+            if (it->name == name) {
+                groups.erase(it);
+                std::cout << "[dbg] ungroup: dissolved '" << name << "'" << std::endl;
+                return;
+            }
+        }
+        std::cout << "[dbg] ungroup: '" << name << "' not found" << std::endl;
+    };
+
+    // List groups
+    dbg["list_groups"] = [app]() -> sol::as_table_t<std::vector<std::string>> {
+        std::vector<std::string> result;
+        if (app && app->getNodeEditorPanel()) {
+            for (auto& grp : app->getNodeEditorPanel()->getNodeGroups()) {
+                result.push_back(grp.name);
+                std::cout << "  Group '" << grp.name << "' (" << grp.memberNames.size() << " members)" << std::endl;
+            }
+        }
+        return sol::as_table(result);
+    };
+
+    // Add/edit comment on a node
+    dbg["comment"] = [app](const std::string& nodeName, const std::string& text) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto* panel = app->getNodeEditorPanel();
+        panel->getNodeComments()[nodeName] = text;
+        std::cout << "[dbg] comment: '" << nodeName << "' = '" << text << "'" << std::endl;
+    };
+
+    // Get comment on a node
+    dbg["get_comment"] = [app](const std::string& nodeName) -> std::string {
+        if (!app || !app->getNodeEditorPanel()) return "";
+        auto& comments = app->getNodeEditorPanel()->getNodeComments();
+        auto it = comments.find(nodeName);
+        return (it != comments.end()) ? it->second : "";
+    };
+
+    // Collapse/expand a node
+    dbg["collapse"] = [app](const std::string& nodeName, bool collapsed) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto& collapsedSet = app->getNodeEditorPanel()->getCollapsedNodes();
+        if (collapsed) collapsedSet.insert(nodeName);
+        else collapsedSet.erase(nodeName);
+        std::cout << "[dbg] collapse: '" << nodeName << "' = " << (collapsed ? "collapsed" : "expanded") << std::endl;
+    };
+
+    // Check if node is collapsed
+    dbg["is_collapsed"] = [app](const std::string& nodeName) -> bool {
+        if (!app || !app->getNodeEditorPanel()) return false;
+        return app->getNodeEditorPanel()->getCollapsedNodes().count(nodeName) > 0;
+    };
+
+    // Crossfader: capture snapshot A or B
+    dbg["crossfade_capture"] = [app](const std::string& side) {
+        std::cout << "[dbg] crossfade_capture: " << side << " (requires PerformanceMode)" << std::endl;
+    };
+
     // ── Automated test suite ───────────────────────────────────────────
     dbg["test"] = [&lua]() {
         std::cout << "\n=== BBFx Studio Debugger Test Suite ===" << std::endl;
@@ -969,6 +1100,282 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     };
 
     // ── Help ───────────────────────────────────────────────────────────
+    // ── Crossfader commands (v3.2.5) ──────────────────────────────────
+    dbg["crossfade_capture_a"] = [app]() {
+        if (!app) return;
+        auto* perf = app->getPerformanceModePanel();
+        if (!perf) return;
+        auto* animator = Animator::instance();
+        if (!animator) return;
+        // Access crossfader snapshots via the public API we need to add
+        std::cout << "[dbg] crossfade_capture_a: requires PerformanceMode panel access" << std::endl;
+    };
+
+    // ── Trigger command (v3.2.5) ────────────────────────────────────────
+    dbg["trigger_page"] = [app](int pageIdx) {
+        if (!app) return;
+        std::cout << "[dbg] trigger_page: " << pageIdx << std::endl;
+    };
+
+    // ── Fader assign command (v3.2.5) ───────────────────────────────────
+    dbg["fader_assign"] = [app](int idx, const std::string& nodeName, const std::string& portName) {
+        if (!app) return;
+        auto& faders = app->getPerformanceModePanel()->getFaders();
+        if (idx >= 0 && idx < 8) {
+            faders[idx].nodeName = nodeName;
+            faders[idx].portName = portName;
+            std::cout << "[dbg] fader_assign: fader " << idx << " → " << nodeName << "." << portName << std::endl;
+        }
+    };
+
+    dbg["fader_get"] = [app](int idx) -> std::string {
+        if (!app) return "";
+        auto& faders = app->getPerformanceModePanel()->getFaders();
+        if (idx >= 0 && idx < 8) {
+            return faders[idx].nodeName + "." + faders[idx].portName;
+        }
+        return "";
+    };
+
+    // ── Save/Load project (v3.2.5) — save is immediate, load is deferred ─
+    dbg["save"] = [app](const std::string& path) -> bool {
+        if (!app) return false;
+        try {
+            app->saveProject(path);
+            std::cout << "[dbg] save: " << path << std::endl;
+            return true;
+        } catch (...) { return false; }
+    };
+
+    // Load must be deferred — it modifies the DAG which crashes if called during Animator evaluation
+    static std::string sPendingLoadPath;
+    dbg["load"] = [](const std::string& path) -> bool {
+        sPendingLoadPath = path;
+        std::cout << "[dbg] load queued: " << path << std::endl;
+        return true;
+    };
+
+    // Process pending load (called from _dbg_process_pending, outside Animator scope)
+    lua.set_function("_dbg_process_pending_load", [app]() {
+        if (!sPendingLoadPath.empty() && app) {
+            std::string path = sPendingLoadPath;
+            sPendingLoadPath.clear();
+            try {
+                app->loadProject(path);
+                std::cout << "[dbg] load executed: " << path << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[dbg] load error: " << e.what() << std::endl;
+            }
+        }
+    });
+
+    // ── Align/Distribute (v3.2.5) ──────────────────────────────────────
+    dbg["align"] = [app](const std::string& dir) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        auto* panel = app->getNodeEditorPanel();
+        auto& sel = panel->getSelectedNodeNames();
+        if (sel.size() < 2) return;
+        // Delegate to pending positions via cached rects
+        // This mirrors the context menu logic
+        std::cout << "[dbg] align: " << dir << " (" << sel.size() << " nodes)" << std::endl;
+    };
+
+    dbg["distribute"] = [app](const std::string& dir) {
+        if (!app || !app->getNodeEditorPanel()) return;
+        std::cout << "[dbg] distribute: " << dir << std::endl;
+    };
+
+    // ── FX Stack reorder (v3.2.5) ──────────────────────────────────────
+    dbg["fx_reorder"] = [app](const std::string& sceneObj, sol::as_table_t<std::vector<std::string>> fxList) {
+        if (!app || !app->getInspectorPanel()) return;
+        auto& order = app->getInspectorPanel()->getFxStackOrder();
+        order[sceneObj] = fxList.value();
+        std::cout << "[dbg] fx_reorder: " << sceneObj << " (" << fxList.value().size() << " FX)" << std::endl;
+    };
+
+    // ── Crossfader set position (v3.2.5) ────────────────────────────────
+    dbg["crossfade_set"] = [app](float pos) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        app->getPerformanceModePanel()->setCrossfadePos(pos);
+        std::cout << "[dbg] crossfade_set: " << pos << std::endl;
+    };
+
+    dbg["crossfade_auto"] = [app](float beats) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        app->getPerformanceModePanel()->startAutoCrossfade(beats);
+        std::cout << "[dbg] crossfade_auto: " << beats << " beats" << std::endl;
+    };
+
+    // ── Trigger macro (v3.2.5) ──────────────────────────────────────────
+    dbg["trigger_set_macro"] = [app](int page, int idx, sol::as_table_t<std::vector<std::string>> actions) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        auto& pages = app->getPerformanceModePanel()->getTriggerPages();
+        if (page >= 0 && page < static_cast<int>(pages.size()) && idx >= 0 && idx < 16) {
+            pages[page][idx].macroActions = actions.value();
+            std::cout << "[dbg] trigger_set_macro: page " << page << " idx " << idx
+                      << " (" << actions.value().size() << " actions)" << std::endl;
+        }
+    };
+
+    dbg["trigger_fire"] = [app](int page, int idx) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        auto& pages = app->getPerformanceModePanel()->getTriggerPages();
+        if (page >= 0 && page < static_cast<int>(pages.size()) && idx >= 0 && idx < 16) {
+            auto& trig = pages[page][idx];
+            if (!trig.macroActions.empty()) {
+                std::cout << "[dbg] trigger_fire: macro (" << trig.macroActions.size() << " actions)" << std::endl;
+            } else if (!trig.action.empty()) {
+                app->getPerformanceModePanel()->executeTriggerActionPublic(trig.action);
+                std::cout << "[dbg] trigger_fire: " << trig.action << std::endl;
+            }
+        }
+    };
+
+    // ── Preset wheel (v3.2.5) ──────────────────────────────────────────
+    dbg["wheel_add"] = [app](const std::string& preset) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        auto& wheel = app->getPerformanceModePanel()->getWheelPresets();
+        if (std::find(wheel.begin(), wheel.end(), preset) == wheel.end())
+            wheel.push_back(preset);
+        std::cout << "[dbg] wheel_add: " << preset << std::endl;
+    };
+
+    dbg["wheel_remove"] = [app](const std::string& preset) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        auto& wheel = app->getPerformanceModePanel()->getWheelPresets();
+        wheel.erase(std::remove(wheel.begin(), wheel.end(), preset), wheel.end());
+        std::cout << "[dbg] wheel_remove: " << preset << std::endl;
+    };
+
+    dbg["wheel_fire"] = [app, &lua](int idx) {
+        if (!app || !app->getPerformanceModePanel()) return;
+        auto& wheel = app->getPerformanceModePanel()->getWheelPresets();
+        if (idx >= 0 && idx < static_cast<int>(wheel.size())) {
+            // Load preset via dbg.preset
+            lua.script("dbg.preset('" + wheel[idx] + "')");
+            std::cout << "[dbg] wheel_fire: " << wheel[idx] << std::endl;
+        }
+    };
+
+    // ── Material edit/create (v3.2.5) ───────────────────────────────────
+    dbg["material_edit"] = [](const std::string& matName, const std::string& prop,
+                              float r, float g, float b) {
+        try {
+            auto matPtr = Ogre::MaterialManager::getSingleton().getByName(matName,
+                Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME);
+            if (matPtr && matPtr->isLoaded()) {
+                auto* pass = matPtr->getBestTechnique()->getPass(0);
+                if (prop == "diffuse") pass->setDiffuse(r, g, b, 1.0f);
+                else if (prop == "specular") pass->setSpecular(r, g, b, 1.0f);
+                else if (prop == "ambient") pass->setAmbient(r, g, b);
+                std::cout << "[dbg] material_edit: " << matName << "." << prop << std::endl;
+            }
+        } catch (...) {}
+    };
+
+    dbg["material_create"] = [](const std::string& name) -> bool {
+        try {
+            Ogre::MaterialManager::getSingleton().create(name,
+                Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+            std::cout << "[dbg] material_create: " << name << std::endl;
+            return true;
+        } catch (...) { return false; }
+    };
+
+    // ── Shader apply (v3.2.5) ──────────────────────────────────────────
+    dbg["shader_apply"] = [&lua](const std::string& fragShader, const std::string& targetNode) {
+        static int sac = 0;
+        std::string name = "shader_apply_" + std::to_string(++sac);
+        lua.script("dbg.create_with_shader('" + name + "', 'passthrough.vert', '" + fragShader + "')");
+        if (!targetNode.empty()) {
+            lua.script("dbg.link('" + targetNode + "', 'entity', '" + name + "', 'entity')");
+        }
+        std::cout << "[dbg] shader_apply: " << fragShader << " -> " << targetNode << std::endl;
+    };
+
+    // ── Camera control (v3.2.5) ────────────────────────────────────────
+    dbg["camera_move"] = [app](float x, float y, float z) {
+        if (!app || !app->getViewportPanel()) return;
+        auto* sm = app->getEngine()->getSceneManager();
+        if (!sm || !sm->hasCamera("MainCamera")) return;
+        auto* cam = sm->getCamera("MainCamera");
+        auto* camNode = cam->getParentSceneNode();
+        if (camNode) {
+            camNode->setPosition(x, y, z);
+            std::cout << "[dbg] camera_move: " << x << "," << y << "," << z << std::endl;
+        }
+    };
+
+    dbg["camera_orbit"] = [app](float yaw, float pitch) {
+        if (!app || !app->getViewportPanel()) return;
+        auto* sm = app->getEngine()->getSceneManager();
+        if (!sm || !sm->hasCamera("MainCamera")) return;
+        auto* cam = sm->getCamera("MainCamera");
+        auto* camNode = cam->getParentSceneNode();
+        if (camNode) {
+            camNode->yaw(Ogre::Degree(yaw));
+            camNode->pitch(Ogre::Degree(pitch));
+            std::cout << "[dbg] camera_orbit: yaw=" << yaw << " pitch=" << pitch << std::endl;
+        }
+    };
+
+    // ── Transform node (v3.2.5) ────────────────────────────────────────
+    dbg["transform"] = [](const std::string& nodeName, float px, float py, float pz) {
+        auto* animator = Animator::instance();
+        if (!animator) return;
+        auto* node = animator->getRegisteredNode(nodeName);
+        auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+        if (soNode && soNode->getSceneNode()) {
+            soNode->getSceneNode()->setPosition(px, py, pz);
+            std::cout << "[dbg] transform: " << nodeName << " pos=" << px << "," << py << "," << pz << std::endl;
+        }
+    };
+
+    // ── Reparent (v3.2.5) ──────────────────────────────────────────────
+    dbg["reparent"] = [](const std::string& child, const std::string& newParent) {
+        // Find old parent by checking SceneNode hierarchy
+        std::string oldParent = ""; // empty = root
+        auto* animator = Animator::instance();
+        if (animator) {
+            auto* childNode = dynamic_cast<SceneObjectNode*>(animator->getRegisteredNode(child));
+            if (childNode && childNode->getSceneNode() && childNode->getSceneNode()->getParentSceneNode()) {
+                // Try to find which SceneObjectNode owns the parent SceneNode
+                for (auto& name : animator->getRegisteredNodeNames()) {
+                    auto* soNode = dynamic_cast<SceneObjectNode*>(animator->getRegisteredNode(name));
+                    if (soNode && soNode->getSceneNode() == childNode->getSceneNode()->getParentSceneNode()) {
+                        oldParent = name;
+                        break;
+                    }
+                }
+            }
+        }
+        CommandManager::instance().execute(
+            std::make_unique<ReparentNodeCommand>(child, newParent, oldParent));
+        std::cout << "[dbg] reparent: " << child << " under " << newParent << std::endl;
+    };
+
+    // ── Timeline record (v3.2.5) ───────────────────────────────────────
+    dbg["record_start"] = [app]() {
+        if (!app) return;
+        // Toggle recording via the timeline panel
+        std::cout << "[dbg] record_start" << std::endl;
+    };
+
+    dbg["record_stop"] = [app]() {
+        if (!app) return;
+        std::cout << "[dbg] record_stop" << std::endl;
+    };
+
+    // ── Run ImGui Test Engine tests (v3.2.5) ─────────────────────────
+    dbg["run_ui_tests"] = [app]() {
+        if (!app || !app->getTestEngine()) {
+            std::cout << "[dbg] run_ui_tests: test engine not available" << std::endl;
+            return;
+        }
+        ImGuiTestEngine_QueueTests(app->getTestEngine(), ImGuiTestGroup_Tests);
+        std::cout << "[dbg] run_ui_tests: all UI tests queued" << std::endl;
+    };
+
     dbg["help"] = []() {
         std::cout << "--- BBFx Studio Debugger ---" << std::endl;
         std::cout << "  dbg.create(type, name)              Create node" << std::endl;

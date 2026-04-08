@@ -1,4 +1,5 @@
 #include "ViewportToolbar.h"
+#include "../RichTooltip.h"
 #include <imgui.h>
 
 namespace bbfx {
@@ -23,10 +24,13 @@ void ViewportToolbar::render()
     };
 
     toolBtn("W:Move", Tool::Translate);
+    RichTooltip("Translate tool — move objects", "W");
     ImGui::SameLine();
     toolBtn("E:Rot",  Tool::Rotate);
+    RichTooltip("Rotate tool — spin objects", "E");
     ImGui::SameLine();
     toolBtn("R:Scl",  Tool::Scale);
+    RichTooltip("Scale tool — resize objects", "R");
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -36,6 +40,7 @@ void ViewportToolbar::render()
     if (ImGui::SmallButton(mSpace == Space::World ? "World" : "Local")) {
         mSpace = (mSpace == Space::World) ? Space::Local : Space::World;
     }
+    RichTooltip("Toggle World/Local transform space");
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -47,6 +52,7 @@ void ViewportToolbar::render()
         mSnapOn = !mSnapOn;
     }
     if (mSnapOn) ImGui::PopStyleColor();
+    RichTooltip("Snap to grid when transforming", "Ctrl");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(50.0f);
     ImGui::DragFloat("##snapSize", &mSnapSize, 0.1f, 0.1f, 10.0f, "%.1f");
@@ -61,6 +67,7 @@ void ViewportToolbar::render()
         mGridOn = !mGridOn;
     }
     if (mGridOn) ImGui::PopStyleColor();
+    RichTooltip("Toggle ground grid display");
 
     ImGui::SameLine();
 
@@ -70,6 +77,7 @@ void ViewportToolbar::render()
         mOverlaysOn = !mOverlaysOn;
     }
     if (mOverlaysOn) ImGui::PopStyleColor();
+    RichTooltip("Toggle overlays (gizmos, outlines, labels)");
 
     ImGui::PopStyleVar(2);
 }

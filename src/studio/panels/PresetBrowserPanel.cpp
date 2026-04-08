@@ -5,6 +5,7 @@
 
 #include "../ResourceEnumerator.h"
 #include "../TextureThumbnailCache.h"
+#include "../ShaderPreviewRenderer.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -104,6 +105,21 @@ void PresetBrowserPanel::renderPresetTree() {
                     ImGui::SetDragDropPayload("PRESET_NAME", name.c_str(), name.size() + 1);
                     ImGui::Text("Instantiate: %s", name.c_str());
                     ImGui::EndDragDropSource();
+                }
+                // Right-click: Add/Remove from Preset Wheel
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                    mSelectedPreset = name;
+                    ImGui::OpenPopup("PresetContextMenu");
+                }
+                if (mSelectedPreset == name && ImGui::BeginPopup("PresetContextMenu")) {
+                    bool inWheel = mWheelCheck ? mWheelCheck(name) : false;
+                    if (!inWheel && ImGui::MenuItem("Add to Wheel")) {
+                        if (mWheelToggle) mWheelToggle(name, true);
+                    }
+                    if (inWheel && ImGui::MenuItem("Remove from Wheel")) {
+                        if (mWheelToggle) mWheelToggle(name, false);
+                    }
+                    ImGui::EndPopup();
                 }
             }
         }
@@ -281,46 +297,95 @@ void PresetBrowserPanel::renderAssetBrowser() {
         }
     }
 
-    // Shaders
+    // Shaders (with animated preview thumbnails if ShaderPreviewRenderer available)
     if (mAssetTypeFilter == 0 || mAssetTypeFilter == 5) {
         auto shaders = ResourceEnumerator::listShaders();
         bool hasMatch = false;
         for (auto& s : shaders) { if (matchesSearch(s)) { hasMatch = true; break; } }
         if (hasMatch && ImGui::TreeNode("Shaders")) {
+            float contentW = ImGui::GetContentRegionAvail().x;
+            int cols = (mPreviewRenderer) ? std::max(1, static_cast<int>(contentW / 76.0f)) : 1;
+            int col = 0;
             for (auto& s : shaders) {
                 if (!matchesSearch(s)) continue;
                 anyResults = true;
-                ImGui::Selectable(s.c_str());
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                    ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
-                    ImGui::Text("Shader: %s", s.c_str());
-                    ImGui::EndDragDropSource();
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Shader: %s", s.c_str());
+
+                if (mPreviewRenderer && mPreviewRenderer->isInitialized()) {
+                    // Grid view with animated preview
+                    if (col > 0 && col < cols) ImGui::SameLine();
+                    ImGui::BeginGroup();
+                    ImTextureID preview = mPreviewRenderer->getShaderPreview(s);
+                    ImGui::Image(preview, {64, 64});
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                        ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
+                        ImGui::Image(preview, {32, 32});
+                        ImGui::SameLine();
+                        ImGui::Text("%s", s.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    // Truncate name
+                    std::string displayName = s;
+                    if (displayName.size() > 10) displayName = displayName.substr(0, 8) + "..";
+                    ImGui::TextDisabled("%s", displayName.c_str());
+                    ImGui::EndGroup();
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shader: %s", s.c_str());
+                    col = (col + 1) % cols;
+                } else {
+                    // Fallback: text list
+                    ImGui::Selectable(s.c_str());
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                        ImGui::SetDragDropPayload("SHADER_NAME", s.c_str(), s.size() + 1);
+                        ImGui::Text("Shader: %s", s.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shader: %s", s.c_str());
                 }
             }
             ImGui::TreePop();
         }
     }
 
-    // Materials
+    // Materials (with sphere preview thumbnails if ShaderPreviewRenderer available)
     if (mAssetTypeFilter == 0 || mAssetTypeFilter == 6) {
         auto materials = ResourceEnumerator::listMaterials();
         bool hasMatch = false;
         for (auto& m : materials) { if (matchesSearch(m)) { hasMatch = true; break; } }
         if (hasMatch && ImGui::TreeNode("Materials")) {
+            float contentW = ImGui::GetContentRegionAvail().x;
+            int cols = (mPreviewRenderer) ? std::max(1, static_cast<int>(contentW / 76.0f)) : 1;
+            int col = 0;
             for (auto& m : materials) {
                 if (!matchesSearch(m)) continue;
                 anyResults = true;
-                ImGui::Selectable(m.c_str());
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                    ImGui::SetDragDropPayload("MATERIAL_NAME", m.c_str(), m.size() + 1);
-                    ImGui::Text("Material: %s", m.c_str());
-                    ImGui::EndDragDropSource();
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Material: %s", m.c_str());
+
+                if (mPreviewRenderer && mPreviewRenderer->isInitialized()) {
+                    // Grid view with sphere preview
+                    if (col > 0 && col < cols) ImGui::SameLine();
+                    ImGui::BeginGroup();
+                    ImTextureID preview = mPreviewRenderer->getMaterialPreview(m);
+                    ImGui::Image(preview, {64, 64});
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                        ImGui::SetDragDropPayload("MATERIAL_NAME", m.c_str(), m.size() + 1);
+                        ImGui::Image(preview, {32, 32});
+                        ImGui::SameLine();
+                        ImGui::Text("%s", m.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    std::string displayName = m;
+                    if (displayName.size() > 10) displayName = displayName.substr(0, 8) + "..";
+                    ImGui::TextDisabled("%s", displayName.c_str());
+                    ImGui::EndGroup();
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material: %s", m.c_str());
+                    col = (col + 1) % cols;
+                } else {
+                    // Fallback: text list
+                    ImGui::Selectable(m.c_str());
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                        ImGui::SetDragDropPayload("MATERIAL_NAME", m.c_str(), m.size() + 1);
+                        ImGui::Text("Material: %s", m.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material: %s", m.c_str());
                 }
             }
             ImGui::TreePop();

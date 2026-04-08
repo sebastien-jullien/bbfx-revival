@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <vector>
+#include <set>
 
 #include <sol/forward.hpp>
 
@@ -29,8 +30,13 @@ public:
         mSelectionCallback = std::move(cb);
     }
 
-    /// Returns the name of the currently selected node, or "".
+    /// Returns the name of the currently selected node (primary), or "".
     const std::string& getSelectedNodeName() const { return mSelectedNode; }
+
+    /// Returns all currently selected node names.
+    const std::set<std::string>& getSelectedNodeNames() const { return mSelectedNodes; }
+
+    // Accessors declared after private members (see below)
 
     /// Callback for creating nodes from drops (texture, material) with optional entity link.
     using CreateNodeFn = std::function<void(const std::string& nodeType, const std::string& paramValue,
@@ -48,6 +54,21 @@ public:
     void selectNodeFromExternal(const std::string& name) {
         mSelectedNode = name;
     }
+
+    // ── Clipboard for copy-paste ────────────────────────────────────────────
+    struct NodeSnapshot {
+        std::string name, typeName;
+        float relX = 0, relY = 0;        // position relative to selection centroid
+        std::map<std::string, float> portValues;
+        std::string paramSpecJsonStr;  // JSON string of ParamSpec
+    };
+    struct LinkSnapshot {
+        std::string fromNode, fromPort, toNode, toPort;
+    };
+    struct ClipboardData {
+        std::vector<NodeSnapshot> nodes;
+        std::vector<LinkSnapshot> links;
+    };
 
     struct NodePosition { std::string name; float x, y; int attempts = 0; };
     std::vector<NodePosition> getNodePositions() const;
@@ -110,7 +131,8 @@ private:
 
     sol::state& mLua;
 
-    std::string mSelectedNode;
+    std::string mSelectedNode;                   // primary selection (first of multi-select)
+    std::set<std::string> mSelectedNodes;          // all currently selected nodes
     std::function<void(const std::string&)> mSelectionCallback;
     CreateNodeFn mCreateNodeFn;
 
@@ -132,6 +154,20 @@ private:
 
     bool mShowCreateMenu = false;
     ImVec2 mCreateMenuPos;
+
+    // Quick-add popup state
+    bool mShowQuickAdd = false;
+    ImVec2 mQuickAddPos;           // canvas position for node creation
+    char mQuickAddBuf[128] = {};
+    int mQuickAddSelection = 0;
+
+    // Drag-link auto-create state
+    struct PendingDragLink {
+        std::string nodeName, portName;
+        bool isOutput = false;
+        bool active = false;
+    };
+    PendingDragLink mPendingDragLink;
     ax::NodeEditor::LinkId mContextLinkId;  // for right-click link context menu
 
     bool mShowSavePresetDialog = false;
@@ -148,10 +184,44 @@ private:
     std::vector<ax::NodeEditor::NodeId> mStaleNodeIds;
     std::vector<ax::NodeEditor::PinId> mStalePinIds;
 
+    ClipboardData mClipboard;
+    static int sCopyCounter;
+
+    // Node comments (v3.2.5 — I-686)
+    std::map<std::string, std::string> mNodeComments;
+    bool mShowCommentPopup = false;
+    char mCommentBuf[512] = {};
+    std::string mCommentTarget;
+
+    // Node groups — struct public for test automation access
+    public:
+    struct NodeGroup {
+        std::string name;
+        float hue = 0.5f;
+        std::vector<std::string> memberNames;
+    };
+    private:
+    std::vector<NodeGroup> mNodeGroups;
+
+    // Collapsed nodes (v3.2.5 — I-689)
+    std::set<std::string> mCollapsedNodes;
+
+    // Minimap cached view rect (captured inside ned::Begin/End scope)
+    float mViewRect[4] = {0, 0, 1, 1}; // {minX, minY, maxX, maxY} in canvas coords
+
     ImVec2 mBookmarks[9] = {};
     float mBookmarkZooms[9] = {};
     float mBookmarkRects[9][4] = {}; // {minX, minY, maxX, maxY}
     bool mBookmarkSet[9] = {};
+
+public:
+    // Accessors for test automation (v3.2.5)
+    std::vector<NodeGroup>& getNodeGroups() { return mNodeGroups; }
+    const std::vector<NodeGroup>& getNodeGroups() const { return mNodeGroups; }
+    std::map<std::string, std::string>& getNodeComments() { return mNodeComments; }
+    const std::map<std::string, std::string>& getNodeComments() const { return mNodeComments; }
+    std::set<std::string>& getCollapsedNodes() { return mCollapsedNodes; }
+    const std::set<std::string>& getCollapsedNodes() const { return mCollapsedNodes; }
 };
 
 } // namespace bbfx

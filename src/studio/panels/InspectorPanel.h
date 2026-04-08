@@ -1,5 +1,8 @@
 #pragma once
 #include <string>
+#include <set>
+#include <map>
+#include <vector>
 #include <functional>
 #include <sol/forward.hpp>
 
@@ -13,6 +16,7 @@ public:
 
     void render();
     void setSelectedNode(const std::string& name) { mSelectedNode = name; }
+    void setSelectedNodes(const std::set<std::string>& names) { mSelectedNodes = names; }
 
     /// Callback for "Add to Timeline" context menu on float params
     using AddToTimelineCb = std::function<void(const std::string& nodeName,
@@ -35,6 +39,7 @@ private:
 
     sol::state& mLua;
     std::string mSelectedNode;
+    std::set<std::string> mSelectedNodes;
     char mLuaSourceBuf[8192] = {};
     bool mLuaModified = false;
     std::string mLuaError;
@@ -57,6 +62,10 @@ private:
     bool mPreviewActive = false;
     std::string mPreviewCurrentTexture;
 
+    // FX Stack order per SceneObjectNode (v3.2.5)
+    std::map<std::string, std::vector<std::string>> mFxStackOrder;
+    void syncFxOrder(const std::string& soNode, std::vector<std::string>& fxNodes);
+
     // Fader learn mode callback (v3.2.4)
     using LearnCb = std::function<void(const std::string& nodeName, const std::string& portName)>;
     LearnCb mLearnCb;
@@ -64,6 +73,7 @@ private:
 public:
     void setThumbCache(class TextureThumbnailCache* cache) { mThumbCache = cache; }
     void setLearnCallback(LearnCb cb) { mLearnCb = std::move(cb); }
+    auto& getFxStackOrder() { return mFxStackOrder; }
 };
 
 } // namespace bbfx

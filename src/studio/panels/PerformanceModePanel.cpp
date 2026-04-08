@@ -17,7 +17,10 @@
 #include <OgreViewport.h>
 #include <OgreCompositorManager.h>
 #include <algorithm>
+#include <set>
 #include <iostream>
+#include <filesystem>
+#include <cstring>
 
 namespace bbfx {
 
@@ -129,6 +132,32 @@ void PerformanceModePanel::render(StudioEngine* engine) {
 
     renderVUMeters();
     renderBPMOverlay();
+
+    // Preset wheel (top-left of viewport)
+    ImGui::SetCursorPos({10, 10});
+    renderPresetWheel();
+
+    // MacroRunner update (beat-gated execution)
+    if (mMacroRunner.running && mMacroRunner.currentIndex < static_cast<int>(mMacroRunner.pendingActions.size())) {
+        if (mCurrentBeat >= mMacroRunner.targetBeat) {
+            auto& action = mMacroRunner.pendingActions[mMacroRunner.currentIndex];
+            if (action.rfind("wait:", 0) == 0) {
+                float beats = std::stof(action.substr(5));
+                mMacroRunner.targetBeat = mCurrentBeat + beats;
+                mMacroRunner.currentIndex++;
+            } else {
+                executeTriggerAction(action);
+                mMacroRunner.currentIndex++;
+            }
+        }
+        if (mMacroRunner.currentIndex >= static_cast<int>(mMacroRunner.pendingActions.size())) {
+            mMacroRunner.running = false;
+        }
+    }
+
+    // Crossfader A/B (above panic button)
+    ImGui::SetCursorPos({10, viewH - 90});
+    renderCrossfader();
 
     // Panic button (bottom center of viewport)
     ImGui::SetCursorPos({viewW / 2 - 60, viewH - 50});
@@ -265,7 +294,11 @@ void PerformanceModePanel::renderTriggerGrid() {
             // Toggle: flip on click
             if (ImGui::IsItemClicked()) {
                 trig.active = !trig.active;
-                executeTriggerAction(trig.action);
+                if (!trig.macroActions.empty()) {
+                    mMacroRunner.start(trig.macroActions);
+                } else {
+                    executeTriggerAction(trig.action);
+                }
             }
         }
         ImGui::PopStyleColor();
@@ -298,10 +331,42 @@ void PerformanceModePanel::renderTriggerGrid() {
                 }
             }
             ImGui::Separator();
+
+            // Macro editor (v3.2.5)
+            if (ImGui::BeginMenu("Edit Macro")) {
+                ImGui::TextDisabled("Actions sequence (one per line):");
+                for (int mi = 0; mi < static_cast<int>(trig.macroActions.size()); ++mi) {
+                    ImGui::PushID(mi);
+                    char buf[128] = {};
+                    std::strncpy(buf, trig.macroActions[mi].c_str(), sizeof(buf) - 1);
+                    ImGui::SetNextItemWidth(200);
+                    if (ImGui::InputText("##macroAction", buf, sizeof(buf))) {
+                        trig.macroActions[mi] = buf;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X##del")) {
+                        trig.macroActions.erase(trig.macroActions.begin() + mi);
+                        mi--;
+                    }
+                    ImGui::PopID();
+                }
+                if (ImGui::SmallButton("+ Add Action")) {
+                    trig.macroActions.push_back("enable:");
+                }
+                ImGui::Separator();
+                ImGui::TextDisabled("Types: chord: enable: disable: preset: reset: compositor: set_param: wait:");
+                if (!trig.macroActions.empty()) {
+                    trig.label = "M:" + std::to_string(trig.macroActions.size());
+                }
+                ImGui::EndMenu();
+            }
+
+            ImGui::Separator();
             ImGui::SliderFloat("Hue", &trig.hue, 0.0f, 1.0f);
             ImGui::Checkbox("Momentary", &trig.momentary);
             if (ImGui::MenuItem("Clear")) {
                 trig.action.clear();
+                trig.macroActions.clear();
                 trig.label = "+";
                 trig.active = false;
             }
@@ -566,10 +631,26 @@ void PerformanceModePanel::executeTriggerAction(const std::string& action) {
     } else if (prefix == "preset") {
         // Load preset via Lua debugger API
         try {
+            // Capture node names before preset load
+            auto* anim = Animator::instance();
+            std::set<std::string> beforeNames;
+            if (anim) {
+                for (auto& n : anim->getRegisteredNodeNames()) beforeNames.insert(n);
+            }
+
             sol::table dbg = mLua["dbg"];
             if (dbg.valid()) {
                 sol::function fn = dbg["preset"];
                 if (fn.valid()) fn(target);
+            }
+
+            // Auto-assign faders for newly created nodes
+            if (anim) {
+                std::vector<std::string> newNodes;
+                for (auto& n : anim->getRegisteredNodeNames()) {
+                    if (beforeNames.find(n) == beforeNames.end()) newNodes.push_back(n);
+                }
+                if (!newNodes.empty()) autoAssignFaders(newNodes);
             }
         } catch (const std::exception& e) {
             std::cerr << "[PerfMode] Preset load error: " << e.what() << std::endl;
@@ -587,6 +668,27 @@ void PerformanceModePanel::executeTriggerAction(const std::string& action) {
                     auto& inputs = node->getInputs();
                     auto it = inputs.find(portName);
                     if (it != inputs.end()) it->second->setValue(0.0f);
+                }
+            }
+        }
+    } else if (prefix == "set_param") {
+        // target = "nodeName.portName=value"
+        auto eqPos = target.find('=');
+        if (eqPos != std::string::npos) {
+            std::string portRef = target.substr(0, eqPos);
+            float value = std::stof(target.substr(eqPos + 1));
+            auto dotPos = portRef.find('.');
+            if (dotPos != std::string::npos) {
+                std::string nodeName = portRef.substr(0, dotPos);
+                std::string portName = portRef.substr(dotPos + 1);
+                auto* animator = Animator::instance();
+                if (animator) {
+                    auto* node = animator->getRegisteredNode(nodeName);
+                    if (node) {
+                        auto& inputs = node->getInputs();
+                        auto it = inputs.find(portName);
+                        if (it != inputs.end()) it->second->setValue(value);
+                    }
                 }
             }
         }
@@ -624,6 +726,210 @@ void PerformanceModePanel::removeCompositorChain(StudioEngine* engine) {
     // Reset cached F5 size so next F5 entry triggers a resize (which re-creates RT1 cleanly)
     mLastPerfW = 0;
     mLastPerfH = 0;
+}
+
+void PerformanceModePanel::autoAssignFaders(const std::vector<std::string>& createdNodeNames) {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+
+    static const char* heuristicNames[] = {
+        "amplitude", "speed", "scale", "intensity", "frequency", "amount", "radius", "decay", "attack"
+    };
+
+    int assigned = 0;
+    for (auto& nodeName : createdNodeNames) {
+        if (assigned >= 4) break;
+        auto* node = animator->getRegisteredNode(nodeName);
+        if (!node || !node->getParamSpec()) continue;
+
+        for (auto& param : node->getParamSpec()->getParams()) {
+            if (assigned >= 4) break;
+            if (param.type != ParamType::FLOAT) continue;
+
+            bool isHeuristic = false;
+            std::string lowerName = param.name;
+            std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+            for (auto* h : heuristicNames) {
+                if (lowerName.find(h) != std::string::npos) { isHeuristic = true; break; }
+            }
+            if (!isHeuristic) continue;
+
+            // Find first free fader
+            for (int i = 0; i < 8; ++i) {
+                if (mFaders[i].nodeName.empty()) {
+                    mFaders[i].nodeName = nodeName;
+                    mFaders[i].portName = param.name;
+                    mFaders[i].minVal = param.minVal;
+                    mFaders[i].maxVal = param.maxVal;
+                    mFaders[i].value = param.floatVal;
+                    assigned++;
+                    break;
+                }
+            }
+        }
+    }
+    if (assigned > 0)
+        std::cout << "[Performance] Auto-assigned " << assigned << " faders" << std::endl;
+}
+
+void PerformanceModePanel::renderPresetWheel() {
+    if (mWheelPresets.empty()) return;
+
+    ImVec2 center = ImGui::GetCursorScreenPos();
+    center.x += 60; center.y += 60;
+    float radius = 50.0f;
+    int n = static_cast<int>(mWheelPresets.size());
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Draw segments
+    for (int i = 0; i < n; ++i) {
+        float angle = (2.0f * 3.14159f * i) / n - 3.14159f / 2;
+        float nextAngle = (2.0f * 3.14159f * (i + 1)) / n - 3.14159f / 2;
+
+        ImVec2 p1 = {center.x + radius * cosf(angle), center.y + radius * sinf(angle)};
+        ImVec2 p2 = {center.x + radius * cosf(nextAngle), center.y + radius * sinf(nextAngle)};
+
+        float hue = static_cast<float>(i) / n;
+        ImVec4 col = ImColor::HSV(hue, 0.6f, (i == mWheelSelection) ? 0.9f : 0.5f);
+
+        dl->AddTriangleFilled(center, p1, p2, ImGui::ColorConvertFloat4ToU32(col));
+    }
+
+    // Center text
+    if (mWheelSelection >= 0 && mWheelSelection < n) {
+        auto& name = mWheelPresets[mWheelSelection];
+        ImVec2 sz = ImGui::CalcTextSize(name.c_str());
+        dl->AddText({center.x - sz.x / 2, center.y - sz.y / 2}, IM_COL32_WHITE, name.c_str());
+    }
+
+    // Invisible button for interaction
+    ImGui::SetCursorScreenPos({center.x - radius, center.y - radius});
+    ImGui::InvisibleButton("##wheel", {radius * 2, radius * 2});
+
+    if (ImGui::IsItemHovered()) {
+        float scroll = ImGui::GetIO().MouseWheel;
+        if (scroll > 0) mWheelSelection = (mWheelSelection + 1) % n;
+        if (scroll < 0) mWheelSelection = (mWheelSelection - 1 + n) % n;
+
+        if (ImGui::IsMouseClicked(0) && mWheelSelection >= 0 && mWheelSelection < n) {
+            executeTriggerAction("preset:" + mWheelPresets[mWheelSelection]);
+        }
+    }
+}
+
+void PerformanceModePanel::renderCrossfader() {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+
+    float availW = ImGui::GetContentRegionAvail().x - 20;
+    if (availW < 100) availW = 100;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {4, 2});
+
+    // Enable toggle
+    ImGui::Checkbox("##cfActive", &mCrossfadeActive);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enable crossfader");
+    ImGui::SameLine();
+
+    // A label
+    ImGui::TextColored({0.3f, 0.5f, 1.0f, 1.0f}, "A");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mSnapshotAName.c_str());
+    // Right-click A → assign
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("AssignA");
+    ImGui::SameLine();
+
+    // Slider
+    ImGui::SetNextItemWidth(availW - 200);
+    ImGui::SliderFloat("##crossfade", &mCrossfadePos, 0.0f, 1.0f, "%.0f%%");
+    ImGui::SameLine();
+
+    // B label
+    ImGui::TextColored({1.0f, 0.5f, 0.2f, 1.0f}, "B");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mSnapshotBName.c_str());
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("AssignB");
+    ImGui::SameLine();
+
+    // Auto button
+    if (ImGui::SmallButton("Auto")) {
+        if (!mSnapshotA.empty() && !mSnapshotB.empty()) {
+            mAutoFading = true;
+            mAutoStartBeat = mCurrentBeat;
+            mAutoStartPos = mCrossfadePos;
+            mAutoTargetPos = (mCrossfadePos < 0.5f) ? 1.0f : 0.0f;
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Auto-crossfade over %.0f beats", mAutoDurationBeats);
+
+    // Assign A popup
+    // Helper lambda for assign popup content
+    auto renderAssignPopup = [&](const char* popupId, DagSnapshot& snap, std::string& snapName) {
+        if (ImGui::BeginPopup(popupId)) {
+            if (ImGui::MenuItem("Capture Current")) {
+                snap.capture(*animator);
+                snapName = "Current";
+            }
+            ImGui::Separator();
+            // List presets
+            if (ImGui::BeginMenu("Presets")) {
+                try {
+                    sol::table dbg = mLua["dbg"];
+                    if (dbg.valid()) {
+                        // Scan lua/presets/ directory for preset names
+                        std::string presetsDir = "lua/presets/";
+                        if (std::filesystem::exists(presetsDir)) {
+                            for (auto& entry : std::filesystem::directory_iterator(presetsDir)) {
+                                if (entry.path().extension() == ".lua") {
+                                    std::string name = entry.path().stem().string();
+                                    if (ImGui::MenuItem(name.c_str())) {
+                                        // Capture current, load preset, capture snapshot, restore
+                                        DagSnapshot backup;
+                                        backup.capture(*animator);
+                                        sol::function presetFn = dbg["preset"];
+                                        if (presetFn.valid()) presetFn(name);
+                                        snap.capture(*animator);
+                                        snapName = name;
+                                        // Restore original state
+                                        DagSnapshot::apply(backup, backup, 0.0f, *animator);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (...) {}
+                ImGui::EndMenu();
+            }
+            ImGui::EndPopup();
+        }
+    };
+    renderAssignPopup("AssignA", mSnapshotA, mSnapshotAName);
+    renderAssignPopup("AssignB", mSnapshotB, mSnapshotBName);
+
+    // Apply crossfade each frame
+    if (mCrossfadeActive && !mSnapshotA.empty() && !mSnapshotB.empty()) {
+        // Auto-fade animation
+        if (mAutoFading && mCurrentBeat > mAutoStartBeat) {
+            float progress = (mCurrentBeat - mAutoStartBeat) / mAutoDurationBeats;
+            if (progress >= 1.0f) {
+                mCrossfadePos = mAutoTargetPos;
+                if (mAutoBounce) {
+                    // Reverse direction
+                    mAutoStartBeat = mCurrentBeat;
+                    mAutoStartPos = mAutoTargetPos;
+                    mAutoTargetPos = (mAutoTargetPos > 0.5f) ? 0.0f : 1.0f;
+                    mAutoBounce = false; // only one bounce
+                } else {
+                    mAutoFading = false;
+                }
+            } else {
+                mCrossfadePos = mAutoStartPos + (mAutoTargetPos - mAutoStartPos) * progress;
+            }
+        }
+
+        DagSnapshot::apply(mSnapshotA, mSnapshotB, mCrossfadePos, *animator);
+    }
+
+    ImGui::PopStyleVar();
 }
 
 } // namespace bbfx

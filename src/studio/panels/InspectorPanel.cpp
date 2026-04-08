@@ -6,6 +6,7 @@
 #include "../commands/CommandManager.h"
 #include "../commands/EditCommands.h"
 #include "../commands/NodeCommands.h"
+#include "../commands/LinkCommands.h"
 #include "../../core/ParamSpec.h"
 #include "../ResourceEnumerator.h"
 #include "../TextureThumbnailCache.h"
@@ -26,6 +27,66 @@ void InspectorPanel::render() {
 
     if (mSelectedNode.empty()) {
         ImGui::TextDisabled("No node selected");
+        ImGui::End();
+        return;
+    }
+
+    // ── Multi-selection header ───────────────────────────────────────────────
+    if (mSelectedNodes.size() > 1) {
+        ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "%d nodes selected",
+                           static_cast<int>(mSelectedNodes.size()));
+        ImGui::Separator();
+        for (auto& name : mSelectedNodes) {
+            ImGui::BulletText("%s", name.c_str());
+        }
+        ImGui::Separator();
+
+        // Check if all selected nodes are the same type — if so, show common float params
+        auto* animator = Animator::instance();
+        if (animator) {
+            std::string commonType;
+            bool sameType = true;
+            for (auto& name : mSelectedNodes) {
+                auto* n = animator->getRegisteredNode(name);
+                if (!n) { sameType = false; break; }
+                if (commonType.empty()) commonType = n->getTypeName();
+                else if (n->getTypeName() != commonType) { sameType = false; break; }
+            }
+
+            if (sameType && !commonType.empty()) {
+                ImGui::TextDisabled("Common type: %s", commonType.c_str());
+                ImGui::Separator();
+
+                // Show float ports of the primary node as editable — changes apply to all
+                auto* primaryNode = animator->getRegisteredNode(mSelectedNode);
+                if (primaryNode) {
+                    for (auto& [pname, port] : primaryNode->getInputs()) {
+                        if (pname == "entity" || pname == "dt" || pname == "beat" || pname == "beatFrac")
+                            continue;
+                        float val = port->getValue();
+                        std::string label = pname + "##batch";
+                        if (ImGui::SliderFloat(label.c_str(), &val, 0.0f, 1.0f)) {
+                            // Apply to ALL selected nodes
+                            auto compound = std::make_unique<CompoundCommand>("Batch set " + pname);
+                            for (auto& sn : mSelectedNodes) {
+                                auto* n = animator->getRegisteredNode(sn);
+                                if (n) {
+                                    auto& inputs = n->getInputs();
+                                    auto it = inputs.find(pname);
+                                    if (it != inputs.end()) {
+                                        float oldVal = it->second->getValue();
+                                        compound->add(std::make_unique<EditPortValueCommand>(
+                                            sn, pname, oldVal, val));
+                                    }
+                                }
+                            }
+                            CommandManager::instance().execute(std::move(compound));
+                        }
+                    }
+                }
+            }
+        }
+
         ImGui::End();
         return;
     }
@@ -59,6 +120,120 @@ void InspectorPanel::render() {
     }
     renderLuaEditor();
     renderShaderUniforms();
+
+    // ── FX Stack: Applied Effects (for SceneObjectNode) ─────────────────────
+    if (node->getTypeName() == "SceneObjectNode") {
+        ImGui::Separator();
+        ImGui::TextColored({0.5f, 1.0f, 0.5f, 1.0f}, "Applied Effects");
+
+        // Find all FX nodes linked to this SceneObjectNode's entity port
+        auto& outputs = node->getOutputs();
+        auto entityIt = outputs.find("entity");
+        std::vector<std::string> fxNodes;
+        if (entityIt != outputs.end() && animator) {
+            for (auto& n2Name : animator->getRegisteredNodeNames()) {
+                auto* other = animator->getRegisteredNode(n2Name);
+                if (!other || other == node) continue;
+                if (other->getParamSpec()) {
+                    auto* te = other->getParamSpec()->getParam("target_entity");
+                    if (te && te->stringVal == mSelectedNode)
+                        fxNodes.push_back(n2Name);
+                }
+            }
+        }
+        // Sync with persisted order (adds new FX at end, removes dead ones)
+        syncFxOrder(mSelectedNode, fxNodes);
+
+        // Quick-apply FX button "+"
+        ImGui::SameLine();
+        if (ImGui::SmallButton("+##addFx")) {
+            ImGui::OpenPopup("QuickApplyFX");
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add effect to this object");
+        if (ImGui::BeginPopup("QuickApplyFX")) {
+            static int qfxCounter = 0;
+            auto quickApply = [&](const std::string& typeName) {
+                std::string fxName = typeName + "_" + std::to_string(++qfxCounter);
+                auto compound = std::make_unique<CompoundCommand>("Quick apply " + typeName);
+                compound->add(std::make_unique<CreateNodeCommand>(typeName, fxName, mLua));
+                compound->add(std::make_unique<CreateLinkCommand>(mSelectedNode, "entity", fxName, "entity"));
+                CommandManager::instance().execute(std::move(compound));
+            };
+            if (ImGui::MenuItem("PerlinFxNode")) quickApply("PerlinFxNode");
+            if (ImGui::MenuItem("WaveVertexShader")) quickApply("WaveVertexShader");
+            if (ImGui::MenuItem("TextureNode")) quickApply("TextureNode");
+            if (ImGui::MenuItem("MaterialNode")) quickApply("MaterialNode");
+            ImGui::EndPopup();
+        }
+
+        if (fxNodes.empty()) {
+            ImGui::TextDisabled("No effects applied");
+        } else {
+            // Drag-reorder support
+            static int dragSourceIdx = -1;
+            static int dragTargetIdx = -1;
+
+            for (int fi = 0; fi < static_cast<int>(fxNodes.size()); ++fi) {
+                auto& fxName = fxNodes[fi];
+                auto* fxNode = animator->getRegisteredNode(fxName);
+                if (!fxNode) continue;
+                ImGui::PushID(fxName.c_str());
+
+                // Drag handle
+                ImGui::TextDisabled("::");
+                if (ImGui::IsItemActive() && !ImGui::IsItemHovered()) {
+                    int delta = ImGui::GetMouseDragDelta(0).y < 0 ? -1 : 1;
+                    int nextIdx = fi + delta;
+                    if (nextIdx >= 0 && nextIdx < static_cast<int>(fxNodes.size())) {
+                        dragSourceIdx = fi;
+                        dragTargetIdx = nextIdx;
+                    }
+                    ImGui::ResetMouseDragDelta();
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Drag to reorder");
+                ImGui::SameLine();
+
+                // Enable/disable toggle
+                bool en = fxNode->isEnabled();
+                if (ImGui::Checkbox("##en", &en)) {
+                    CommandManager::instance().execute(
+                        std::make_unique<SetEnabledCommand>(fxName, !en, en));
+                }
+                ImGui::SameLine();
+
+                // Type + name
+                ImGui::TextColored({0.7f, 0.7f, 1.0f, 1.0f}, "%s", fxNode->getTypeName().c_str());
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", fxName.c_str());
+
+                // Unlink button
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X")) {
+                    auto& fxInputs = fxNode->getInputs();
+                    auto fxEntityIt = fxInputs.find("entity");
+                    if (fxEntityIt != fxInputs.end() && entityIt != outputs.end()) {
+                        CommandManager::instance().execute(
+                            std::make_unique<DeleteLinkCommand>(
+                                mSelectedNode, "entity", fxName, "entity"));
+                    }
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Unlink FX");
+
+                ImGui::PopID();
+            }
+
+            // Apply drag-reorder swap (persisted in mFxStackOrder)
+            if (dragSourceIdx >= 0 && dragTargetIdx >= 0 &&
+                dragSourceIdx < static_cast<int>(fxNodes.size()) &&
+                dragTargetIdx < static_cast<int>(fxNodes.size())) {
+                std::swap(fxNodes[dragSourceIdx], fxNodes[dragTargetIdx]);
+                mFxStackOrder[mSelectedNode] = fxNodes; // persist the new order
+                dragSourceIdx = -1;
+                dragTargetIdx = -1;
+            }
+        }
+    }
+
     ImGui::Separator();
     renderRenameDelete();
 
@@ -83,7 +258,7 @@ void InspectorPanel::renderParamSpec() {
                 ImGui::SameLine(120.0f);
                 ImGui::SetNextItemWidth(-1.0f);
                 if (ImGui::SliderFloat(id.c_str(), &param.floatVal, param.minVal, param.maxVal)) {
-                    // Sync to DAG port if exists
+                    // Sync to DAG port if exists (tooltip shown below)
                     auto& inputs = node->getInputs();
                     auto it = inputs.find(param.name);
                     if (it != inputs.end()) {
@@ -103,6 +278,10 @@ void InspectorPanel::renderParamSpec() {
                         mAddToTimelineCb(mSelectedNode, param.name, param.minVal, param.maxVal);
                     }
                     ImGui::EndPopup();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s [%.2f - %.2f] (right-click: Add to Timeline)",
+                        param.name.c_str(), param.minVal, param.maxVal);
                 }
                 break;
             }
@@ -543,6 +722,32 @@ void InspectorPanel::renderRenameDelete() {
         }
         ImGui::EndPopup();
     }
+}
+
+void InspectorPanel::syncFxOrder(const std::string& soNode, std::vector<std::string>& fxNodes) {
+    auto it = mFxStackOrder.find(soNode);
+    if (it == mFxStackOrder.end()) {
+        // No persisted order — store current
+        mFxStackOrder[soNode] = fxNodes;
+        return;
+    }
+
+    auto& order = it->second;
+    // Build ordered result: persisted order first (if still valid), then new ones at end
+    std::vector<std::string> result;
+    std::set<std::string> fxSet(fxNodes.begin(), fxNodes.end());
+    for (auto& name : order) {
+        if (fxSet.count(name)) {
+            result.push_back(name);
+            fxSet.erase(name);
+        }
+    }
+    // Append newly added FX
+    for (auto& name : fxNodes) {
+        if (fxSet.count(name)) result.push_back(name);
+    }
+    fxNodes = result;
+    order = result;
 }
 
 } // namespace bbfx

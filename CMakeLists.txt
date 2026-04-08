@@ -32,7 +32,7 @@ FetchContent_MakeAvailable(ogre-lua)
 # ── Dear ImGui (docking branch) ──────────────────────────────────────────────
 FetchContent_Declare(imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.6-docking
+    GIT_TAG        v1.92.7-docking
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -54,6 +54,33 @@ if(WIN32)
     target_link_libraries(imgui_studio PUBLIC opengl32)
 endif()
 
+# ── Dear ImGui Test Engine ────────────────────────────────────────────────────
+FetchContent_Declare(imgui_test_engine
+    GIT_REPOSITORY https://github.com/ocornut/imgui_test_engine.git
+    GIT_TAG        main
+)
+FetchContent_MakeAvailable(imgui_test_engine)
+
+# Add test engine sources to imgui_studio library
+target_sources(imgui_studio PRIVATE
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_engine.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_context.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_coroutine.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_exporters.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_perftool.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_utils.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_capture_tool.cpp
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine/imgui_te_ui.cpp
+)
+target_include_directories(imgui_studio PUBLIC
+    ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine
+)
+target_compile_definitions(imgui_studio PUBLIC
+    IMGUI_ENABLE_TEST_ENGINE
+    IMGUI_TEST_ENGINE_ENABLE_STD_FUNCTION
+    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+)
+
 # ── imgui-node-editor (thedmd) ────────────────────────────────────────────────
 # imgui-node-editor requires imgui headers; point it to our FetchContent copy.
 set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "ImGui source directory for imgui-node-editor" FORCE)
@@ -63,6 +90,31 @@ FetchContent_Declare(imgui_node_editor
     GIT_TAG        develop
 )
 FetchContent_MakeAvailable(imgui_node_editor)
+
+# ── Patches imgui-node-editor for ImGui v1.92 compatibility ───────────────────
+# 1) operator*(float, ImVec2) now defined natively in ImGui v1.92 — guard redefinition
+file(READ "${imgui_node_editor_SOURCE_DIR}/imgui_extra_math.inl" _ne_math)
+string(REPLACE
+    "inline ImVec2 operator*(const float lhs, const ImVec2& rhs)\n{\n    return ImVec2(lhs * rhs.x, lhs * rhs.y);\n}"
+    "# if IMGUI_VERSION_NUM < 19200\ninline ImVec2 operator*(const float lhs, const ImVec2& rhs)\n{\n    return ImVec2(lhs * rhs.x, lhs * rhs.y);\n}\n# endif"
+    _ne_math "${_ne_math}")
+file(WRITE "${imgui_node_editor_SOURCE_DIR}/imgui_extra_math.inl" "${_ne_math}")
+
+# 2) ImRect::Floor() removed in v1.92 — replace 2 in-place calls with manual floor
+file(READ "${imgui_node_editor_SOURCE_DIR}/imgui_node_editor.cpp" _ne_cpp)
+string(REPLACE "newBounds.Floor();"
+    "newBounds.Min = ImFloor(newBounds.Min); newBounds.Max = ImFloor(newBounds.Max);" _ne_cpp "${_ne_cpp}")
+string(REPLACE "m_NodeRect.Floor();"
+    "m_NodeRect.Min = ImFloor(m_NodeRect.Min); m_NodeRect.Max = ImFloor(m_NodeRect.Max);" _ne_cpp "${_ne_cpp}")
+string(REPLACE "node->m_Bounds.Floor();"
+    "node->m_Bounds.Min = ImFloor(node->m_Bounds.Min); node->m_Bounds.Max = ImFloor(node->m_Bounds.Max);" _ne_cpp "${_ne_cpp}")
+string(REPLACE "node->m_GroupBounds.Floor();"
+    "node->m_GroupBounds.Min = ImFloor(node->m_GroupBounds.Min); node->m_GroupBounds.Max = ImFloor(node->m_GroupBounds.Max);" _ne_cpp "${_ne_cpp}")
+string(REPLACE "m_CurrentPin->m_Bounds.Floor();"
+    "m_CurrentPin->m_Bounds.Min = ImFloor(m_CurrentPin->m_Bounds.Min); m_CurrentPin->m_Bounds.Max = ImFloor(m_CurrentPin->m_Bounds.Max);" _ne_cpp "${_ne_cpp}")
+string(REPLACE "m_GroupBounds.Floor();"
+    "m_GroupBounds.Min = ImFloor(m_GroupBounds.Min); m_GroupBounds.Max = ImFloor(m_GroupBounds.Max);" _ne_cpp "${_ne_cpp}")
+file(WRITE "${imgui_node_editor_SOURCE_DIR}/imgui_node_editor.cpp" "${_ne_cpp}")
 
 # imgui-node-editor creates a target named 'imgui-node-editor'
 # Ensure it can find imgui headers (CMakeLists in the library uses IMGUI_DIR)
@@ -168,6 +220,9 @@ add_executable(bbfx-studio
     src/studio/SettingsManager.cpp
     src/studio/ResourceEnumerator.cpp
     src/studio/TextureThumbnailCache.cpp
+    src/studio/ShaderPreviewRenderer.cpp
+    src/studio/DagSnapshot.cpp
+    src/studio/ToastSystem.cpp
     src/studio/Debugger.cpp
     src/studio/generators/MeshGenerator.cpp
     src/studio/nodes/SceneObjectNode.cpp
@@ -195,6 +250,9 @@ add_executable(bbfx-studio
     src/studio/panels/InspectorPanel.cpp
     src/studio/panels/TimelinePanel.cpp
     src/studio/panels/PresetBrowserPanel.cpp
+    src/studio/panels/ShaderGalleryPanel.cpp
+    src/studio/panels/MaterialEditorPanel.cpp
+    src/studio/panels/UndoHistoryPanel.cpp
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
     src/studio/panels/SetEditorPanel.cpp

@@ -561,3 +561,42 @@ Aucune nouvelle dependance ajoutee en v3.2.3. Stack inchangee. Le systeme d'auto
 ## Etat des dependances v3.2.4 (Avril 2026)
 
 Aucune nouvelle dependance ajoutee en v3.2.4. Stack inchangee. Les nouveaux modules (TextureThumbnailCache, CompositorStackPanel, TextureNode, MaterialNode) utilisent exclusivement les APIs OGRE 14 existantes (TextureManager, MaterialManager, CompositorManager, RenderTexture) et ImGui (Image, DragDropSource/Target). Le renderer passe en GL3Plus par defaut avec option runtime --d3d11 via le plugin RenderSystem_GL3Plus deja present dans la stack.
+
+## Etat des dependances v3.2.5 (Avril 2026)
+
+Changements majeurs dans les dependances :
+
+| Dependance | Avant | Apres | Raison |
+|-----------|-------|-------|--------|
+| **Dear ImGui** | v1.91.6-docking | **v1.92.7-docking** | Derniere version, meilleur support fonts dynamiques |
+| **imgui_test_engine** | (absent) | **main (FetchContent)** | Automatisation tests UI, 25 tests enregistres |
+| **imgui-node-editor** | thedmd/develop | thedmd/develop **(avec 2 patches CMake)** | Compat v1.92 : operator*(float,ImVec2) guard + ImRect::Floor inline |
+
+### Nouvelles dependances
+
+**imgui_test_engine** (ocornut/imgui_test_engine, branche main) :
+- Integration via FetchContent dans CMakeLists.txt
+- 8 fichiers source compiles dans imgui_studio lib
+- Defines requis : IMGUI_ENABLE_TEST_ENGINE=1, IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1, IMGUI_TEST_ENGINE_ENABLE_STD_FUNCTION
+- Licence : gratuit pour individus/petits projets/open-source
+
+### Patches CMake automatiques
+
+imgui-node-editor (thedmd/develop) necessite 2 patches automatiques pour ImGui v1.92 :
+1. `imgui_extra_math.inl` : guard `#if IMGUI_VERSION_NUM < 19200` autour de `operator*(float, ImVec2)` (deja defini nativement en v1.92)
+2. `imgui_node_editor.cpp` : 6 occurrences de `.Floor()` remplacees par `ImFloor()` inline sur Min/Max (methode supprimee en v1.92)
+
+### Stack complete v3.2.5
+
+| Dependance | Version | Source |
+|-----------|---------|--------|
+| OGRE 14 | 14.5.2 | vcpkg |
+| Dear ImGui | v1.92.7-docking | FetchContent |
+| imgui-node-editor | develop | FetchContent (thedmd, patche) |
+| imgui_test_engine | main | FetchContent (ocornut) |
+| SDL3 | latest | vcpkg |
+| sol2 | 3.3.0+ | vcpkg |
+| Lua | 5.5.0 | vcpkg |
+| Boost.Graph | latest | vcpkg |
+| nlohmann-json | 3.12+ | vcpkg |
+| libtheora/libogg | latest | vcpkg |

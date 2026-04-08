@@ -11,8 +11,13 @@
 #include "panels/SetEditorPanel.h"
 #include "panels/SceneHierarchyPanel.h"
 #include "panels/CompositorStackPanel.h"
+#include "panels/ShaderGalleryPanel.h"
+#include "panels/MaterialEditorPanel.h"
+#include "panels/UndoHistoryPanel.h"
+#include "ShaderPreviewRenderer.h"
 #include "Debugger.h"
 #include "commands/CommandManager.h"
+#include <imgui_te_engine.h>
 #include "NodeTypeRegistry.h"
 #include "SettingsManager.h"
 #include "project/ProjectSerializer.h"
@@ -45,6 +50,9 @@ public:
     NodeEditorPanel* getNodeEditorPanel() { return mNodeEditorPanel.get(); }
     InspectorPanel* getInspectorPanel() { return mInspectorPanel.get(); }
     ViewportPanel* getViewportPanel() { return mViewportPanel.get(); }
+    PerformanceModePanel* getPerformanceModePanel() { return mPerformanceModePanel.get(); }
+    void saveProject(const std::string& path);
+    void loadProject(const std::string& path);
 
 private:
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -67,8 +75,6 @@ private:
     void initNodeTypeRegistry();
 
     // ── Project / IO ─────────────────────────────────────────────────────────
-    void saveProject(const std::string& path);
-    void loadProject(const std::string& path);
     void tickAutoSave();
 
     // ── State ────────────────────────────────────────────────────────────────
@@ -103,6 +109,10 @@ private:
     std::unique_ptr<AutomationEngine>     mAutomationEngine;
     std::unique_ptr<TextureThumbnailCache> mThumbCache;
     std::unique_ptr<CompositorStackPanel>  mCompositorStackPanel;
+    std::unique_ptr<ShaderGalleryPanel>    mShaderGalleryPanel;
+    std::unique_ptr<MaterialEditorPanel>   mMaterialEditorPanel;
+    std::unique_ptr<ShaderPreviewRenderer> mPreviewRenderer;
+    std::unique_ptr<UndoHistoryPanel>      mUndoHistoryPanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -114,10 +124,26 @@ private:
     bool mShowSetEditor     = false;
     bool mShowSceneHierarchy = true;
     bool mShowCompositorStack = false;
+    bool mShowShaderGallery  = false;
+    bool mShowMaterialEditor = false;
+    bool mShowUndoHistory    = false;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;
     bool mProjectDirty      = false;
+    bool mShowSplash        = false;  // splash screen on startup (v3.2.5)
+
+    // ImGui Test Engine (v3.2.5)
+    ImGuiTestEngine* mTestEngine = nullptr;
+    void registerTests();
+public:
+    ImGuiTestEngine* getTestEngine() { return mTestEngine; }
+private:
+    std::string mLockFilePath;         // crash recovery lock file (v3.2.5)
+
+    void renderSplashScreen();
+    void createLockFile();
+    void removeLockFile();
 };
 
 } // namespace bbfx

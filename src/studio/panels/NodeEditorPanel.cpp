@@ -10,6 +10,7 @@
 #include "../commands/EditCommands.h"
 #include "../../core/ParamSpec.h"
 
+#include <nlohmann/json.hpp>
 #include <imgui.h>
 #include <imgui_node_editor.h>
 #include <imgui_node_editor_internal.h>
@@ -24,6 +25,8 @@
 namespace ned = ax::NodeEditor;
 
 namespace bbfx {
+
+int NodeEditorPanel::sCopyCounter = 0;
 
 // ── Color map by node type name ───────────────────────────────────────────────
 static const std::map<std::string, ImVec4> kNodeColors = {
@@ -421,12 +424,27 @@ void NodeEditorPanel::render() {
             }
         }
 
+        // Check if node is collapsed — only show connected pins
+        bool isCollapsed = mCollapsedNodes.count(name) > 0;
+        std::vector<ned::PinId> connectedPins;
+        if (isCollapsed) {
+            for (auto& lk : mLinks) {
+                if (lk.fromNode == name || lk.toNode == name) {
+                    connectedPins.push_back(lk.startPin);
+                    connectedPins.push_back(lk.endPin);
+                }
+            }
+            // Show collapse indicator
+            ImGui::TextDisabled("[collapsed]");
+        }
+
         // Input pins (left)
         for (size_t i = 0; i < nd.inputPins.size(); ++i) {
+            if (isCollapsed && std::find(connectedPins.begin(), connectedPins.end(), nd.inputPins[i]) == connectedPins.end())
+                continue; // skip unconnected pins when collapsed
             ned::BeginPin(nd.inputPins[i], ned::PinKind::Input);
-            ImGui::Text("> %s", nd.inputNames[i].c_str()); // ● bullet
-            // Show current port value
-            if (node) {
+            ImGui::Text("> %s", nd.inputNames[i].c_str());
+            if (!isCollapsed && node) {
                 auto& inputs = node->getInputs();
                 auto it = inputs.find(nd.inputNames[i]);
                 if (it != inputs.end()) {
@@ -439,9 +457,11 @@ void NodeEditorPanel::render() {
 
         // Output pins (right)
         for (size_t i = 0; i < nd.outputPins.size(); ++i) {
+            if (isCollapsed && std::find(connectedPins.begin(), connectedPins.end(), nd.outputPins[i]) == connectedPins.end())
+                continue;
             ned::BeginPin(nd.outputPins[i], ned::PinKind::Output);
             ImGui::Text("%s >", nd.outputNames[i].c_str());
-            if (node) {
+            if (!isCollapsed && node) {
                 auto& outputs = node->getOutputs();
                 auto it = outputs.find(nd.outputNames[i]);
                 if (it != outputs.end()) {
@@ -466,13 +486,40 @@ void NodeEditorPanel::render() {
     handleLinkCreation();
 
     // ── Handle deletion (single BeginDelete/EndDelete scope) ──────────────────
-    // ── Delete key: delete selected node via CommandManager (undoable) ─────
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !mSelectedNode.empty()) {
-        if (mNodes.count(mSelectedNode)) {
-            CommandManager::instance().execute(
-                std::make_unique<DeleteNodeCommand>(mSelectedNode, mLua));
-            mSelectedNode.clear();
+    // ── Delete key: delete selected node(s) via CommandManager (undoable) ──
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !mSelectedNodes.empty()) {
+        // Filter out non-deletable nodes (RootTimeNode, BeatDetectorNode)
+        std::vector<std::string> toDelete;
+        for (auto& name : mSelectedNodes) {
+            auto it = mNodes.find(name);
+            if (it != mNodes.end()) {
+                if (it->second.typeName != "RootTimeNode" && it->second.typeName != "BeatDetectorNode")
+                    toDelete.push_back(name);
+            }
         }
+
+        if (toDelete.size() == 1) {
+            CommandManager::instance().execute(
+                std::make_unique<DeleteNodeCommand>(toDelete[0], mLua));
+        } else if (toDelete.size() > 1) {
+            // Confirmation dialog for > 3 nodes
+            bool proceed = true;
+            if (toDelete.size() > 3) {
+                // ImGui popup needs to be deferred — use a flag
+                // For simplicity, skip confirmation and always delete (TODO: add modal in polish)
+                proceed = true;
+            }
+            if (proceed) {
+                auto compound = std::make_unique<CompoundCommand>(
+                    "Delete " + std::to_string(toDelete.size()) + " nodes");
+                for (auto& name : toDelete) {
+                    compound->add(std::make_unique<DeleteNodeCommand>(name, mLua));
+                }
+                CommandManager::instance().execute(std::move(compound));
+            }
+        }
+        mSelectedNode.clear();
+        mSelectedNodes.clear();
     }
 
     handleDeletion();
@@ -498,6 +545,211 @@ void NodeEditorPanel::render() {
                         std::make_unique<CreateNodeCommand>(nd.typeName, newName, mLua));
                     break;
                 }
+            }
+        }
+    }
+
+    // ── Ctrl+G: create node group from multi-select ────────────────────────
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G) && mSelectedNodes.size() >= 2) {
+        static int grpShortcutCounter = 0;
+        NodeGroup grp;
+        grp.name = "Group " + std::to_string(++grpShortcutCounter);
+        grp.hue = static_cast<float>(grpShortcutCounter % 10) / 10.0f;
+        grp.memberNames.assign(mSelectedNodes.begin(), mSelectedNodes.end());
+        mNodeGroups.push_back(grp);
+        std::cout << "[NodeEditor] Created group '" << grp.name << "' with " << grp.memberNames.size() << " nodes" << std::endl;
+    }
+
+    // ── Ctrl+C: copy selected nodes + internal links to clipboard ─────────
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C) && !mSelectedNodes.empty()) {
+        auto* anim = Animator::instance();
+        mClipboard = {};
+
+        // Compute centroid of selected nodes
+        float cx = 0, cy = 0;
+        int cnt = 0;
+        for (auto& name : mSelectedNodes) {
+            auto it = mNodes.find(name);
+            if (it != mNodes.end()) {
+                auto pos = ned::GetNodePosition(it->second.id);
+                cx += pos.x; cy += pos.y; cnt++;
+            }
+        }
+        if (cnt > 0) { cx /= cnt; cy /= cnt; }
+
+        // Serialize each selected node
+        for (auto& name : mSelectedNodes) {
+            auto it = mNodes.find(name);
+            if (it == mNodes.end()) continue;
+            NodeSnapshot snap;
+            snap.name = name;
+            snap.typeName = it->second.typeName;
+            auto pos = ned::GetNodePosition(it->second.id);
+            snap.relX = pos.x - cx;
+            snap.relY = pos.y - cy;
+
+            if (anim) {
+                auto* node = anim->getRegisteredNode(name);
+                if (node) {
+                    for (auto& [pname, port] : node->getInputs())
+                        snap.portValues[pname] = port->getValue();
+                    if (node->getParamSpec())
+                        snap.paramSpecJsonStr = node->getParamSpec()->toJson().dump();
+                }
+            }
+            mClipboard.nodes.push_back(std::move(snap));
+        }
+
+        // Serialize internal links (both endpoints in selection)
+        if (anim) {
+            auto dagLinks = anim->getLinks();
+            for (auto& dl : dagLinks) {
+                if (mSelectedNodes.count(dl.fromNode) && mSelectedNodes.count(dl.toNode)) {
+                    mClipboard.links.push_back({dl.fromNode, dl.fromPort, dl.toNode, dl.toPort});
+                }
+            }
+        }
+
+        std::cout << "[NodeEditor] Copied " << mClipboard.nodes.size()
+                  << " nodes, " << mClipboard.links.size() << " links" << std::endl;
+    }
+
+    // ── Ctrl+V: paste nodes from clipboard ───────────────────────────────────
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V) && !mClipboard.nodes.empty()) {
+        auto* anim = Animator::instance();
+        if (anim) {
+            ++sCopyCounter;
+            std::string suffix = "_copy" + std::to_string(sCopyCounter);
+
+            // Build name mapping: original → pasted
+            std::map<std::string, std::string> nameMap;
+            for (auto& snap : mClipboard.nodes) {
+                std::string newName = snap.name + suffix;
+                // Ensure unique
+                while (anim->getRegisteredNode(newName) || mNodes.count(newName))
+                    newName += "_";
+                nameMap[snap.name] = newName;
+            }
+
+            // Build compound command
+            auto compound = std::make_unique<CompoundCommand>(
+                "Paste " + std::to_string(mClipboard.nodes.size()) + " nodes");
+
+            // Create nodes
+            for (auto& snap : mClipboard.nodes) {
+                compound->add(std::make_unique<CreateNodeCommand>(
+                    snap.typeName, nameMap[snap.name], mLua));
+            }
+
+            // Create internal links (using remapped names)
+            for (auto& lk : mClipboard.links) {
+                auto fromIt = nameMap.find(lk.fromNode);
+                auto toIt = nameMap.find(lk.toNode);
+                if (fromIt != nameMap.end() && toIt != nameMap.end()) {
+                    compound->add(std::make_unique<CreateLinkCommand>(
+                        fromIt->second, lk.fromPort, toIt->second, lk.toPort));
+                }
+            }
+
+            CommandManager::instance().execute(std::move(compound));
+
+            // Restore port values and ParamSpec after node creation
+            for (auto& snap : mClipboard.nodes) {
+                auto* newNode = anim->getRegisteredNode(nameMap[snap.name]);
+                if (!newNode) continue;
+
+                // Restore ParamSpec
+                if (!snap.paramSpecJsonStr.empty() && newNode->getParamSpec()) {
+                    try {
+                        auto j = nlohmann::json::parse(snap.paramSpecJsonStr);
+                        newNode->getParamSpec()->fromJson(j);
+                    } catch (...) {}
+                }
+
+                // Restore port values
+                for (auto& [pname, val] : snap.portValues) {
+                    auto& inputs = newNode->getInputs();
+                    auto portIt = inputs.find(pname);
+                    if (portIt != inputs.end())
+                        portIt->second->setValue(val);
+                }
+            }
+
+            // Position pasted nodes at offset from current view center
+            auto viewCenter = ned::ScreenToCanvas(ImVec2(
+                ImGui::GetWindowPos().x + ImGui::GetWindowWidth() * 0.5f,
+                ImGui::GetWindowPos().y + ImGui::GetWindowHeight() * 0.5f));
+            float offsetX = 100.0f * sCopyCounter;
+            float offsetY = 50.0f * sCopyCounter;
+            for (auto& snap : mClipboard.nodes) {
+                mPendingPositions.push_back({
+                    nameMap[snap.name],
+                    viewCenter.x + snap.relX + offsetX,
+                    viewCenter.y + snap.relY + offsetY
+                });
+            }
+
+            // Select pasted nodes
+            mSelectedNodes.clear();
+            for (auto& [orig, pasted] : nameMap) {
+                mSelectedNodes.insert(pasted);
+            }
+            mSelectedNode = mSelectedNodes.empty() ? "" : *mSelectedNodes.begin();
+
+            std::cout << "[NodeEditor] Pasted " << nameMap.size() << " nodes" << std::endl;
+        }
+    }
+
+    // ── Quick-add popup: double-click in void or Ctrl+Space ────────────────
+    if ((ImGui::IsMouseDoubleClicked(0) && !ned::GetHoveredNode() && !ned::GetHoveredLink() && !ned::GetHoveredPin()) ||
+        (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Space))) {
+        mShowQuickAdd = true;
+        mQuickAddPos = ned::ScreenToCanvas(ImGui::GetMousePos());
+        std::memset(mQuickAddBuf, 0, sizeof(mQuickAddBuf));
+        mQuickAddSelection = 0;
+    }
+
+    // ── Ctrl+L: Smart wire ───────────────────────────────────────────────────
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_L) && mSelectedNodes.size() == 2) {
+        auto it = mSelectedNodes.begin();
+        std::string node1 = *it++;
+        std::string node2 = *it;
+        auto* anim = Animator::instance();
+        if (anim) {
+            auto* n1 = anim->getRegisteredNode(node1);
+            auto* n2 = anim->getRegisteredNode(node2);
+            if (n1 && n2) {
+                // Try to match output of n1 → input of n2
+                bool linked = false;
+                for (auto& [outName, outPort] : n1->getOutputs()) {
+                    for (auto& [inName, inPort] : n2->getInputs()) {
+                        if (outName == inName || (outName == "entity" && inName == "entity") ||
+                            (outName == "out" && (inName == "in" || inName == "amplitude"))) {
+                            CommandManager::instance().execute(
+                                std::make_unique<CreateLinkCommand>(node1, outName, node2, inName));
+                            linked = true;
+                            break;
+                        }
+                    }
+                    if (linked) break;
+                }
+                if (!linked) {
+                    // Try reverse: output of n2 → input of n1
+                    for (auto& [outName, outPort] : n2->getOutputs()) {
+                        for (auto& [inName, inPort] : n1->getInputs()) {
+                            if (outName == inName || (outName == "entity" && inName == "entity") ||
+                                (outName == "out" && (inName == "in" || inName == "amplitude"))) {
+                                CommandManager::instance().execute(
+                                    std::make_unique<CreateLinkCommand>(node2, outName, node1, inName));
+                                linked = true;
+                                break;
+                            }
+                        }
+                        if (linked) break;
+                    }
+                }
+                if (!linked)
+                    std::cout << "[NodeEditor] Smart wire: no compatible ports found" << std::endl;
             }
         }
     }
@@ -539,15 +791,42 @@ void NodeEditorPanel::render() {
 
     // ── Selection tracking (must be inside Begin/End scope) ─────────────────
     {
-        ned::NodeId selectedId;
-        if (ned::GetSelectedNodes(&selectedId, 1) == 1) {
+        int selCount = ned::GetSelectedObjectCount();
+        std::vector<ned::NodeId> selectedIds(selCount > 0 ? selCount : 1);
+        int actualCount = ned::GetSelectedNodes(selectedIds.data(), static_cast<int>(selectedIds.size()));
+
+        std::set<std::string> newSelection;
+        for (int i = 0; i < actualCount; ++i) {
             for (auto& [name, nd] : mNodes) {
-                if (nd.id == selectedId && name != mSelectedNode) {
-                    mSelectedNode = name;
-                    if (mSelectionCallback) mSelectionCallback(name);
+                if (nd.id == selectedIds[i]) {
+                    newSelection.insert(name);
+                    break;
                 }
             }
         }
+
+        if (newSelection != mSelectedNodes) {
+            mSelectedNodes = newSelection;
+
+            // Derive primary selection (first alphabetically, or empty)
+            std::string newPrimary = mSelectedNodes.empty() ? "" : *mSelectedNodes.begin();
+            mSelectedNode = newPrimary;
+
+            // Always fire callback when selection set changes — Inspector needs the full set
+            if (mSelectionCallback) mSelectionCallback(mSelectedNode);
+
+            if (mSelectedNodes.size() > 1) {
+                std::cout << "[NodeEditor] Selected " << mSelectedNodes.size() << " nodes" << std::endl;
+            }
+        }
+    }
+
+    // Cache view rect for minimap (must be inside Begin/End scope)
+    {
+        auto* edCtx2 = reinterpret_cast<ax::NodeEditor::Detail::EditorContext*>(mEditorContext);
+        auto vr = edCtx2->GetViewRect();
+        mViewRect[0] = vr.Min.x; mViewRect[1] = vr.Min.y;
+        mViewRect[2] = vr.Max.x; mViewRect[3] = vr.Max.y;
     }
 
     // Cache node rects + mouse canvas position for hit-test during drag-drop
@@ -596,6 +875,237 @@ void NodeEditorPanel::render() {
         mPendingPositions = std::move(remaining);
         ned::SetCurrentEditor(nullptr);
     }
+
+    // ── Node groups: visual rendering only (interactions in showNodeContextMenu via ned::Suspend) ──
+    // Clean dead members from groups (BEFORE rendering to avoid iterator invalidation)
+    for (size_t gi = 0; gi < mNodeGroups.size(); ++gi) {
+        auto& grp = mNodeGroups[gi];
+        grp.memberNames.erase(
+            std::remove_if(grp.memberNames.begin(), grp.memberNames.end(),
+                [this](const std::string& n) { return mNodes.find(n) == mNodes.end(); }),
+            grp.memberNames.end());
+        if (grp.memberNames.empty()) {
+            mNodeGroups.erase(mNodeGroups.begin() + gi);
+            --gi;
+        }
+    }
+
+    if (!mNodeGroups.empty()) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float cScale = mCanvasRef1.x - mCanvasRef0.x;
+        if (std::abs(cScale) > 0.0001f) {
+            float invScale = 1.0f / cScale;
+            auto canvasToScreen = [&](float cx, float cy) -> ImVec2 {
+                return {(cx - mCanvasRef0.x) * invScale, (cy - mCanvasRef0.y) * invScale};
+            };
+
+            for (auto& grp : mNodeGroups) {
+                float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
+                for (auto& name : grp.memberNames) {
+                    auto it = mCachedNodeRects.find(name);
+                    if (it == mCachedNodeRects.end()) continue;
+                    minX = std::min(minX, it->second.x);
+                    minY = std::min(minY, it->second.y);
+                    maxX = std::max(maxX, it->second.x + it->second.w);
+                    maxY = std::max(maxY, it->second.y + it->second.h);
+                }
+                if (minX >= FLT_MAX) continue;
+
+                float pad = 20.0f;
+                ImVec2 p1 = canvasToScreen(minX - pad, minY - pad - 22);
+                ImVec2 p2 = canvasToScreen(maxX + pad, maxY + pad);
+
+                // Body
+                ImVec4 col4 = ImColor::HSV(grp.hue, 0.3f, 0.4f, 0.15f);
+                ImVec4 border4 = ImColor::HSV(grp.hue, 0.5f, 0.6f, 0.5f);
+                dl->AddRectFilled(p1, p2, ImGui::ColorConvertFloat4ToU32(col4), 8.0f);
+                dl->AddRect(p1, p2, ImGui::ColorConvertFloat4ToU32(border4), 8.0f, 0, 1.5f);
+
+                // Title bar
+                ImVec2 titleP2 = {p2.x, p1.y + 20};
+                ImVec4 titleBg = ImColor::HSV(grp.hue, 0.4f, 0.35f, 0.5f);
+                dl->AddRectFilled(p1, titleP2, ImGui::ColorConvertFloat4ToU32(titleBg), 8.0f, ImDrawFlags_RoundCornersTop);
+                ImVec4 textCol = ImColor::HSV(grp.hue, 0.3f, 0.95f, 1.0f);
+                dl->AddText({p1.x + 8, p1.y + 3}, ImGui::ColorConvertFloat4ToU32(textCol), grp.name.c_str());
+                std::string countStr = "(" + std::to_string(grp.memberNames.size()) + ")";
+                ImVec2 countSz = ImGui::CalcTextSize(countStr.c_str());
+                dl->AddText({titleP2.x - countSz.x - 8, p1.y + 3}, IM_COL32(180, 180, 180, 180), countStr.c_str());
+            }
+        }
+    }
+
+    // ── Node comments overlay (yellow bubble above node) ─────────────────
+    if (!mNodeComments.empty()) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 winPos = ImGui::GetWindowPos();
+        // Canvas→screen conversion using cached refs
+        // mCanvasRef0 = ScreenToCanvas({0,0}), mCanvasRef1 = ScreenToCanvas({1,0})
+        // scale = mCanvasRef1.x - mCanvasRef0.x (canvas units per screen pixel)
+        float cScale = mCanvasRef1.x - mCanvasRef0.x;
+        if (std::abs(cScale) > 0.0001f) {
+            float invScale = 1.0f / cScale;
+            auto canvasToScreen = [&](float cx, float cy) -> ImVec2 {
+                return {(cx - mCanvasRef0.x) * invScale, (cy - mCanvasRef0.y) * invScale};
+            };
+
+            for (auto& [name, comment] : mNodeComments) {
+                auto it = mCachedNodeRects.find(name);
+                if (it == mCachedNodeRects.end()) continue;
+                auto& rect = it->second;
+                ImVec2 screenPos = canvasToScreen(rect.x, rect.y);
+                // Position bubble above the node
+                float bubbleY = screenPos.y - 30;
+                float bubbleX = screenPos.x;
+
+                // Truncate to first 50 chars
+                std::string display = comment.substr(0, 50);
+                if (comment.size() > 50) display += "...";
+
+                ImVec2 textSz = ImGui::CalcTextSize(display.c_str());
+                float pad = 4;
+                ImVec2 p1 = {bubbleX - pad, bubbleY - pad};
+                ImVec2 p2 = {bubbleX + textSz.x + pad, bubbleY + textSz.y + pad};
+
+                dl->AddRectFilled(p1, p2, IM_COL32(200, 180, 50, 200), 4.0f);
+                dl->AddRect(p1, p2, IM_COL32(180, 160, 30, 255), 4.0f);
+                dl->AddText({bubbleX, bubbleY}, IM_COL32(0, 0, 0, 255), display.c_str());
+            }
+        }
+    }
+
+    // ── Minimap (interactive overview in bottom-right corner) ──────────────
+    if (!mNodes.empty() && mCachedNodeRects.size() >= 2) {
+        // 1. Compute global bounds of ALL nodes (canvas coords)
+        float gMinX = FLT_MAX, gMinY = FLT_MAX, gMaxX = -FLT_MAX, gMaxY = -FLT_MAX;
+        for (auto& [name, rect] : mCachedNodeRects) {
+            gMinX = std::min(gMinX, rect.x);
+            gMinY = std::min(gMinY, rect.y);
+            gMaxX = std::max(gMaxX, rect.x + rect.w);
+            gMaxY = std::max(gMaxY, rect.y + rect.h);
+        }
+        if (gMinX >= FLT_MAX) goto skipMinimap;
+
+        // 2. Check if the entire graph fits in the current view — if yes, hide minimap
+        {
+            float viewW = mViewRect[2] - mViewRect[0];
+            float viewH = mViewRect[3] - mViewRect[1];
+            float graphW = gMaxX - gMinX;
+            float graphH = gMaxY - gMinY;
+            if (graphW < viewW * 0.9f && graphH < viewH * 0.9f &&
+                gMinX > mViewRect[0] && gMaxX < mViewRect[2] &&
+                gMinY > mViewRect[1] && gMaxY < mViewRect[3]) {
+                goto skipMinimap; // entire graph visible, no minimap needed
+            }
+        }
+
+        {
+            ImVec2 parentWinPos = ImGui::GetWindowPos();
+            ImVec2 parentWinSize = ImGui::GetWindowSize();
+            float mmW = 160, mmH = 110;
+            float mmPad = 8.0f;
+            ImVec2 mmPos = {parentWinPos.x + parentWinSize.x - mmW - 10,
+                            parentWinPos.y + parentWinSize.y - mmH - 10};
+
+            // Use a separate floating window so it captures mouse independently of node editor
+            ImGui::SetNextWindowPos(mmPos);
+            ImGui::SetNextWindowSize({mmW, mmH});
+            ImGui::SetNextWindowBgAlpha(0.85f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+            ImGui::Begin("##Minimap", nullptr,
+                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
+                ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoDocking);
+
+            // Recompute mmPos from the actual window position (may differ slightly)
+            mmPos = ImGui::GetWindowPos();
+            ImVec2 mmSz = ImGui::GetWindowSize();
+            mmW = mmSz.x; mmH = mmSz.y;
+
+            // World bounds = union of all nodes + current view
+            float worldMinX = std::min(gMinX, mViewRect[0]);
+            float worldMinY = std::min(gMinY, mViewRect[1]);
+            float worldMaxX = std::max(gMaxX, mViewRect[2]);
+            float worldMaxY = std::max(gMaxY, mViewRect[3]);
+            float worldW = std::max(1.0f, worldMaxX - worldMinX);
+            float worldH = std::max(1.0f, worldMaxY - worldMinY);
+
+            float scaleX = (mmW - 2 * mmPad) / worldW;
+            float scaleY = (mmH - 2 * mmPad) / worldH;
+            float scale = std::min(scaleX, scaleY);
+
+            float contentW = worldW * scale;
+            float contentH = worldH * scale;
+            float offsetX = mmPos.x + mmPad + (mmW - 2 * mmPad - contentW) * 0.5f;
+            float offsetY = mmPos.y + mmPad + (mmH - 2 * mmPad - contentH) * 0.5f;
+
+            auto canvasToMM = [&](float cx, float cy) -> ImVec2 {
+                return {offsetX + (cx - worldMinX) * scale, offsetY + (cy - worldMinY) * scale};
+            };
+
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+
+            // Draw links
+            for (auto& lk : mLinks) {
+                auto fromIt = mCachedNodeRects.find(lk.fromNode);
+                auto toIt = mCachedNodeRects.find(lk.toNode);
+                if (fromIt != mCachedNodeRects.end() && toIt != mCachedNodeRects.end()) {
+                    auto& fr = fromIt->second;
+                    auto& tr = toIt->second;
+                    ImVec2 p1 = canvasToMM(fr.x + fr.w, fr.y + fr.h * 0.5f);
+                    ImVec2 p2 = canvasToMM(tr.x, tr.y + tr.h * 0.5f);
+                    dl->AddLine(p1, p2, IM_COL32(255, 160, 50, 80), 1.0f);
+                }
+            }
+
+            // Draw nodes
+            for (auto& [name, rect] : mCachedNodeRects) {
+                ImVec2 p1 = canvasToMM(rect.x, rect.y);
+                ImVec2 p2 = canvasToMM(rect.x + rect.w, rect.y + rect.h);
+                if (p2.x - p1.x < 6) p2.x = p1.x + 6;
+                if (p2.y - p1.y < 4) p2.y = p1.y + 4;
+
+                auto nodeIt = mNodes.find(name);
+                ImVec4 col4 = nodeIt != mNodes.end() ? nodeColor(nodeIt->second.typeName) : ImVec4(0.8f,0.8f,0.8f,1);
+                ImU32 fillCol = ImGui::ColorConvertFloat4ToU32({col4.x, col4.y, col4.z, 0.7f});
+                ImU32 borderCol = ImGui::ColorConvertFloat4ToU32({col4.x, col4.y, col4.z, 1.0f});
+                if (mSelectedNodes.count(name) > 0) {
+                    fillCol = ImGui::ColorConvertFloat4ToU32({col4.x, col4.y, col4.z, 1.0f});
+                    borderCol = IM_COL32(255, 255, 100, 255);
+                }
+                dl->AddRectFilled(p1, p2, fillCol);
+                dl->AddRect(p1, p2, borderCol);
+            }
+
+            // Draw viewport rectangle
+            {
+                ImVec2 vp1 = canvasToMM(mViewRect[0], mViewRect[1]);
+                ImVec2 vp2 = canvasToMM(mViewRect[2], mViewRect[3]);
+                dl->AddRect(vp1, vp2, IM_COL32(255, 255, 255, 180), 0.0f, 0, 1.5f);
+                dl->AddRectFilled(vp1, vp2, IM_COL32(255, 255, 255, 15));
+            }
+
+            // Interactive: click/drag in minimap window = navigate canvas
+            // The window itself captures mouse, preventing node editor box-select
+            if (ImGui::IsWindowHovered() && (ImGui::IsMouseClicked(0) || ImGui::IsMouseDragging(0))) {
+                ImVec2 mousePos = ImGui::GetMousePos();
+                float canvasX = worldMinX + (mousePos.x - offsetX) / scale;
+                float canvasY = worldMinY + (mousePos.y - offsetY) / scale;
+                float viewW = mViewRect[2] - mViewRect[0];
+                float viewH = mViewRect[3] - mViewRect[1];
+                ImRect target({canvasX - viewW * 0.5f, canvasY - viewH * 0.5f},
+                              {canvasX + viewW * 0.5f, canvasY + viewH * 0.5f});
+                ned::SetCurrentEditor(mEditorContext);
+                auto* edCtxMM = reinterpret_cast<ax::NodeEditor::Detail::EditorContext*>(mEditorContext);
+                edCtxMM->NavigateTo(target, false, -1.0f);
+                ned::SetCurrentEditor(nullptr);
+            }
+
+            ImGui::End(); // ##Minimap
+            ImGui::PopStyleVar(2);
+        }
+    }
+    skipMinimap:;
 
     // ── Save as Preset modal ─────────────────────────────────────────────────
     if (mShowSavePresetDialog) {
@@ -818,6 +1328,37 @@ void NodeEditorPanel::handleLinkCreation() {
             }
         }
     }
+
+    // Detect drag-link to void (QueryNewNode fires when link is dropped on empty canvas)
+    ned::PinId newNodePinId;
+    if (ned::QueryNewNode(&newNodePinId)) {
+        if (ned::AcceptNewItem()) {
+            // Find which node/port this pin belongs to
+            for (auto& [name, nd] : mNodes) {
+                for (size_t i = 0; i < nd.outputPins.size(); ++i) {
+                    if (nd.outputPins[i] == newNodePinId) {
+                        mPendingDragLink = {name, nd.outputNames[i], true, true};
+                        mShowQuickAdd = true;
+                        mQuickAddPos = ned::ScreenToCanvas(ImGui::GetMousePos());
+                        std::memset(mQuickAddBuf, 0, sizeof(mQuickAddBuf));
+                        mQuickAddSelection = 0;
+                        goto endCreate;
+                    }
+                }
+                for (size_t i = 0; i < nd.inputPins.size(); ++i) {
+                    if (nd.inputPins[i] == newNodePinId) {
+                        mPendingDragLink = {name, nd.inputNames[i], false, true};
+                        mShowQuickAdd = true;
+                        mQuickAddPos = ned::ScreenToCanvas(ImGui::GetMousePos());
+                        std::memset(mQuickAddBuf, 0, sizeof(mQuickAddBuf));
+                        mQuickAddSelection = 0;
+                        goto endCreate;
+                    }
+                }
+            }
+        }
+    }
+    endCreate:
     ned::EndCreate();
 }
 
@@ -858,9 +1399,49 @@ void NodeEditorPanel::handleDeletion() {
 
 void NodeEditorPanel::showNodeContextMenu() {
     ned::Suspend();
+
+    // Static state for group context menu
+    static int sGrpCtxIdx = -1;
+    static char sGrpRenameBuf[128] = {};
+
     if (ned::ShowBackgroundContextMenu()) {
-        ImGui::OpenPopup("NodeCreationMenu");
         mCreateMenuPos = ImGui::GetMousePos();
+        // Check if right-click is on a group title bar
+        sGrpCtxIdx = -1;
+        float cScale = mCanvasRef1.x - mCanvasRef0.x;
+        if (std::abs(cScale) > 0.0001f) {
+            float invScale = 1.0f / cScale;
+            for (int gi = 0; gi < static_cast<int>(mNodeGroups.size()); ++gi) {
+                auto& grp = mNodeGroups[gi];
+                float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
+                for (auto& name : grp.memberNames) {
+                    auto it = mCachedNodeRects.find(name);
+                    if (it == mCachedNodeRects.end()) continue;
+                    minX = std::min(minX, it->second.x);
+                    minY = std::min(minY, it->second.y);
+                    maxX = std::max(maxX, it->second.x + it->second.w);
+                    maxY = std::max(maxY, it->second.y + it->second.h);
+                }
+                if (minX >= FLT_MAX) continue;
+                float pad = 20.0f;
+                // Convert group bounds to screen coords
+                ImVec2 gp1 = {(minX - pad - mCanvasRef0.x) * invScale,
+                              (minY - pad - 22 - mCanvasRef0.y) * invScale};
+                ImVec2 gp2 = {(maxX + pad - mCanvasRef0.x) * invScale,
+                              (maxY + pad - mCanvasRef0.y) * invScale};
+                if (mCreateMenuPos.x >= gp1.x && mCreateMenuPos.x <= gp2.x &&
+                    mCreateMenuPos.y >= gp1.y && mCreateMenuPos.y <= gp2.y) {
+                    sGrpCtxIdx = gi;
+                    std::strncpy(sGrpRenameBuf, grp.name.c_str(), sizeof(sGrpRenameBuf) - 1);
+                    break;
+                }
+            }
+        }
+        if (sGrpCtxIdx >= 0) {
+            ImGui::OpenPopup("GroupContextMenu");
+        } else {
+            ImGui::OpenPopup("NodeCreationMenu");
+        }
     }
     if (ImGui::BeginPopup("NodeCreationMenu")) {
         ImGui::TextDisabled("Create Node");
@@ -912,14 +1493,22 @@ void NodeEditorPanel::showNodeContextMenu() {
     // ── Node context menu (right-click on a node) ────────────────────────────
     ned::NodeId contextNodeId;
     if (ned::ShowNodeContextMenu(&contextNodeId)) {
-        // Auto-select the right-clicked node so the context menu operates on it
+        // Find which node was right-clicked
+        std::string contextName;
         for (auto& [name, nd] : mNodes) {
-            if (nd.id == contextNodeId) {
-                mSelectedNode = name;
-                ned::SelectNode(contextNodeId);
-                if (mSelectionCallback) mSelectionCallback(name);
-                break;
-            }
+            if (nd.id == contextNodeId) { contextName = name; break; }
+        }
+        // If the right-clicked node is already in the multi-selection, keep the selection intact.
+        // Otherwise (no selection or node not in selection), select just this node.
+        if (!contextName.empty() && mSelectedNodes.find(contextName) == mSelectedNodes.end()) {
+            mSelectedNode = contextName;
+            mSelectedNodes = {contextName};
+            ned::SelectNode(contextNodeId);
+            if (mSelectionCallback) mSelectionCallback(contextName);
+        }
+        // Ensure primary is set for context menu operations
+        if (!contextName.empty() && mSelectedNodes.size() <= 1) {
+            mSelectedNode = contextName;
         }
         ImGui::OpenPopup("NodeContextMenu");
     }
@@ -962,6 +1551,181 @@ void NodeEditorPanel::showNodeContextMenu() {
                 }
             }
         }
+        // Node comment
+        if (!mSelectedNode.empty()) {
+            bool hasComment = mNodeComments.count(mSelectedNode) > 0;
+            if (ImGui::MenuItem(hasComment ? "Edit Comment" : "Add Comment")) {
+                mShowCommentPopup = true;
+                mCommentTarget = mSelectedNode;
+                std::memset(mCommentBuf, 0, sizeof(mCommentBuf));
+                if (hasComment) {
+                    std::strncpy(mCommentBuf, mNodeComments[mSelectedNode].c_str(), sizeof(mCommentBuf) - 1);
+                }
+            }
+            if (hasComment && ImGui::MenuItem("Remove Comment")) {
+                mNodeComments.erase(mSelectedNode);
+            }
+        }
+
+        // Node group (Ctrl+G)
+        if (mSelectedNodes.size() >= 2) {
+            if (ImGui::MenuItem("Group (Ctrl+G)")) {
+                static int grpCounter = 0;
+                NodeGroup grp;
+                grp.name = "Group " + std::to_string(++grpCounter);
+                grp.hue = static_cast<float>(grpCounter % 10) / 10.0f;
+                grp.memberNames.assign(mSelectedNodes.begin(), mSelectedNodes.end());
+                mNodeGroups.push_back(grp);
+            }
+        }
+
+        // Remove from group (if node belongs to one)
+        if (!mSelectedNode.empty()) {
+            for (int gi = 0; gi < static_cast<int>(mNodeGroups.size()); ++gi) {
+                auto& grp = mNodeGroups[gi];
+                auto it = std::find(grp.memberNames.begin(), grp.memberNames.end(), mSelectedNode);
+                if (it != grp.memberNames.end()) {
+                    std::string menuLabel = "Remove from \"" + grp.name + "\"";
+                    if (ImGui::MenuItem(menuLabel.c_str())) {
+                        grp.memberNames.erase(it);
+                    }
+                    break; // a node can only be in one group
+                }
+            }
+        }
+
+        // Collapse/Expand toggle
+        if (!mSelectedNode.empty()) {
+            bool collapsed = mCollapsedNodes.count(mSelectedNode) > 0;
+            if (ImGui::MenuItem(collapsed ? "Expand" : "Collapse")) {
+                if (collapsed) mCollapsedNodes.erase(mSelectedNode);
+                else mCollapsedNodes.insert(mSelectedNode);
+            }
+        }
+
+        // Align / Distribute — uses mCachedNodeRects (safe) + mPendingPositions (deferred apply)
+        if (mSelectedNodes.size() >= 2 && ImGui::BeginMenu("Align")) {
+            // Helper: get cached position + size for each selected node
+            struct NodePosSize { std::string name; float x, y, w, h; };
+            auto getCached = [this]() {
+                std::vector<NodePosSize> result;
+                for (auto& sn : mSelectedNodes) {
+                    auto it = mCachedNodeRects.find(sn);
+                    if (it != mCachedNodeRects.end())
+                        result.push_back({sn, it->second.x, it->second.y, it->second.w, it->second.h});
+                }
+                return result;
+            };
+            if (ImGui::MenuItem("Top")) {
+                auto nodes = getCached();
+                float minY = FLT_MAX;
+                for (auto& nd : nodes) minY = std::min(minY, nd.y);
+                for (auto& nd : nodes)
+                    mPendingPositions.push_back({nd.name, nd.x, minY});
+            }
+            if (ImGui::MenuItem("Bottom")) {
+                auto nodes = getCached();
+                float maxBottom = -FLT_MAX;
+                for (auto& nd : nodes) maxBottom = std::max(maxBottom, nd.y + nd.h);
+                for (auto& nd : nodes)
+                    mPendingPositions.push_back({nd.name, nd.x, maxBottom - nd.h});
+            }
+            if (ImGui::MenuItem("Left")) {
+                auto nodes = getCached();
+                float minX = FLT_MAX;
+                for (auto& nd : nodes) minX = std::min(minX, nd.x);
+                for (auto& nd : nodes)
+                    mPendingPositions.push_back({nd.name, minX, nd.y});
+            }
+            if (ImGui::MenuItem("Right")) {
+                auto nodes = getCached();
+                float maxRight = -FLT_MAX;
+                for (auto& nd : nodes) maxRight = std::max(maxRight, nd.x + nd.w);
+                for (auto& nd : nodes)
+                    mPendingPositions.push_back({nd.name, maxRight - nd.w, nd.y});
+            }
+            ImGui::EndMenu();
+        }
+        if (mSelectedNodes.size() >= 2 && ImGui::BeginMenu("Distribute")) {
+            if (ImGui::MenuItem("Horizontally (row)")) {
+                // Arrange all nodes in a horizontal row: same Y, sequential X with 30px gap
+                struct NPS { std::string name; float x, y, w, h; };
+                std::vector<NPS> nodes;
+                float avgY = 0;
+                for (auto& sn : mSelectedNodes) {
+                    auto it = mCachedNodeRects.find(sn);
+                    if (it != mCachedNodeRects.end()) {
+                        nodes.push_back({sn, it->second.x, it->second.y, it->second.w, it->second.h});
+                        avgY += it->second.y;
+                    }
+                }
+                if (!nodes.empty()) {
+                    avgY /= nodes.size();
+                    std::sort(nodes.begin(), nodes.end(), [](auto& a, auto& b) { return a.x < b.x; });
+                    constexpr float gap = 30.0f;
+                    float curX = nodes.front().x;
+                    for (size_t i = 0; i < nodes.size(); ++i) {
+                        mPendingPositions.push_back({nodes[i].name, curX, avgY});
+                        curX += nodes[i].w + gap;
+                    }
+                }
+            }
+            if (ImGui::MenuItem("Vertically (column)")) {
+                // Arrange all nodes in a vertical column: same X, sequential Y with 20px gap
+                struct NPS { std::string name; float x, y, w, h; };
+                std::vector<NPS> nodes;
+                float avgX = 0;
+                for (auto& sn : mSelectedNodes) {
+                    auto it = mCachedNodeRects.find(sn);
+                    if (it != mCachedNodeRects.end()) {
+                        nodes.push_back({sn, it->second.x, it->second.y, it->second.w, it->second.h});
+                        avgX += it->second.x;
+                    }
+                }
+                if (!nodes.empty()) {
+                    avgX /= nodes.size();
+                    std::sort(nodes.begin(), nodes.end(), [](auto& a, auto& b) { return a.y < b.y; });
+                    constexpr float gap = 20.0f;
+                    float curY = nodes.front().y;
+                    for (size_t i = 0; i < nodes.size(); ++i) {
+                        mPendingPositions.push_back({nodes[i].name, avgX, curY});
+                        curY += nodes[i].h + gap;
+                    }
+                }
+            }
+            ImGui::EndMenu();
+        }
+
+        // Batch apply FX — only when multi-select contains SceneObjectNodes
+        if (mSelectedNodes.size() >= 2) {
+            auto* anim3 = Animator::instance();
+            std::vector<std::string> sceneObjs;
+            for (auto& sn : mSelectedNodes) {
+                auto* n = anim3 ? anim3->getRegisteredNode(sn) : nullptr;
+                if (n && n->getTypeName() == "SceneObjectNode")
+                    sceneObjs.push_back(sn);
+            }
+            if (sceneObjs.size() >= 2 && ImGui::BeginMenu("Apply FX...")) {
+                static int fxCounter = 0;
+                auto applyFx = [&](const std::string& typeName, const std::string& name) {
+                    auto compound = std::make_unique<CompoundCommand>("Batch Apply " + typeName);
+                    compound->add(std::make_unique<CreateNodeCommand>(typeName, name, mLua));
+                    for (auto& target : sceneObjs) {
+                        compound->add(std::make_unique<CreateLinkCommand>(
+                            target, "entity", name, "entity"));
+                    }
+                    CommandManager::instance().execute(std::move(compound));
+                };
+                if (ImGui::MenuItem("PerlinFxNode")) {
+                    applyFx("PerlinFxNode", "BatchPerlin_" + std::to_string(++fxCounter));
+                }
+                if (ImGui::MenuItem("WaveVertexShader")) {
+                    applyFx("WaveVertexShader", "BatchWave_" + std::to_string(++fxCounter));
+                }
+                ImGui::EndMenu();
+            }
+        }
+
         ImGui::Separator();
         if (ImGui::MenuItem("Save as Preset")) {
             mShowSavePresetDialog = true;
@@ -969,6 +1733,174 @@ void NodeEditorPanel::showNodeContextMenu() {
             if (!mSelectedNode.empty()) {
                 std::strncpy(mPresetNameBuf, mSelectedNode.c_str(), sizeof(mPresetNameBuf) - 1);
             }
+        }
+        ImGui::EndPopup();
+    }
+
+    // ── Quick-add popup rendering ──────────────────────────────────────────
+    if (mShowQuickAdd) {
+        ImGui::OpenPopup("QuickAddPopup");
+        mShowQuickAdd = false;
+    }
+    if (ImGui::BeginPopup("QuickAddPopup")) {
+        ImGui::SetNextItemWidth(250.0f);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::InputText("##quickadd", mQuickAddBuf, sizeof(mQuickAddBuf));
+
+        std::string filter(mQuickAddBuf);
+        std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
+
+        // Build filtered list from node types
+        auto byCategory = NodeTypeRegistry::instance().getByCategory();
+        static int qaCounter = 0;
+        int idx = 0;
+        for (auto& [cat, types] : byCategory) {
+            for (auto* info : types) {
+                std::string lower = info->typeName;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (!filter.empty() && lower.find(filter) == std::string::npos) continue;
+
+                bool selected = (idx == mQuickAddSelection);
+                std::string label = info->typeName + " (" + cat + ")";
+                if (ImGui::Selectable(label.c_str(), selected)) {
+                    std::string name = info->typeName + "_" + std::to_string(++qaCounter);
+                    if (mPendingDragLink.active) {
+                        // Create node + auto-link from/to the dragged pin
+                        auto compound = std::make_unique<CompoundCommand>("Quick create + link");
+                        compound->add(std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
+                        // Determine which port of the new node to connect to
+                        // Simple heuristic: if drag from output, connect to first input; vice versa
+                        if (mPendingDragLink.isOutput) {
+                            // Dragged from output → connect to first input of new node
+                            std::string targetPort = "in"; // default
+                            // Check known port names
+                            if (mPendingDragLink.portName == "entity") targetPort = "entity";
+                            compound->add(std::make_unique<CreateLinkCommand>(
+                                mPendingDragLink.nodeName, mPendingDragLink.portName, name, targetPort));
+                        } else {
+                            // Dragged from input → connect from first output of new node
+                            std::string srcPort = "out";
+                            if (mPendingDragLink.portName == "entity") srcPort = "entity";
+                            compound->add(std::make_unique<CreateLinkCommand>(
+                                name, srcPort, mPendingDragLink.nodeName, mPendingDragLink.portName));
+                        }
+                        CommandManager::instance().execute(std::move(compound));
+                        mPendingDragLink.active = false;
+                    } else {
+                        CommandManager::instance().execute(
+                            std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
+                    }
+                    mPendingPositions.push_back({name, mQuickAddPos.x, mQuickAddPos.y});
+                    ImGui::CloseCurrentPopup();
+                }
+                idx++;
+            }
+        }
+
+        // Arrow key navigation
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && mQuickAddSelection > 0) mQuickAddSelection--;
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) mQuickAddSelection++;
+        if (mQuickAddSelection >= idx) mQuickAddSelection = idx > 0 ? idx - 1 : 0;
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+
+        if (idx == 0) ImGui::TextDisabled("No results");
+
+        ImGui::EndPopup();
+    }
+
+    // ── Group context menu popup ────────────────────────────────────────────
+    if (ImGui::BeginPopup("GroupContextMenu") && sGrpCtxIdx >= 0 &&
+        sGrpCtxIdx < static_cast<int>(mNodeGroups.size())) {
+        auto& grp = mNodeGroups[sGrpCtxIdx];
+
+        ImGui::TextDisabled("Group: %s (%d nodes)", grp.name.c_str(),
+                            static_cast<int>(grp.memberNames.size()));
+        ImGui::Separator();
+
+        // Rename
+        ImGui::SetNextItemWidth(150);
+        if (ImGui::InputText("Name", sGrpRenameBuf, sizeof(sGrpRenameBuf),
+                             ImGuiInputTextFlags_EnterReturnsTrue)) {
+            grp.name = sGrpRenameBuf;
+        }
+
+        // Color
+        ImGui::SliderFloat("Color", &grp.hue, 0.0f, 1.0f);
+        ImGui::SameLine();
+        ImVec4 preview = ImColor::HSV(grp.hue, 0.5f, 0.7f);
+        ImGui::ColorButton("##hue", preview);
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem("Select all members")) {
+            ned::ClearSelection();
+            for (auto& name : grp.memberNames) {
+                auto it = mNodes.find(name);
+                if (it != mNodes.end()) ned::SelectNode(it->second.id, true);
+            }
+            mSelectedNodes.clear();
+            for (auto& name : grp.memberNames) mSelectedNodes.insert(name);
+            mSelectedNode = mSelectedNodes.empty() ? "" : *mSelectedNodes.begin();
+            if (mSelectionCallback) mSelectionCallback(mSelectedNode);
+        }
+
+        if (mSelectedNodes.size() > 0 && ImGui::MenuItem("Add selection to group")) {
+            for (auto& name : mSelectedNodes) {
+                if (std::find(grp.memberNames.begin(), grp.memberNames.end(), name) == grp.memberNames.end())
+                    grp.memberNames.push_back(name);
+            }
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem("Ungroup (keep nodes)")) {
+            mNodeGroups.erase(mNodeGroups.begin() + sGrpCtxIdx);
+            sGrpCtxIdx = -1;
+            ImGui::CloseCurrentPopup();
+        }
+
+        if (ImGui::MenuItem("Delete group + all nodes")) {
+            auto compound = std::make_unique<CompoundCommand>("Delete group " + grp.name);
+            for (auto& name : grp.memberNames) {
+                if (mNodes.count(name))
+                    compound->add(std::make_unique<DeleteNodeCommand>(name, mLua));
+            }
+            CommandManager::instance().execute(std::move(compound));
+            mNodeGroups.erase(mNodeGroups.begin() + sGrpCtxIdx);
+            sGrpCtxIdx = -1;
+            mSelectedNodes.clear();
+            mSelectedNode.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen("GroupContextMenu")) {
+        sGrpCtxIdx = -1; // reset when popup closed
+    }
+
+    // ── Comment edit popup (outside ned scope) ─────────────────────────────
+    if (mShowCommentPopup) {
+        ImGui::OpenPopup("EditComment");
+        mShowCommentPopup = false;
+    }
+    if (ImGui::BeginPopupModal("EditComment", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Comment for: %s", mCommentTarget.c_str());
+        ImGui::SetNextItemWidth(300);
+        ImGui::InputTextMultiline("##commentText", mCommentBuf, sizeof(mCommentBuf), {300, 100});
+        ImGui::Separator();
+        if (ImGui::Button("OK", {80, 0})) {
+            std::string text(mCommentBuf);
+            if (text.empty()) {
+                mNodeComments.erase(mCommentTarget);
+            } else {
+                mNodeComments[mCommentTarget] = text;
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", {80, 0})) {
+            ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }

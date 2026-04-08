@@ -55,6 +55,10 @@ public:
     std::string redoDescription() const;
     void clear();
 
+    /// Access undo history for UndoHistoryPanel (v3.2.5)
+    const std::deque<std::unique_ptr<Command>>& getUndoStack() const { return mUndoStack; }
+    const std::deque<std::unique_ptr<Command>>& getRedoStack() const { return mRedoStack; }
+
 private:
     CommandManager() = default;
     std::deque<std::unique_ptr<Command>> mUndoStack;

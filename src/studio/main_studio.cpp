@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
         sol::state lua;
         lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
                            sol::lib::table, sol::lib::io, sol::lib::os,
-                           sol::lib::package);
+                           sol::lib::package, sol::lib::coroutine);
 
         // Prepend lua/ to package.path
         std::string packagePath = lua["package"]["path"].get<std::string>();
