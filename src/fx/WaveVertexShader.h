@@ -11,7 +11,7 @@ using namespace Ogre;
 
 class WaveVertexShader : public SoftwareVertexShader, public AnimationNode {
 public:
-    WaveVertexShader(const String& meshName, const String& cloneName);
+    WaveVertexShader(const String& meshName, const String& cloneName, const std::string& nodeName = "WaveVertexShader");
     virtual ~WaveVertexShader();
     void renderOneFrame(Real dt) override;
     void update() override;

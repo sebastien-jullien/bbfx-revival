@@ -276,4 +276,96 @@ void StudioEngine::startRendering() {
     ImGui::DestroyContext();
 }
 
+// ── Dual Output (v3.3) ──────────────────────────────────────────────────────
+
+bool StudioEngine::openOutputWindow(int width, int height) {
+    if (mOutputWindow) return true;
+    mOutputWidth = width;
+    mOutputHeight = height;
+
+    mOutputWindow = SDL_CreateWindow("BBFx Output", width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS);
+    if (!mOutputWindow) {
+        std::cerr << "[Output] Failed to create window: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    try {
+        mOutputTex = Ogre::TextureManager::getSingleton().createManual(
+            "OutputRenderTexture",
+            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+            Ogre::TEX_TYPE_2D, width, height, 0,
+            Ogre::PF_R8G8B8A8, Ogre::TU_RENDERTARGET);
+        mOutputTarget = mOutputTex->getBuffer()->getRenderTarget();
+        mOutputTarget->setAutoUpdated(false);
+        if (mSceneManager && mSceneManager->hasCamera("MainCamera")) {
+            auto* cam = mSceneManager->getCamera("MainCamera");
+            auto* vp = mOutputTarget->addViewport(cam);
+            vp->setBackgroundColour(Ogre::ColourValue(0.0f, 0.0f, 0.0f));
+            vp->setOverlaysEnabled(false);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[Output] RT error: " << e.what() << std::endl;
+        SDL_DestroyWindow(mOutputWindow);
+        mOutputWindow = nullptr;
+        return false;
+    }
+
+    std::cout << "[Output] Window " << width << "x" << height << std::endl;
+    return true;
+}
+
+void StudioEngine::closeOutputWindow() {
+    if (!mOutputWindow) return;
+    if (mOutputTex) {
+        Ogre::TextureManager::getSingleton().remove("OutputRenderTexture",
+            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+        mOutputTarget = nullptr;
+        mOutputTex.reset();
+    }
+    SDL_DestroyWindow(mOutputWindow);
+    mOutputWindow = nullptr;
+    std::cout << "[Output] Closed" << std::endl;
+}
+
+void StudioEngine::toggleOutputFullscreen() {
+    if (!mOutputWindow) return;
+    mOutputFullscreen = !mOutputFullscreen;
+    SDL_SetWindowFullscreen(mOutputWindow, mOutputFullscreen);
+}
+
+void StudioEngine::setOutputResolution(int w, int h) {
+    if (!mOutputWindow) return;
+    closeOutputWindow();
+    openOutputWindow(w, h);
+}
+
+void StudioEngine::setOutputMonitor(int idx) {
+    if (!mOutputWindow) return;
+    int count = 0;
+    auto* displays = SDL_GetDisplays(&count);
+    if (idx >= 0 && idx < count && displays) {
+        SDL_Rect bounds;
+        SDL_GetDisplayBounds(displays[idx], &bounds);
+        SDL_SetWindowPosition(mOutputWindow, bounds.x, bounds.y);
+    }
+    SDL_free(displays);
+}
+
+void StudioEngine::updateOutputTarget() {
+    if (!mOutputTarget || !mOutputWindow) return;
+    GLStateGuard guard;
+    mOutputTarget->update();
+    SDL_GL_MakeCurrent(mOutputWindow, mGLContext);
+    SDL_GL_SwapWindow(mOutputWindow);
+    SDL_GL_MakeCurrent(mWindow, mGLContext);
+}
+
+ImTextureID StudioEngine::getOutputTextureID() const {
+    if (!mOutputTex) return 0;
+    unsigned int glId = 0;
+    mOutputTex->getCustomAttribute("GLID", &glId);
+    return static_cast<ImTextureID>(glId);
+}
+
 } // namespace bbfx

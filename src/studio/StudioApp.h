@@ -14,7 +14,12 @@
 #include "panels/ShaderGalleryPanel.h"
 #include "panels/MaterialEditorPanel.h"
 #include "panels/UndoHistoryPanel.h"
+#include "panels/MidiActivityPanel.h"
+#include "panels/MidiMappingPanel.h"
+#include "panels/OutputPanel.h"
+#include "panels/OscBrowserPanel.h"
 #include "ShaderPreviewRenderer.h"
+#include "../midi/MidiDeviceManager.h"
 #include "Debugger.h"
 #include "commands/CommandManager.h"
 #include <imgui_te_engine.h>
@@ -69,6 +74,7 @@ private:
     void renderStatusBar();
     void renderAboutDialog();
     void renderShortcutsDialog();
+    void renderRecoveryDialog();
     void renderSettingsDialog();
 
     // ── Node type registration ──────────────────────────────────────────────
@@ -112,7 +118,12 @@ private:
     std::unique_ptr<ShaderGalleryPanel>    mShaderGalleryPanel;
     std::unique_ptr<MaterialEditorPanel>   mMaterialEditorPanel;
     std::unique_ptr<ShaderPreviewRenderer> mPreviewRenderer;
+    std::unique_ptr<MidiDeviceManager> mMidiDeviceManager;
     std::unique_ptr<UndoHistoryPanel>      mUndoHistoryPanel;
+    std::unique_ptr<MidiActivityPanel>     mMidiActivityPanel;
+    std::unique_ptr<MidiMappingPanel>      mMidiMappingPanel;
+    std::unique_ptr<OutputPanel>           mOutputPanel;
+    std::unique_ptr<OscBrowserPanel>       mOscBrowserPanel;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -127,11 +138,17 @@ private:
     bool mShowShaderGallery  = false;
     bool mShowMaterialEditor = false;
     bool mShowUndoHistory    = false;
+    bool mShowMidiActivity   = false;
+    bool mShowMidiMapping    = false;
+    bool mShowOutput         = false;
+    bool mShowOscBrowser     = false;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;
     bool mProjectDirty      = false;
     bool mShowSplash        = false;  // splash screen on startup (v3.2.5)
+    bool mShowRecoveryDialog = false; // autosave recovery after crash
+    std::string mRecoveryAutosavePath;
 
     // ImGui Test Engine (v3.2.5)
     ImGuiTestEngine* mTestEngine = nullptr;

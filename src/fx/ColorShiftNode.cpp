@@ -4,8 +4,8 @@
 
 namespace bbfx {
 
-ColorShiftNode::ColorShiftNode(const string& materialName)
-    : AnimationNode("ColorShiftNode")
+ColorShiftNode::ColorShiftNode(const string& materialName, const std::string& nodeName)
+    : AnimationNode(nodeName)
 {
     mMaterialNames.push_back(materialName);
     addInput(new AnimationPort("hue_shift", 0.0f));

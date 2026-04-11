@@ -1,4 +1,4 @@
-# BBFx Revival — v3.2.5
+# BBFx Revival — v3.3
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -19,6 +19,8 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 **v3.2.4 "Asset Pipeline & Visual Application"** replaces text-based asset manipulation with visual direct interaction: unified Asset Browser with 6 asset types (Meshes, Textures, Particles, Compositors, Shaders, Materials), 64x64 texture thumbnails via TextureThumbnailCache, universal drag-drop with payloads, TextureNode and MaterialNode as DAG nodes with entity-link and per-sub-entity save/restore, CompositorStackPanel with drag-reorder/inline params/solo/bypass, visual texture picker with grid/search/live preview, ParticleNode entity-link, configurable triggers (chord/enable/disable/preset/reset/compositor) with pages/color/momentary, fader learn mode with intelligent labels and ParamSpec range, auto-detect drop on viewport via raycast, iterative anti-stacking positioning. 75 iterations across 11 lots (A-K).
 
 **v3.2.5 "Performance Pro & Final Polish"** completes the Studio Perfect branch with professional-grade tools: multi-selection (box select, Shift+click, CompoundCommand delete/copy-paste/align/distribute), Shader Gallery (animated 64x64 thumbnails, double-click apply), Material Editor (sphere preview, color/texture editing), Crossfader A/B (DagSnapshot interpolation, auto-crossfade sync BPM, Bounce/Hold), macro triggers (MacroRunner beat-gated, set_param/wait actions), FX Stack in Inspector (Applied Effects with enable/disable/unlink/reorder), quick-add popup (type-ahead, Ctrl+Space), drag-link auto-create, smart wire (Ctrl+L), node comments/groups/collapsed, interactive minimap, ToastSystem, UndoHistoryPanel, preset wheel, auto-assign faders. Infrastructure: Dear ImGui v1.92.7-docking, imgui_test_engine integrated, 95 automated tests (0 FAIL, 0 SKIP), 25 ImGui UI tests, multi-frame Lua coroutine test runner, 20+ dbg automation commands. 89 iterations across 8 lots (B-H).
+
+**v3.3 "BBFx Connect"** transforms the isolated Studio into a connected live performance hub: MIDI controller integration (rtmidi — MidiDeviceManager with auto-detect, hot-plug, multi-device with proper deviceId via CallbackData, MidiInputNode with 8 CC outputs + 4 note triggers + MIDI clock sync + relative CC encoder mode + aftertouch, MidiOutputNode with note/CC send + LED feedback), MIDI Learn system (MidiLearnManager singleton with conflict detection, learn from faders/triggers/Inspector/NodeEditor, MidiMappingPanel with real-time binding display), OSC control (UdpServer thread-safe, OscInputNode with glob pattern matching + command dispatch /bbfx/set|node|preset|bpm, OscOutputNode rate-limited with delta detection, OscBrowserPanel hierarchical tree), Dual Output window (second SDL3 window for projector, resolution presets 720p/1080p/4K, fullscreen F11, multi-monitor selection, OutputPanel with preview), NDI output skeleton (#ifdef BBFX_HAS_NDI), MappingProfile class (MIDI+OSC bindings, save/load .bbfx-mapping, 3 controller presets), Performance Mode overhaul (trigger activate/deactivate with proper node cleanup, rest snapshot + PANIC restore, ChordSystem connected to DagSnapshot, trigger menus Load Preset/Toggle Compositor/Set Param, auto-descriptive labels, Quick Assign faders, crossfader lerp fix + repositioned in right column), autosave recovery dialog (crash detection via lock file, popup Recover/Ignore/Delete), serialization hardened (macroActions, chord snapshots, MIDI mappings, autosave complete, link deduplication), Menu Connect with Load/Save Mapping Preset, status bar MIDI/Output indicators, Help shortcuts. FX node naming fix (ColorShiftNode/PerlinFxNode/WaveVertexShader/TextureBlitterNode use instance names), FX cleanup fix (PerlinFxNode/WaveVertexShader destroy OGRE clones on delete), ColorShiftNode factory fix (uses existing SceneObjectNode entity). 224 iterations (I-714→I-937), 14 lots (A-N) + fixes, 101+ automated tests.
 
 ---
 
@@ -183,6 +185,26 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Bridge save/load** — StudioApp copies faders (8 + minVal/maxVal), triggerPages (N x 16 slots), compositorStack between panels and ProjectState
 - **Camera default** — orbit distance 150 units, pitch 15 degrees for comfortable viewing
 
+### BBFx Connect (v3.3)
+- **MidiDeviceManager** — rtmidi wrapper, auto-detect + auto-open all devices at startup, hot-plug detection, proper deviceId via CallbackData, thread-safe (callback→mutex queue→poll)
+- **MidiInputNode** — DAG node with 8 configurable CC outputs, 4 note triggers, pitch bend, aftertouch, MIDI clock sync (24ppq→BPM), transport start/stop/continue, relative CC encoder mode
+- **MidiOutputNode** — DAG node sending note-on/off, CC, and LED feedback (led_note/led_velocity ports for Launchpad/APC)
+- **MidiLearnManager** — singleton, learn mode (fader/trigger/port), conflict detection (auto-replace), toJson/fromJson serialization
+- **MidiMappingPanel** — real-time binding table from MidiLearnManager, Learn buttons, edit min/max, delete
+- **MidiActivityPanel** — live MIDI monitor, color-coded by type (green=notes, blue=CC, yellow=PC), channel filter
+- **OscInputNode** — UDP listener with glob pattern matching, 8 value outputs, trigger bang, command dispatch (/bbfx/set, /bbfx/node/enable|disable, /bbfx/preset/load, /bbfx/bpm)
+- **OscOutputNode** — UDP sender, rate-limited (max_rate configurable), delta detection
+- **OscBrowserPanel** — hierarchical tree of auto-discovered OSC addresses, click-to-copy
+- **OutputPanel** — second SDL3 window for projector, resolution presets (720p/1080p/4K), fullscreen (F11), multi-monitor selection via SDL_GetDisplays, preview 16:9
+- **NdiOutputNode** — skeleton with #ifdef BBFX_HAS_NDI, ParamSpec (source_name, width, height, fps), graceful no-op without SDK
+- **MappingProfile** — MIDI+OSC binding profiles, save/load .bbfx-mapping JSON, 3 controller presets (APC Mini, nanoKONTROL2, Launchpad)
+- **Menu Connect** — MIDI Activity, MIDI Mapping, OSC Browser, Load/Save Mapping Preset, Clear All
+- **Status bar** — MIDI (devices/bindings) and Output (On/Off) indicators
+- **Performance Mode overhaul** — trigger activate/deactivate with proper node cleanup (synchronous deletion), rest snapshot + PANIC restore (not all-to-zero), ChordSystem→DagSnapshot (capture/apply/remove), trigger menus (Load Preset, Toggle Compositor, Set Param), auto-descriptive labels + tooltips, Quick Assign faders, crossfader lerp fix + repositioned in right column
+- **Autosave recovery** — crash detection via lock file, popup dialog (Recover/Ignore/Delete Autosave)
+- **Serialization hardened** — macroActions, chord snapshots, MIDI mappings, autosave complete, link deduplication
+- **FX node fixes** — instance naming (not type-hardcoded), proper OGRE cleanup (destroy clones, not just hide), ColorShiftNode factory uses existing SceneObjectNode entity
+
 ---
 
 ## Architecture
@@ -201,11 +223,13 @@ C++ core
   ├── Input           -- KeyboardManager, MouseManager, JoystickManager (SDL3)
   ├── Audio           -- AudioCapture, AudioAnalyzer, BeatDetector
   ├── Video           -- OggReader, TheoraReader, TheoraBlitter, TheoraClip, Crossfader
-  ├── Network         -- TcpServer (remote REPL)
+  ├── MIDI            -- MidiDeviceManager, MidiLearnManager, MappingProfile, MidiMessage (v3.3)
+  ├── OSC             -- OscMessage (v3.3)
+  ├── Network         -- TcpServer (remote REPL), UdpServer (OSC, v3.3)
   ├── Record          -- InputRecorder, InputPlayer, VideoExporter
   └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
-       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, ...
-       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack
+       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, MidiInput, MidiOutput, OscInput, OscOutput, NdiOutput, ...
+       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack, MidiActivity, MidiMapping, OscBrowser, Output
        ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
        ├── Hierarchy  -- SceneHierarchyPanel (v3.2.2)
        ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform/Scene/Reparent commands)
@@ -233,11 +257,14 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/input/` | KeyboardManager, MouseManager, JoystickManager, InputManager |
 | `src/audio/` | AudioCapture, AudioAnalyzer, BeatDetector |
 | `src/video/` | TheoraClip, ReversableClip, TheoraBlitter, TextureCrossfader |
+| `src/midi/` | MidiDeviceManager, MidiLearnManager, MappingProfile, MidiMessage |
+| `src/osc/` | OscMessage parser |
 | `src/network/TcpServer` | TCP REPL server, WinSock2/POSIX |
+| `src/network/UdpServer` | UDP listener for OSC, thread-safe queue |
 | `src/record/` | InputRecorder, InputPlayer, VideoExporter |
 | `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
-| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode, TextureNode, MaterialNode |
-| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel, CompositorStackPanel |
+| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode, TextureNode, MaterialNode, MidiInputNode, MidiOutputNode, OscInputNode, OscOutputNode, NdiOutputNode |
+| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel, CompositorStackPanel, MidiActivityPanel, MidiMappingPanel, OscBrowserPanel, OutputPanel |
 | `src/studio/TextureThumbnailCache` | Lazy-load OGRE textures as ImGui GL texture IDs (64x64), single-thread only |
 | `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
 | `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands, AutomationCommands |
@@ -322,6 +349,9 @@ All demos run from the build output directory (`build/windows-debug/Debug/` or e
 | **Audio** | `./bbfx lua/demos/demo_audio.lua` | Audio-reactive Perlin + HUD (H=toggle, [/]=frequency) |
 | **GPU** | `./bbfx lua/demos/demo_gpu.lua` | PerlinGPU GLSL + audio RMS + profiler (H/P=toggles) |
 | **Production** | `./bbfx lua/demos/demo_production.lua` | R=record, P=replay offline, E=export PNG frames |
+| **MIDI Live** | `./bbfx-studio lua/demos/demo_midi_live.lua` | MIDI controller live performance |
+| **OSC Control** | `./bbfx-studio lua/demos/demo_osc_control.lua` | OSC remote control from tablet/phone |
+| **Dual Output** | `./bbfx-studio lua/demos/demo_dual_output.lua` | Second window for projector output |
 
 ### Production pipeline
 
@@ -400,6 +430,7 @@ animator:addNode(modulate)
 | imgui-node-editor | — | Visual node graph editor |
 | libtheora | 1.2.0 | Theora video decoding |
 | libogg | 1.3.6 | Ogg container parsing |
+| rtmidi | latest | MIDI device I/O |
 
 ---
 
@@ -426,7 +457,7 @@ ctest --preset windows-release
 
 ## History
 
-BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG, and v3.2.4 delivers the asset pipeline with unified browser, visual pickers, TextureNode/MaterialNode DAG entity-link, compositor stack with Performance Mode rendering, triggers/faders pro with 7 action types and learn mode, auto-detect drop, and runtime renderer selection.
+BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG, v3.2.4 delivers the asset pipeline with unified browser, visual pickers, TextureNode/MaterialNode DAG entity-link, compositor stack with Performance Mode rendering, triggers/faders pro with 7 action types and learn mode, auto-detect drop, and runtime renderer selection, v3.2.5 completes the Studio Perfect branch with multi-selection, Shader Gallery, Material Editor, Crossfader A/B, macro triggers, FX Stack, quick-add, smart wire, collapsed nodes, groups, minimap, 95 tests, and v3.3 "Connect" transforms the Studio into a live performance hub with MIDI controller integration (rtmidi, MidiLearnManager, conflict detection, LED feedback), OSC control (UdpServer, command dispatch), dual output window (projector, F11 fullscreen, multi-monitor), NDI skeleton, MappingProfile save/load, Performance Mode overhaul (trigger activate/deactivate, rest snapshot PANIC, ChordSystem→DagSnapshot), autosave recovery dialog, and 224 iterations.
 
 ---
 

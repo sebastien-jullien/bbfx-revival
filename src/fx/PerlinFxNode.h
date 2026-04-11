@@ -11,7 +11,7 @@ namespace bbfx {
 
 class PerlinFxNode : public AnimationNode {
 public:
-    PerlinFxNode(const string& defaultMesh, const string& clonePrefix);
+    PerlinFxNode(const string& defaultMesh, const string& clonePrefix, const std::string& nodeName = "PerlinFxNode");
     virtual ~PerlinFxNode();
     void update() override;
     void setEnabled(bool en) override;

@@ -4,12 +4,15 @@
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
 #include "../../core/PrimitiveNodes.h"
+#include "../nodes/SceneObjectNode.h"
+#include "../../midi/MidiLearnManager.h"
 
 #include <sol/sol.hpp>
 #include <nlohmann/json.hpp>
 
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <filesystem>
 #include <chrono>
 #include <iomanip>
@@ -27,7 +30,7 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     }
 
     json j;
-    j["version"] = "3.1";
+    j["version"] = "3.3";
 
     // Timestamp (ISO 8601)
     auto now = std::chrono::system_clock::now();
@@ -88,13 +91,36 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
             n["params"] = node->getParamSpec()->toJson();
         }
 
+        // Serialize transform offsets for SceneObjectNode (v3.3)
+        if (node->getTypeName() == "SceneObjectNode") {
+            auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+            if (soNode) {
+                auto& op = soNode->getOffsetPos();
+                auto& or_ = soNode->getOffsetRot();
+                auto& os = soNode->getOffsetScale();
+                if (op != Ogre::Vector3::ZERO || or_ != Ogre::Vector3::ZERO ||
+                    os != Ogre::Vector3::UNIT_SCALE || !soNode->isDAGPriority()) {
+                    n["offsets"] = {
+                        {"px", op.x}, {"py", op.y}, {"pz", op.z},
+                        {"rx", or_.x}, {"ry", or_.y}, {"rz", or_.z},
+                        {"sx", os.x}, {"sy", os.y}, {"sz", os.z},
+                        {"dagPriority", soNode->isDAGPriority()}
+                    };
+                }
+            }
+        }
+
         nodes.push_back(n);
     }
     j["graph"]["nodes"] = nodes;
 
     // ── Graph: links ─────────────────────────────────────────────────────────
     json links = json::array();
+    std::set<std::string> seenLinks;
     for (auto& lk : animator->getLinks()) {
+        std::string key = lk.fromNode + "." + lk.fromPort + "->" + lk.toNode + "." + lk.toPort;
+        if (seenLinks.count(key)) continue; // skip duplicate
+        seenLinks.insert(key);
         json l;
         l["from_node"] = lk.fromNode;
         l["from_port"] = lk.fromPort;
@@ -147,6 +173,9 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
                 s["action"] = slot.action;
                 s["momentary"] = slot.momentary;
                 s["hue"] = slot.hue;
+                if (!slot.macroActions.empty()) {
+                    s["macroActions"] = slot.macroActions;
+                }
                 p.push_back(s);
             }
             pages.push_back(p);
@@ -179,8 +208,24 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     }
     j["performance"]["quickAccess"] = quickAccess;
 
+    // Chord snapshots (v3.3 Performance Edition)
+    if (!state.chordSnapshots.empty()) {
+        json csJson = json::object();
+        for (auto& [name, snapData] : state.chordSnapshots) {
+            json snapJson = json::object();
+            for (auto& [key, val] : snapData) {
+                snapJson[key] = val;
+            }
+            csJson[name] = snapJson;
+        }
+        j["performance"]["chordSnapshots"] = csJson;
+    }
+
     // ── Automation ──────────────────────────────────────────────────────────
     j["automation"] = state.automation.toJson();
+
+    // ── MIDI mappings (v3.3) ────────────────────────────────────────────────
+    j["midi_mappings"] = MidiLearnManager::instance().toJson();
 
     // ── Media paths ──────────────────────────────────────────────────────────
     j["media"]["videos"]  = json::array();
@@ -323,6 +368,21 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 // Restore ParamSpec values if present
                 if (node && node->getParamSpec() && n.contains("params")) {
                     node->getParamSpec()->fromJson(n["params"]);
+                }
+
+                // Restore transform offsets for SceneObjectNode (v3.3)
+                if (node && node->getTypeName() == "SceneObjectNode" && n.contains("offsets")) {
+                    auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+                    if (soNode) {
+                        auto& o = n["offsets"];
+                        soNode->setOffsetPos(Ogre::Vector3(
+                            o.value("px", 0.0f), o.value("py", 0.0f), o.value("pz", 0.0f)));
+                        soNode->setOffsetRot(Ogre::Vector3(
+                            o.value("rx", 0.0f), o.value("ry", 0.0f), o.value("rz", 0.0f)));
+                        soNode->setOffsetScale(Ogre::Vector3(
+                            o.value("sx", 1.0f), o.value("sy", 1.0f), o.value("sz", 1.0f)));
+                        soNode->setDAGPriority(o.value("dagPriority", true));
+                    }
                 }
 
                 // Restore position if outState is provided
@@ -468,6 +528,11 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                         slot.action = slotJson.value("action", "");
                         slot.momentary = slotJson.value("momentary", false);
                         slot.hue = slotJson.value("hue", 0.0f);
+                        if (slotJson.contains("macroActions")) {
+                            for (auto& ma : slotJson["macroActions"]) {
+                                slot.macroActions.push_back(ma.get<std::string>());
+                            }
+                        }
                         page.push_back(slot);
                     }
                     outState->triggerPages.push_back(page);
@@ -501,6 +566,18 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     outState->faders[i].maxVal = fads[i].value("maxVal", 1.0f);
                 }
             }
+            // Chord snapshots (v3.3 Performance Edition)
+            if (perf.contains("chordSnapshots")) {
+                outState->chordSnapshots.clear();
+                for (auto& [name, snapJson] : perf["chordSnapshots"].items()) {
+                    std::map<std::string, float> snapData;
+                    for (auto& [key, val] : snapJson.items()) {
+                        snapData[key] = val.get<float>();
+                    }
+                    outState->chordSnapshots[name] = snapData;
+                }
+            }
+
             if (perf.contains("quickAccess")) {
                 auto& qa = perf["quickAccess"];
                 for (int i = 0; i < 8 && i < static_cast<int>(qa.size()); ++i) {
@@ -513,6 +590,14 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
         // ── Restore automation (v3.2.3+) ─────────────────────────────────────
         if (outState && j.contains("automation")) {
             outState->automation.fromJson(j["automation"]);
+        }
+
+        // ── Restore MIDI mappings (v3.3) ─────────────────────────────────────
+        if (j.contains("midi_mappings")) {
+            MidiLearnManager::instance().fromJson(j["midi_mappings"]);
+            std::cout << "[ProjectSerializer] Restored "
+                      << MidiLearnManager::instance().getBindings().size()
+                      << " MIDI mappings" << std::endl;
         }
 
         std::cout << "[ProjectSerializer] Loaded ← " << path

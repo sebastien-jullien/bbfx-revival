@@ -38,6 +38,10 @@ private:
         float value = 0.0f;
         float minVal = 0.0f;
         float maxVal = 1.0f;
+        // MIDI binding (v3.3)
+        int midiCC = -1;           // CC number (-1 = no binding)
+        int midiChannel = -1;      // channel (-1 = any)
+        int midiDeviceId = -1;     // device (-1 = any)
     };
     FaderSlot mFaders[8];
     RecordValueCb mRecordValueCb;
@@ -55,6 +59,10 @@ private:
         float hue = 0.0f;      // HSV hue 0-1 for button color
         bool active = false;    // current state
         std::vector<std::string> macroActions; // v3.2.5: multi-action sequence (empty = single action)
+        // MIDI binding (v3.3)
+        int midiNote = -1;         // note number (-1 = no binding)
+        int midiChannel = -1;      // channel (-1 = any)
+        int midiDeviceId = -1;     // device (-1 = any)
     };
 
     // MacroRunner state machine for deferred execution of macro sequences
@@ -73,8 +81,12 @@ private:
     };
     MacroRunner mMacroRunner;
 
+public:
     // Auto-assign (v3.2.5)
     void autoAssignFaders(const std::vector<std::string>& createdNodeNames);
+    /// Auto-assign all DAG nodes' heuristic ports to empty faders
+    void autoAssignAllFaders();
+private:
 
     // Preset wheel (v3.2.5)
     std::vector<std::string> mWheelPresets;
@@ -84,6 +96,15 @@ private:
     int mCurrentTriggerPage = 0;
 
     void executeTriggerAction(const std::string& action);
+    void activateTrigger(TriggerSlot& trig);
+    void deactivateTrigger(TriggerSlot& trig);
+
+    // Rest snapshot for PANIC restore
+    DagSnapshot mRestSnapshot;
+    bool mRestCaptured = false;
+
+    // Chord snapshots: chord name → DAG state
+    std::map<std::string, DagSnapshot> mChordSnapshots;
 
     // Crossfader A/B (v3.2.5)
     DagSnapshot mSnapshotA, mSnapshotB;
@@ -101,9 +122,6 @@ private:
 
     void renderCrossfader();
 
-    // Fader learn mode (v3.2.4)
-    int mLearnFaderIndex = -1;
-
     // Compositor chain (delegates to CompositorStackPanel)
     CompositorStackPanel* mCompositorStack = nullptr;
     bool mCompositorsPending = false;
@@ -115,8 +133,21 @@ public:
     void removeCompositorChain(StudioEngine* engine);
 
 public:
-    // For fader learn callback from InspectorPanel
-    void onLearnParam(const std::string& nodeName, const std::string& portName);
+
+    /// Rebuild fader/trigger MIDI bindings from MidiLearnManager (single source of truth)
+    void syncMidiBindingsFromManager();
+
+    /// Force recapture of rest snapshot on next render (call after loadProject)
+    void resetRestSnapshot() { mRestCaptured = false; }
+
+    /// Chord snapshot management (for ChordSystem → DagSnapshot connection)
+    void captureChordSnapshot(const std::string& chordName);
+    void applyChordSnapshot(const std::string& chordName);
+    void removeChordSnapshot(const std::string& chordName);
+    bool hasChordSnapshot(const std::string& chordName) const { return mChordSnapshots.count(chordName) > 0; }
+    auto& getChordSnapshots() { return mChordSnapshots; }
+    const auto& getChordSnapshots() const { return mChordSnapshots; }
+    void setChordSnapshots(const std::map<std::string, DagSnapshot>& snaps) { mChordSnapshots = snaps; }
 
     // Accessors for save/load
     auto& getTriggerPages() { return mTriggerPages; }

@@ -290,15 +290,16 @@ float ViewportGizmo::projectMouseOnAxis(float dx, float dy, int axis)
 
     auto viewMat = mCamera->getViewMatrix();
     auto projMat = mCamera->getProjectionMatrix();
-    auto vp = viewMat * projMat;
+    auto vp = projMat * viewMat; // correct order: projection * view
 
-    // Project gizmo pos and gizmo pos + axis to screen
+    // Project gizmo pos and gizmo pos + axis to clip space
     Ogre::Vector4 p0 = vp * Ogre::Vector4(gizmoPos.x, gizmoPos.y, gizmoPos.z, 1);
     Ogre::Vector4 p1 = vp * Ogre::Vector4(gizmoPos.x + axisDir.x,
                                             gizmoPos.y + axisDir.y,
                                             gizmoPos.z + axisDir.z, 1);
     if (std::fabs(p0.w) < 1e-6f || std::fabs(p1.w) < 1e-6f) return 0;
 
+    // NDC coordinates (-1..1)
     float sx0 = p0.x / p0.w, sy0 = p0.y / p0.w;
     float sx1 = p1.x / p1.w, sy1 = p1.y / p1.w;
 
@@ -314,7 +315,7 @@ float ViewportGizmo::projectMouseOnAxis(float dx, float dy, int axis)
     // Project mouse delta onto screen axis (note: dy inverted for screen coords)
     float ndx = dx * 0.002f; // normalize pixel delta
     float ndy = -dy * 0.002f;
-    return (ndx * screenDx + ndy * screenDy) / screenLen;
+    return ndx * screenDx + ndy * screenDy;
 }
 
 // ── Mouse handlers ─────────────────────────────────────────────────────────────
@@ -329,6 +330,12 @@ bool ViewportGizmo::handleMouseDown(float vpX, float vpY, int button)
     mDragging = true;
     mDragAxis = axis;
     mStartState = captureState();
+    // Snapshot current offsets for undo
+    if (auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode)) {
+        mStartOffsets.pos   = soNode->getOffsetPos();
+        mStartOffsets.rot   = soNode->getOffsetRot();
+        mStartOffsets.scale = soNode->getOffsetScale();
+    }
     return true;
 }
 
@@ -399,132 +406,111 @@ void ViewportGizmo::update()
 
 // ── Transform application ──────────────────────────────────────────────────────
 
+// ── NEW PARADIGM: gizmo NEVER touches mTarget (OGRE SceneNode) directly.
+// It modifies SceneObjectNode offsets. SceneObjectNode::update() combines DAG + offsets → OGRE.
+// This ensures DAG animations are never disrupted by gizmo manipulation.
+
 void ViewportGizmo::applyTranslate(float dx, float dy, bool snap)
 {
-    if (!mTarget) return;
+    if (!mTarget || !mDAGNode) return;
+    auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode);
+    if (!soNode) return;
+
     int axis = mKeyboardMode ? mConstrainedAxis : mDragAxis;
+    Ogre::Vector3 off = soNode->getOffsetPos();
 
     if (axis >= 0) {
         float amount = projectMouseOnAxis(dx, dy, axis);
         float dist = (mCamera->getDerivedPosition() - mTarget->_getDerivedPosition()).length();
         amount *= dist;
-
         if (snap) amount = std::round(amount / mSnapSize) * mSnapSize;
 
         Ogre::Vector3 axisVec = getAxisVector(axis);
-        mTarget->translate(axisVec * amount, Ogre::Node::TS_WORLD);
+        off += axisVec * amount;
     } else {
-        // Free translate in camera plane
         float dist = (mCamera->getDerivedPosition() - mTarget->_getDerivedPosition()).length();
         float scale = dist * kMoveSensitivity * 0.01f;
         Ogre::Vector3 right = mCamera->getDerivedOrientation() * Ogre::Vector3::UNIT_X;
         Ogre::Vector3 up    = mCamera->getDerivedOrientation() * Ogre::Vector3::UNIT_Y;
-        mTarget->translate(right * dx * scale + up * (-dy * scale), Ogre::Node::TS_WORLD);
+        Ogre::Vector3 delta = right * dx * scale + up * (-dy * scale);
+        off += delta;
     }
+    soNode->setOffsetPos(off);
 }
 
 void ViewportGizmo::applyRotate(float dx, float dy, bool snap)
 {
-    if (!mTarget) return;
-    int axis = mKeyboardMode ? mConstrainedAxis : mDragAxis;
+    if (!mTarget || !mDAGNode) return;
+    auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode);
+    if (!soNode) return;
 
+    int axis = mKeyboardMode ? mConstrainedAxis : mDragAxis;
     float angle = dx * kRotateSensitivity;
     if (snap) angle = std::round(angle / 5.0f) * 5.0f;
 
-    if (axis >= 0) {
-        Ogre::Vector3 axisVec = getAxisVector(axis);
-        mTarget->rotate(Ogre::Quaternion(Ogre::Degree(angle), axisVec), Ogre::Node::TS_WORLD);
-    } else {
-        // Free rotate around Y axis
-        mTarget->rotate(Ogre::Quaternion(Ogre::Degree(angle), Ogre::Vector3::UNIT_Y), Ogre::Node::TS_WORLD);
-    }
+    Ogre::Vector3 off = soNode->getOffsetRot();
+    if (axis == 0)      off.x += angle;
+    else if (axis == 1) off.y += angle;
+    else if (axis == 2) off.z += angle;
+    else                off.y += angle; // free → Y
+    soNode->setOffsetRot(off);
 }
 
 void ViewportGizmo::applyScale(float dx, float dy, bool snap)
 {
-    if (!mTarget) return;
-    int axis = mKeyboardMode ? mConstrainedAxis : mDragAxis;
+    if (!mTarget || !mDAGNode) return;
+    auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode);
+    if (!soNode) return;
 
+    int axis = mKeyboardMode ? mConstrainedAxis : mDragAxis;
     float amount = dx * kScaleSensitivity;
     if (snap) amount = std::round(amount / 0.1f) * 0.1f;
+    float s = 1.0f + amount;
 
-    Ogre::Vector3 curScale = mTarget->getScale();
+    Ogre::Vector3 off = soNode->getOffsetScale();
+    if (axis == 0)      off.x *= s;
+    else if (axis == 1) off.y *= s;
+    else if (axis == 2) off.z *= s;
+    else { off.x *= s; off.y *= s; off.z *= s; }
 
-    if (axis >= 0) {
-        float s = 1.0f + amount;
-        if (axis == 0) curScale.x *= s;
-        if (axis == 1) curScale.y *= s;
-        if (axis == 2) curScale.z *= s;
-    } else {
-        // Uniform scale
-        float s = 1.0f + amount;
-        curScale *= s;
-    }
-
-    // Clamp
-    curScale.x = std::max(curScale.x, 0.01f);
-    curScale.y = std::max(curScale.y, 0.01f);
-    curScale.z = std::max(curScale.z, 0.01f);
-
-    mTarget->setScale(curScale);
+    off.x = std::max(off.x, 0.01f);
+    off.y = std::max(off.y, 0.01f);
+    off.z = std::max(off.z, 0.01f);
+    soNode->setOffsetScale(off);
 }
 
 void ViewportGizmo::syncToDAGPorts()
 {
-    if (!mDAGNode || !mTarget) return;
-
-    auto& inputs = mDAGNode->getInputs();
-    auto setPort = [&](const std::string& name, float val) {
-        auto it = inputs.find(name);
-        if (it != inputs.end()) it->second->setValue(val);
-    };
-
-    auto pos = mTarget->getPosition();
-    setPort("position.x", pos.x);
-    setPort("position.y", pos.y);
-    setPort("position.z", pos.z);
-
-    auto scale = mTarget->getScale();
-    setPort("scale.x", scale.x);
-    setPort("scale.y", scale.y);
-    setPort("scale.z", scale.z);
-
-    // Extract Euler angles from quaternion (YXZ order to match SceneObjectNode)
-    auto ori = mTarget->getOrientation();
-    Ogre::Matrix3 mat;
-    ori.ToRotationMatrix(mat);
-    Ogre::Radian yaw, pitch, roll;
-    mat.ToEulerAnglesYXZ(yaw, pitch, roll);
-    setPort("rotation.x", pitch.valueDegrees());
-    setPort("rotation.y", yaw.valueDegrees());
-    setPort("rotation.z", roll.valueDegrees());
+    // No-op: offsets are now written directly by applyTranslate/Rotate/Scale.
+    // SceneObjectNode::update() reads offsets and applies DAG + offset → OGRE.
 }
 
 void ViewportGizmo::commitTransform()
 {
     if (!mDAGNode || !mTarget) return;
 
-    auto cur = captureState();
-    auto& s = mStartState;
+    auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode);
+    if (!soNode) return;
 
-    // Extract Euler angles from quaternions
-    Ogre::Matrix3 matOld, matNew;
-    s.orientation.ToRotationMatrix(matOld);
-    cur.orientation.ToRotationMatrix(matNew);
-    Ogre::Radian oy, op, or_; matOld.ToEulerAnglesYXZ(oy, op, or_);
-    Ogre::Radian ny, np, nr;  matNew.ToEulerAnglesYXZ(ny, np, nr);
+    auto curPos = soNode->getOffsetPos();
+    auto curRot = soNode->getOffsetRot();
+    auto curScl = soNode->getOffsetScale();
+
+    // For undo: use mStartOffsets as old, current as new
+    Ogre::Vector3 oldPos = mStartOffsets.pos, newPos = curPos;
+    Ogre::Vector3 oldRot = mStartOffsets.rot, newRot = curRot;
+    Ogre::Vector3 oldScl = mStartOffsets.scale, newScl = curScl;
 
     auto cmd = std::make_unique<TransformNodeCommand>(
         mDAGNode->getName(), "Transform " + mDAGNode->getName(),
-        s.position.x, s.position.y, s.position.z,
-        s.scale.x, s.scale.y, s.scale.z,
-        op.valueDegrees(), oy.valueDegrees(), or_.valueDegrees(),
-        cur.position.x, cur.position.y, cur.position.z,
-        cur.scale.x, cur.scale.y, cur.scale.z,
-        np.valueDegrees(), ny.valueDegrees(), nr.valueDegrees()
+        oldPos.x, oldPos.y, oldPos.z,
+        oldScl.x, oldScl.y, oldScl.z,
+        oldRot.x, oldRot.y, oldRot.z,
+        newPos.x, newPos.y, newPos.z,
+        newScl.x, newScl.y, newScl.z,
+        newRot.x, newRot.y, newRot.z
     );
 
-    // Don't re-execute — the transform is already applied visually
     CommandManager::instance().execute(std::move(cmd));
 }
 
@@ -541,11 +527,14 @@ ViewportGizmo::TransformState ViewportGizmo::captureState() const
 
 void ViewportGizmo::restoreState(const TransformState& s)
 {
-    if (mTarget) {
-        mTarget->setPosition(s.position);
-        mTarget->setScale(s.scale);
-        mTarget->setOrientation(s.orientation);
-        syncToDAGPorts();
+    // Restore offsets to their start values (cancel keyboard transform)
+    if (mDAGNode) {
+        auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode);
+        if (soNode) {
+            soNode->setOffsetPos(mStartOffsets.pos);
+            soNode->setOffsetRot(mStartOffsets.rot);
+            soNode->setOffsetScale(mStartOffsets.scale);
+        }
     }
 }
 
@@ -558,6 +547,11 @@ void ViewportGizmo::startKeyboardTransform(Tool tool)
     mKeyboardMode = true;
     mConstrainedAxis = -1; // free mode initially
     mStartState = captureState();
+    if (auto* soNode = dynamic_cast<SceneObjectNode*>(mDAGNode)) {
+        mStartOffsets.pos   = soNode->getOffsetPos();
+        mStartOffsets.rot   = soNode->getOffsetRot();
+        mStartOffsets.scale = soNode->getOffsetScale();
+    }
     buildGizmo();
 }
 

@@ -8,7 +8,7 @@ namespace bbfx {
 
 class TextureBlitterNode : public AnimationNode {
 public:
-    explicit TextureBlitterNode(const string& textureName);
+    explicit TextureBlitterNode(const string& textureName, const std::string& nodeName = "TextureBlitterNode");
     virtual ~TextureBlitterNode();
     void update() override;
     std::string getTypeName() const override { return "TextureBlitterNode"; }

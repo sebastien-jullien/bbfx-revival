@@ -1636,7 +1636,7 @@ Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infi
 
 ---
 
-## BBFx Studio — Architecture v3.0 → v3.2.3
+## BBFx Studio — Architecture v3.0 → v3.3
 
 Le BBFx Revival v3.x ajoute une couche Studio GUI complete au-dessus du moteur headless v2.x :
 
@@ -1719,4 +1719,31 @@ SceneHierarchyPanel (F8, visibility/lock par objet). SceneObjectNamer (nommage B
 **Lot G — Final Polish (6 iter) :** Validation, documentation.
 
 **Lot H — Test Engine & Upgrades (13 iter) :** imgui_test_engine integre (FetchContent main, 25 tests UI, IMGUI_ENABLE_TEST_ENGINE + COROUTINE_STDTHREAD_IMPL + STD_FUNCTION). ImGui v1.92.7-docking (upgrade depuis v1.91.6, patches CMake imgui-node-editor : operator* guard + ImRect::Floor inline 6 occurrences). Runner multi-frame (sol::lib::coroutine, yield entre frames reelles). 20+ commandes dbg automation (save/load, align/distribute, crossfade, macros, wheel, material, shader, camera, transform, reparent, record). Deferred ops inter-frame (dbg.clear() via gPendingDeletes, dbg.load() via sPendingLoadPath, _dbg_process_pending appele dans boucle principale StudioApp avant handleEvents). Fix vector iterators (nettoyage groupes boucle indexee). Fix dbg.list() noms bruts. Fix dbg.set() inputs+outputs. Fix shutdown order (ImGui::DestroyContext avant ImGuiTestEngine_DestroyContext). Protection _test_/_dbg_ dans dbg.clear(). Resultat : **95 tests, 0 FAIL, 0 SKIP**.
+
+### v3.3 — Connect
+**224 iterations (I-714 → I-937), 14 lots (A-N), 12 epics (EPIC-133 → EPIC-144)**
+
+**Lot A — MIDI Foundation (20 iter) :** MidiDeviceManager (src/midi/) : RtMidiIn/Out multi-device simultane, hot-plug detection thread timer, callback queue thread-safe, virtual MIDI device pour tests, error handling + error codes, NRPN + 14-bit CC. MidiInputNode (src/studio/nodes/) : poll MidiDeviceManager queue, parse CC/Note/Program Change, 8 CC outputs configurables + 4 note trigger outputs + bank/program. MidiOutputNode : RtMidiOut integration, send CC/Note. MIDI Lua bindings (bbfx_bindings.cpp) : dbg.midi_inject + dbg.midi_monitor. vcpkg : +rtmidi.
+
+**Lot B — MIDI Studio Integration (20 iter) :** MidiActivityPanel (src/studio/panels/) : monitoring temps reel, indicateurs visuels par canal, statistiques messages/s. PerformanceModePanel : MIDI fader binding (mMidiFaderBindings CC channel→faderIndex), MIDI trigger binding (mMidiTriggerBindings note→triggerIndex), pickup mode (ignore CC tant que fader physique n'a pas croise la valeur logicielle). MidiMappingPanel (src/studio/panels/) : add/edit/delete bindings, device selector live, DAG port bindings directement vers les ports du graphe. MIDI LED feedback bidirectionnel (MidiOutputNode CC reflect fader values). MidiDeviceManager integration StudioApp.
+
+**Lot C — OSC Foundation (16 iter) :** UdpServer (src/network/) : reception UDP asynchrone boost::asio pattern. OscMessage (src/osc/) : struct address + args (float/int/string/blob). OscInputNode (src/studio/nodes/) : drain UdpServer, address pattern matching wildcards, multi-listeners. OscOutputNode : UDP send oscpack. OscBrowserPanel (src/studio/panels/) : tree structure des addresses recues, auto-assignment drag vers DAG. OSC Lua bindings. OSC bundle support. vcpkg : +oscpack.
+
+**Lot D — Dual Output (20 iter) :** StudioEngine : second SDL3 window (SDL_CreateWindow + SDL_GL_MakeCurrent context sharing), output RenderTexture blit vers window, fullscreen toggle (SDL_SetWindowFullscreen), resolution configuration, monitor selection (SDL_GetDisplays), aspect ratio letterbox/pillarbox, VSync. OutputPanel (src/studio/panels/) : preview thumbnail RT, resolution picker, monitor selector, F11 fullscreen. Compositors appliques sur output RT. Single-render optimization (scene rendue une seule fois dans RT principale, blittee vers output).
+
+**Lot E — MIDI Learn & Mapping (20 iter) :** MidiLearnManager (src/midi/) : capture first CC/Note message, source unique de verite pour tous les bindings. MidiBindingStore (src/midi/) : serialisation JSON des bindings. Learn button par fader/trigger avec feedback visuel (clignotement). CC auto-assign faders. Conflict detection (remap ou reject). MidiMappingPanel : live binding display, learn depuis panel, edit binding params, drag reassign. Integration Inspector (learn depuis slider) + NodeEditor (learn context menu).
+
+**Lot F — Mapping Profiles & Save (12 iter) :** MappingProfile (src/midi/) : data model + save/load .bbfx-mapping, export/import UI. Controller presets bundles (data/mappings/ : akai_apc_mini, korg_nanokontrol2, novation_launchpad). ProjectSerializer v3.3 : sections MIDI/OSC mappings, backward compat v3.2.5. Settings MIDI/OSC dans SettingsManager.
+
+**Lot G — Should-Have Features (20 iter) :** CC auto-assign global + smart grouping. Output resolution picker + fullscreen F11 + multi-monitor preview. MidiActivityPanel filtres + color coding. OSC browser enhanced tree + auto-assignment. MIDI Output LED feedback Launchpad + motorized fader + LED pattern commands. MidiInputNode relative CC encoder + aftertouch. OscOutputNode configurable rate.
+
+**Lot H — Could-Have Features (14 iter) :** MIDI clock sync receive + timeline integration + start/stop/continue. OSC preset recall + transport control + query protocol. NdiOutputNode skeleton (src/studio/nodes/, ifdef BBFX_HAS_NDI) : pixel readback + send, config dans OutputPanel. Multi-monitor preview strip.
+
+**Lot I — Integration & Polish (14 iter) :** Startup auto-detect MIDI + auto-start OSC. Menu bar "Connect". Status bar indicateurs MIDI/OSC/Output. Help shortcuts. Version bump. 95 tests legacy + 15 MIDI + 8 OSC + 7 Output consolides. Demos (demo_midi_live.lua, demo_osc_control.lua, demo_dual_output.lua).
+
+**Post-release fixes (16 iter, I-870→I-885) :** Fix propagateFreshValues vector iterators. Fix test runner coroutine yield sol2. Fix ViewportToolbar PushStyleColor/PopStyleColor mismatch. Fix gizmo translation (systeme d'offsets SceneObjectNode mPositionOffset/mRotationOffset/mScaleOffset, ViewportGizmo integration, TransformNodeCommand, serialisation + reset). Fix crash OgreAxisAlignedBox assertion. Fix entity link ecrasee par update(). Raccourcis clavier BPM +/-. Auto-reload dernier projet au demarrage. Fix checkbox Visible Inspector (SceneObjectNode setEnabled + clones PerlinFx/Wave).
+
+**Lots J-N — Performance Mode Polish (23 iter, I-886→I-908) :** Serialiser macroActions triggers + MIDI bindings via MidiLearnManager source unique de verite. PANIC fix (rest snapshot capture au premier rendu + recapture apres loadProject, PANIC = restore). Trigger assignment UX (sous-menus Load Preset/Toggle Compositor/Set Param, ChordSystem connecte a DagSnapshot, "Capture as Chord Snapshot", labels auto-descriptifs). Fader UX fix (retrait bouton L legacy, "Quick Assign" right-click, value display ameliore). Crossfader polish (fix lerp ports manquants, repositionnement colonne droite).
+
+**Audit & fixes finaux (29 iter, I-909→I-937) :** Fix Set Param InputFloat static. Nettoyage code mort LearnCb InspectorPanel. Fix MidiMappingPanel deconnecte de MidiLearnManager. Learn conflict detection. Status bar MIDI/OSC/Output. Help shortcuts MIDI/OSC/Connect. Output fullscreen F11. MIDI Learn NodeEditor context menu. OSC Browser tree. MidiInputNode relative CC encoder. MidiOutputNode LED feedback. CC auto-assign global. Startup auto-detect MIDI. OSC preset recall + BPM via OSC. MappingProfile class. Multi-monitor preview OutputPanel. NdiOutputNode skeleton. Tests consolides MIDI/OSC/Output. Fix MappingProfile const-correctness. Fix autosave incomplet. Fix static map editValues. Fix trigger activation/desactivation proper. Fix FX nodes noms hardcodes (ColorShiftNode/PerlinFxNode/WaveVertexShader/TextureBlitterNode). Fix PerlinFxNode/WaveVertexShader cleanup clones OGRE. Fix deactivateTrigger suppression synchrone. Fix ColorShiftNode factory ogre fantome. Clean code (logs debug, liens dupliques, variable inutilisee). Autosave recovery dialog startup. MidiDeviceManager deviceId proper via CallbackData.
 

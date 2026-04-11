@@ -2,7 +2,9 @@
 #include "../../core/AutomationData.h"
 #include <string>
 #include <vector>
+#include <map>
 #include <sol/forward.hpp>
+#include <nlohmann/json_fwd.hpp>
 
 namespace bbfx {
 
@@ -37,6 +39,7 @@ public:
         std::string action;
         bool momentary = false;
         float hue = 0.0f;
+        std::vector<std::string> macroActions; // v3.3: multi-action sequence
     };
 
     struct ProjectState {
@@ -50,6 +53,7 @@ public:
         AutomationData automation;
         std::vector<std::string> compositorStack; // v3.2.4
         std::vector<std::vector<TriggerSlotData>> triggerPages; // v3.2.4
+        std::map<std::string, std::map<std::string, float>> chordSnapshots; // v3.3: chord name → port values
     };
 
     bool save(const std::string& path, const ProjectState& state = {});

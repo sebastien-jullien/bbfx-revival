@@ -15,6 +15,7 @@
     { "name": "boost-utility"                        },
     { "name": "libogg"                               },
     { "name": "libtheora"                            },
-    { "name": "nlohmann-json",  "version>=": "3.11.2"}
+    { "name": "nlohmann-json",  "version>=": "3.11.2"},
+    { "name": "rtmidi"                               }
   ]
 }

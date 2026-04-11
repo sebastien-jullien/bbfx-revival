@@ -380,7 +380,13 @@ void TimelinePanel::renderTransport(StudioEngine* engine) {
 void TimelinePanel::renderBPMDisplay() {
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputFloat("BPM", &mBPM, 1.0f, 5.0f, "%.1f");
-    mBPM = std::clamp(mBPM, 20.0f, 300.0f);
+    mBPM = std::clamp(mBPM, 20.0f, 1200.0f);
+}
+
+void TimelinePanel::changeBPM(float delta) {
+    mBPM = std::clamp(mBPM + delta, 20.0f, 1200.0f);
+    if (auto* time = RootTimeNode::instance())
+        time->setBPM(mBPM);
 }
 
 void TimelinePanel::renderMarkers(float pixelsPerBeat, float currentBeat) {

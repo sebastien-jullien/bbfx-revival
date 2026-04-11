@@ -12,6 +12,9 @@
 #include "../core/Engine.h"
 #include "nodes/SceneObjectNode.h"
 #include "commands/SceneCommands.h"
+#include "../midi/MidiDeviceManager.h"
+#include "../midi/MidiMessage.h"
+#include "../midi/MidiLearnManager.h"
 #include <OgreMaterialManager.h>
 #include <OgreMaterial.h>
 #include <OgreTechnique.h>
@@ -1367,6 +1370,154 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     };
 
     // ── Run ImGui Test Engine tests (v3.2.5) ─────────────────────────
+    // ── MIDI commands (v3.3) ──────────────────────────────────────────
+    dbg["midi_devices"] = []() -> sol::as_table_t<std::vector<std::string>> {
+        auto* mgr = MidiDeviceManager::instance();
+        std::vector<std::string> result;
+        if (mgr) {
+            result = mgr->getInputDeviceNames();
+            for (auto& n : result) std::cout << "  MIDI IN: " << n << std::endl;
+        }
+        std::cout << "[dbg] " << result.size() << " MIDI input devices" << std::endl;
+        return sol::as_table(result);
+    };
+
+    dbg["midi_open"] = [](int index) -> bool {
+        auto* mgr = MidiDeviceManager::instance();
+        if (!mgr) return false;
+        return mgr->openInput(index);
+    };
+
+    dbg["midi_close"] = [](int index) {
+        auto* mgr = MidiDeviceManager::instance();
+        if (mgr) mgr->closeInput(index);
+    };
+
+    dbg["midi_inject"] = [](int channel, int status, int data1, int data2) {
+        auto* mgr = MidiDeviceManager::instance();
+        if (!mgr) return;
+        MidiMessage msg;
+        msg.deviceId = -1; // virtual
+        msg.status = static_cast<uint8_t>(status | ((channel - 1) & 0x0F));
+        msg.data1 = static_cast<uint8_t>(data1);
+        msg.data2 = static_cast<uint8_t>(data2);
+        msg.channel = channel;
+        msg.timestamp = 0.0;
+        mgr->injectMessage(msg);
+        std::cout << "[dbg] midi_inject: ch=" << channel << " st=0x" << std::hex << status
+                  << " d1=" << std::dec << data1 << " d2=" << data2 << std::endl;
+    };
+
+    static bool sMidiMonitor = false;
+    dbg["midi_monitor"] = [](bool on) {
+        sMidiMonitor = on;
+        std::cout << "[dbg] midi_monitor: " << (on ? "ON" : "OFF") << std::endl;
+    };
+
+    dbg["midi_send"] = [](int channel, int status, int data1, int data2) {
+        auto* mgr = MidiDeviceManager::instance();
+        if (!mgr) return;
+        mgr->sendMessage(0, static_cast<uint8_t>(status | ((channel - 1) & 0x0F)),
+                         static_cast<uint8_t>(data1), static_cast<uint8_t>(data2));
+        std::cout << "[dbg] midi_send: ch=" << channel << " st=0x" << std::hex << status
+                  << " d1=" << std::dec << data1 << " d2=" << data2 << std::endl;
+    };
+
+    dbg["midi_poll"] = []() -> sol::as_table_t<std::vector<std::string>> {
+        auto* mgr = MidiDeviceManager::instance();
+        std::vector<std::string> result;
+        if (mgr) {
+            auto msgs = mgr->poll();
+            for (auto& m : msgs) {
+                std::string info = "ch=" + std::to_string(m.channel) +
+                    " type=0x" + std::to_string(m.type()) +
+                    " d1=" + std::to_string(m.data1) +
+                    " d2=" + std::to_string(m.data2);
+                result.push_back(info);
+            }
+        }
+        return sol::as_table(result);
+    };
+
+    // ── MIDI Learn commands (v3.3) ──────────────────────────────────
+    dbg["midi_learn_fader"] = [](int faderIndex) {
+        MidiLearnTarget target;
+        target.type = "fader";
+        target.index = faderIndex;
+        MidiLearnManager::instance().startLearn(target);
+        std::cout << "[dbg] MIDI Learn started for fader " << faderIndex << std::endl;
+    };
+
+    dbg["midi_learn_trigger"] = [](int trigIndex) {
+        MidiLearnTarget target;
+        target.type = "trigger";
+        target.index = trigIndex;
+        MidiLearnManager::instance().startLearn(target);
+        std::cout << "[dbg] MIDI Learn started for trigger " << trigIndex << std::endl;
+    };
+
+    dbg["midi_learn_port"] = [](const std::string& nodeName, const std::string& portName) {
+        MidiLearnTarget target;
+        target.type = "port";
+        target.nodeName = nodeName;
+        target.portName = portName;
+        MidiLearnManager::instance().startLearn(target);
+        std::cout << "[dbg] MIDI Learn started for " << nodeName << "." << portName << std::endl;
+    };
+
+    dbg["midi_learn_cancel"] = []() {
+        MidiLearnManager::instance().cancelLearn();
+        std::cout << "[dbg] MIDI Learn cancelled" << std::endl;
+    };
+
+    dbg["midi_bindings"] = []() -> int {
+        auto& bindings = MidiLearnManager::instance().getBindings();
+        for (size_t i = 0; i < bindings.size(); ++i) {
+            auto& b = bindings[i];
+            std::cout << "  [" << i << "] " << b.midiType << "#" << b.number
+                      << " ch" << b.channel << " → " << b.target.type;
+            if (b.target.index >= 0) std::cout << "[" << b.target.index << "]";
+            if (!b.target.nodeName.empty()) std::cout << " " << b.target.nodeName << "." << b.target.portName;
+            std::cout << std::endl;
+        }
+        std::cout << "[dbg] " << bindings.size() << " MIDI bindings" << std::endl;
+        return static_cast<int>(bindings.size());
+    };
+
+    dbg["midi_clear_bindings"] = []() {
+        MidiLearnManager::instance().getBindings().clear();
+        std::cout << "[dbg] All MIDI bindings cleared" << std::endl;
+    };
+
+    // ── Output commands (v3.3) ──────────────────────────────────────
+    dbg["output_open"] = [app](int w, int h) {
+        if (app && app->getEngine()) {
+            app->getEngine()->openOutputWindow(w, h);
+            std::cout << "[dbg] Output window opened: " << w << "x" << h << std::endl;
+        }
+    };
+
+    dbg["output_close"] = [app]() {
+        if (app && app->getEngine()) {
+            app->getEngine()->closeOutputWindow();
+            std::cout << "[dbg] Output window closed" << std::endl;
+        }
+    };
+
+    dbg["output_fullscreen"] = [app]() {
+        if (app && app->getEngine()) {
+            app->getEngine()->toggleOutputFullscreen();
+            std::cout << "[dbg] Output fullscreen toggled" << std::endl;
+        }
+    };
+
+    dbg["output_resolution"] = [app](int w, int h) {
+        if (app && app->getEngine()) {
+            app->getEngine()->setOutputResolution(w, h);
+            std::cout << "[dbg] Output resolution: " << w << "x" << h << std::endl;
+        }
+    };
+
     dbg["run_ui_tests"] = [app]() {
         if (!app || !app->getTestEngine()) {
             std::cout << "[dbg] run_ui_tests: test engine not available" << std::endl;
@@ -1375,6 +1526,22 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         ImGuiTestEngine_QueueTests(app->getTestEngine(), ImGuiTestGroup_Tests);
         std::cout << "[dbg] run_ui_tests: all UI tests queued" << std::endl;
     };
+
+    // Flush gPendingDeletes synchronously (for test suite W() calls)
+    lua.set_function("_dbg_flush_deletes", [&lua]() {
+        if (gPendingDeletes.empty()) return;
+        auto names = std::move(gPendingDeletes);
+        gPendingDeletes.clear();
+        auto* animator = Animator::instance();
+        for (auto& n : names) {
+            if (!animator) break;
+            auto* node = animator->getRegisteredNode(n);
+            if (!node) continue;
+            animator->removeNode(node);
+            try { node->cleanup(); } catch (...) {}
+            delete node;
+        }
+    });
 
     dbg["help"] = []() {
         std::cout << "--- BBFx Studio Debugger ---" << std::endl;
@@ -1394,6 +1561,25 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::cout << "  dbg.clear()                         Clear DAG" << std::endl;
         std::cout << "  dbg.test()                          Run test suite" << std::endl;
         std::cout << "  dbg.fps()                           Show FPS" << std::endl;
+        std::cout << "--- MIDI (v3.3) ---" << std::endl;
+        std::cout << "  dbg.midi_devices()                  List MIDI input devices" << std::endl;
+        std::cout << "  dbg.midi_open(index)                Open MIDI input" << std::endl;
+        std::cout << "  dbg.midi_close(index)               Close MIDI input" << std::endl;
+        std::cout << "  dbg.midi_inject(ch,st,d1,d2)        Inject virtual MIDI message" << std::endl;
+        std::cout << "  dbg.midi_monitor(bool)              Toggle MIDI monitor" << std::endl;
+        std::cout << "  dbg.midi_send(ch,st,d1,d2)          Send MIDI output" << std::endl;
+        std::cout << "  dbg.midi_poll()                     Poll MIDI messages" << std::endl;
+        std::cout << "  dbg.midi_learn_fader(index)         Start MIDI Learn for fader" << std::endl;
+        std::cout << "  dbg.midi_learn_trigger(index)       Start MIDI Learn for trigger" << std::endl;
+        std::cout << "  dbg.midi_learn_port(node,port)      Start MIDI Learn for DAG port" << std::endl;
+        std::cout << "  dbg.midi_learn_cancel()             Cancel MIDI Learn" << std::endl;
+        std::cout << "  dbg.midi_bindings()                 List MIDI bindings" << std::endl;
+        std::cout << "  dbg.midi_clear_bindings()           Clear all MIDI bindings" << std::endl;
+        std::cout << "--- Output (v3.3) ---" << std::endl;
+        std::cout << "  dbg.output_open(w,h)                Open output window" << std::endl;
+        std::cout << "  dbg.output_close()                  Close output window" << std::endl;
+        std::cout << "  dbg.output_fullscreen()             Toggle output fullscreen" << std::endl;
+        std::cout << "  dbg.output_resolution(w,h)          Set output resolution" << std::endl;
         std::cout << "  dbg.help()                          This help" << std::endl;
     };
 

@@ -1,4 +1,5 @@
 #include "SceneObjectNode.h"
+#include "../../core/Animator.h"
 #include <OgreEntity.h>
 #include <OgreMeshManager.h>
 #include <cmath>
@@ -96,34 +97,120 @@ void SceneObjectNode::update() {
         } catch (...) { mMovable = nullptr; }
     }
     if (!mSceneNode) return;
+
+    // Periodically refresh which ports are DAG-linked
+    if (mDAGPriority && ++mLinkRefreshCounter >= 30) {
+        mLinkRefreshCounter = 0;
+        onLinkChanged();
+    }
+
     auto& in = getInputs();
-    float px = in.at("position.x")->getValue();
-    float py = in.at("position.y")->getValue();
-    float pz = in.at("position.z")->getValue();
-    mSceneNode->setPosition(px, py, pz);
 
-    float sx = in.at("scale.x")->getValue();
-    float sy = in.at("scale.y")->getValue();
-    float sz = in.at("scale.z")->getValue();
-    if (sx > 0.001f && sy > 0.001f && sz > 0.001f)
-        mSceneNode->setScale(sx, sy, sz);
+    // Effective offsets: when DAG Priority is ON, zero offset on axes with active DAG links.
+    Ogre::Vector3 effPos = mOffsetPos;
+    Ogre::Vector3 effRot = mOffsetRot;
+    Ogre::Vector3 effScl = mOffsetScale;
+    if (mDAGPriority) {
+        if (mLinkedPosX) effPos.x = 0.0f;
+        if (mLinkedPosY) effPos.y = 0.0f;
+        if (mLinkedPosZ) effPos.z = 0.0f;
+        if (mLinkedRotX) effRot.x = 0.0f;
+        if (mLinkedRotY) effRot.y = 0.0f;
+        if (mLinkedRotZ) effRot.z = 0.0f;
+        if (mLinkedSclX) effScl.x = 1.0f;
+        if (mLinkedSclY) effScl.y = 1.0f;
+        if (mLinkedSclZ) effScl.z = 1.0f;
+    }
 
-    float rx = in.at("rotation.x")->getValue();
-    float ry = in.at("rotation.y")->getValue();
-    float rz = in.at("rotation.z")->getValue();
-    // Only override orientation if rotation ports are non-zero
-    // (allows external scripts like rotate_head to control orientation)
-    if (std::abs(rx) > 0.001f || std::abs(ry) > 0.001f || std::abs(rz) > 0.001f) {
+    // Position & Scale: always set ABSOLUTE values (DAG + offset).
+    // These don't compound because we set, not add.
+    mSceneNode->setPosition(
+        in.at("position.x")->getValue() + effPos.x,
+        in.at("position.y")->getValue() + effPos.y,
+        in.at("position.z")->getValue() + effPos.z);
+
+    {
+        float sx = in.at("scale.x")->getValue() * effScl.x;
+        float sy = in.at("scale.y")->getValue() * effScl.y;
+        float sz = in.at("scale.z")->getValue() * effScl.z;
+        if (sx > 0.001f && sy > 0.001f && sz > 0.001f)
+            mSceneNode->setScale(sx, sy, sz);
+    }
+
+    // Rotation: two modes depending on whether DAG ports drive rotation.
+    float dagRx = in.at("rotation.x")->getValue();
+    float dagRy = in.at("rotation.y")->getValue();
+    float dagRz = in.at("rotation.z")->getValue();
+    bool rotFromDAG = mLinkedRotX || mLinkedRotY || mLinkedRotZ ||
+        std::abs(dagRx) > 0.001f || std::abs(dagRy) > 0.001f || std::abs(dagRz) > 0.001f;
+
+    if (rotFromDAG) {
+        // DAG ports drive rotation — set absolute orientation from DAG + offset
+        float rx = dagRx + effRot.x, ry = dagRy + effRot.y, rz = dagRz + effRot.z;
         Ogre::Quaternion qx(Ogre::Degree(rx), Ogre::Vector3::UNIT_X);
         Ogre::Quaternion qy(Ogre::Degree(ry), Ogre::Vector3::UNIT_Y);
         Ogre::Quaternion qz(Ogre::Degree(rz), Ogre::Vector3::UNIT_Z);
         mSceneNode->setOrientation(qy * qx * qz);
+    } else if (effRot != Ogre::Vector3::ZERO) {
+        // No DAG rotation — Lua script may control via entity link (setOrientation each frame).
+        // Compose gizmo offset ON TOP of whatever Lua set. Safe: Lua resets base each frame.
+        Ogre::Quaternion current = mSceneNode->getOrientation();
+        Ogre::Quaternion qx(Ogre::Degree(effRot.x), Ogre::Vector3::UNIT_X);
+        Ogre::Quaternion qy(Ogre::Degree(effRot.y), Ogre::Vector3::UNIT_Y);
+        Ogre::Quaternion qz(Ogre::Degree(effRot.z), Ogre::Vector3::UNIT_Z);
+        mSceneNode->setOrientation(current * qy * qx * qz);
     }
 
-    bool vis = in.at("visible")->getValue() >= 0.5f;
+    bool vis;
+    if (mLinkedVis) {
+        vis = in.at("visible")->getValue() >= 0.5f;
+    } else {
+        auto* p = mSpec.getParam("visible");
+        vis = p ? p->boolVal : true;
+    }
     mSceneNode->setVisible(vis && mEnabled && mUserVisible);
 
     fireUpdate();
+}
+
+void SceneObjectNode::onLinkChanged() {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+
+    // Check each transform port: does it have an incoming edge from an enabled node?
+    auto checkPort = [&](const std::string& portName) -> bool {
+        auto& inputs = getInputs();
+        auto it = inputs.find(portName);
+        if (it == inputs.end()) return false;
+        auto sources = animator->getSourceNodes(it->second);
+        for (auto* src : sources) {
+            if (src && src->isEnabled()) return true;
+        }
+        return false;
+    };
+
+    mLinkedPosX = checkPort("position.x");
+    mLinkedPosY = checkPort("position.y");
+    mLinkedPosZ = checkPort("position.z");
+    mLinkedRotX = checkPort("rotation.x");
+    mLinkedRotY = checkPort("rotation.y");
+    mLinkedRotZ = checkPort("rotation.z");
+    mLinkedSclX = checkPort("scale.x");
+    mLinkedSclY = checkPort("scale.y");
+    mLinkedSclZ = checkPort("scale.z");
+    mLinkedVis  = checkPort("visible");
+
+}
+
+bool SceneObjectNode::isNodeVisible() const {
+    if (!mEnabled || !mUserVisible) return false;
+    if (mLinkedVis) {
+        const auto& inputs = getInputs();
+        auto it = inputs.find("visible");
+        return it != inputs.end() && it->second->getValue() >= 0.5f;
+    }
+    const auto* p = mSpec.getParam("visible");
+    return p ? p->boolVal : true;
 }
 
 void SceneObjectNode::setEnabled(bool en) {

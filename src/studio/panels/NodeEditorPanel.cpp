@@ -9,6 +9,7 @@
 #include "../commands/LinkCommands.h"
 #include "../commands/EditCommands.h"
 #include "../../core/ParamSpec.h"
+#include "../../midi/MidiLearnManager.h"
 
 #include <nlohmann/json.hpp>
 #include <imgui.h>
@@ -1525,6 +1526,42 @@ void NodeEditorPanel::showNodeContextMenu() {
                 }
                 ImGui::Separator();
             }
+        }
+        // MIDI Learn for input ports (v3.3)
+        if (!mSelectedNode.empty()) {
+            auto* animator = Animator::instance();
+            auto* node = animator ? animator->getRegisteredNode(mSelectedNode) : nullptr;
+            if (node && ImGui::BeginMenu("MIDI Learn Port")) {
+                auto& mlm = MidiLearnManager::instance();
+                for (auto& [portName, port] : node->getInputs()) {
+                    bool isLearning = mlm.isLearning() &&
+                        mlm.getLearnTarget().type == "port" &&
+                        mlm.getLearnTarget().nodeName == mSelectedNode &&
+                        mlm.getLearnTarget().portName == portName;
+                    std::string label = portName;
+                    // Show existing binding if any
+                    for (auto& b : mlm.getBindings()) {
+                        if (b.target.type == "port" && b.target.nodeName == mSelectedNode && b.target.portName == portName) {
+                            label += " [CC#" + std::to_string(b.number) + "]";
+                            break;
+                        }
+                    }
+                    if (isLearning) label = ">> " + label + " <<";
+                    if (ImGui::MenuItem(label.c_str())) {
+                        if (isLearning) {
+                            mlm.cancelLearn();
+                        } else {
+                            MidiLearnTarget target;
+                            target.type = "port";
+                            target.nodeName = mSelectedNode;
+                            target.portName = portName;
+                            mlm.startLearn(target);
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
         }
         // Detach Particle (v3.2.4) — only for ParticleNodes with entity links
         if (!mSelectedNode.empty()) {

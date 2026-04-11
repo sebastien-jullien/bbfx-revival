@@ -12,8 +12,8 @@ namespace bbfx {
 
 static int sCloneCounter = 0;
 
-PerlinFxNode::PerlinFxNode(const string& defaultMesh, const string& clonePrefix)
-    : AnimationNode("PerlinFxNode")
+PerlinFxNode::PerlinFxNode(const string& defaultMesh, const string& clonePrefix, const std::string& nodeName)
+    : AnimationNode(nodeName)
     , mClonePrefix(clonePrefix)
     , mDefaultMesh(defaultMesh)
 {
@@ -196,13 +196,10 @@ void PerlinFxNode::resolveTargets() {
             continue;
         }
 
-        if (isEnabled()) {
-            setCloneVisible(targetName, true);
-            sceneObj->getSceneNode()->setVisible(false);
-        } else {
-            setCloneVisible(targetName, true);
-            sceneObj->getSceneNode()->setVisible(false);
-        }
+        // Respect the SceneObjectNode's intended visibility (ParamSpec BOOL / DAG port).
+        // The clone replaces the original, so the original SceneNode is always hidden.
+        setCloneVisible(targetName, sceneObj->isNodeVisible());
+        sceneObj->getSceneNode()->setVisible(false);
 
         // Position clone at target
         if (sceneMgr && it->second.entityCreated) {
@@ -251,22 +248,29 @@ void PerlinFxNode::disable() {
 }
 
 void PerlinFxNode::cleanup() {
-    // Disable all shaders and restore all target visibilities
+    // Disable all shaders, restore target visibilities, and DESTROY clone OGRE objects
+    auto* engine = Engine::instance();
+    auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
     for (auto& [name, clone] : mClones) {
         clone.shader->disable();
         auto* sceneObj = findTargetSceneObj(name);
         if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
             sceneObj->getSceneNode()->setVisible(true);
-        // Hide clone
-        auto* engine = Engine::instance();
-        auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
-        if (sceneMgr) {
+        // Destroy clone OGRE objects (not just hide)
+        if (sceneMgr && clone.entityCreated) {
             try {
-                if (sceneMgr->hasSceneNode(clone.sceneNodeName))
-                    sceneMgr->getSceneNode(clone.sceneNodeName)->setVisible(false);
+                if (sceneMgr->hasSceneNode(clone.sceneNodeName)) {
+                    auto* sn = sceneMgr->getSceneNode(clone.sceneNodeName);
+                    sn->detachAllObjects();
+                    sceneMgr->destroySceneNode(sn);
+                }
+                if (sceneMgr->hasEntity(clone.entityName)) {
+                    sceneMgr->destroyEntity(clone.entityName);
+                }
             } catch (...) {}
         }
     }
+    mClones.clear();
 }
 
 void PerlinFxNode::onLinkChanged() {

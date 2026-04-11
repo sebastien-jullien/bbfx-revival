@@ -41,6 +41,7 @@ public:
                      float value, float currentBeat);
 
     float getBPM() const { return mBPM; }
+    void  changeBPM(float delta);
 
 private:
     void ensureDefaultChords();

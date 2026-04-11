@@ -66,13 +66,8 @@ private:
     std::map<std::string, std::vector<std::string>> mFxStackOrder;
     void syncFxOrder(const std::string& soNode, std::vector<std::string>& fxNodes);
 
-    // Fader learn mode callback (v3.2.4)
-    using LearnCb = std::function<void(const std::string& nodeName, const std::string& portName)>;
-    LearnCb mLearnCb;
-
 public:
     void setThumbCache(class TextureThumbnailCache* cache) { mThumbCache = cache; }
-    void setLearnCallback(LearnCb cb) { mLearnCb = std::move(cb); }
     auto& getFxStackOrder() { return mFxStackOrder; }
 };
 

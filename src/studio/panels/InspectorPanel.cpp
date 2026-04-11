@@ -10,6 +10,8 @@
 #include "../../core/ParamSpec.h"
 #include "../ResourceEnumerator.h"
 #include "../TextureThumbnailCache.h"
+#include "../nodes/SceneObjectNode.h"
+#include "../../midi/MidiLearnManager.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -234,6 +236,47 @@ void InspectorPanel::render() {
         }
     }
 
+    // Transform offsets display + reset (SceneObjectNode only)
+    auto* selNode = Animator::instance() ? Animator::instance()->getRegisteredNode(mSelectedNode) : nullptr;
+    if (selNode && selNode->getTypeName() == "SceneObjectNode") {
+        auto* soNode = dynamic_cast<SceneObjectNode*>(selNode);
+        if (soNode) {
+            ImGui::Separator();
+
+            // DAG Priority toggle
+            bool dagPri = soNode->isDAGPriority();
+            if (ImGui::Checkbox("DAG Priority", &dagPri)) {
+                soNode->setDAGPriority(dagPri);
+                soNode->onLinkChanged(); // refresh immediately
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("When ON, DAG animations override gizmo offsets on linked axes.\nWhen OFF, gizmo offsets apply fully on all axes.");
+
+            auto op = soNode->getOffsetPos();
+            auto or_ = soNode->getOffsetRot();
+            auto os = soNode->getOffsetScale();
+            bool hasOffset = (op != Ogre::Vector3::ZERO || or_ != Ogre::Vector3::ZERO ||
+                              os != Ogre::Vector3::UNIT_SCALE);
+            if (hasOffset) {
+                ImGui::TextDisabled("Transform Offsets");
+                // Position
+                ImGui::Text("Pos:   %.2f, %.2f, %.2f", op.x, op.y, op.z);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X##resetPos")) soNode->resetOffsetPos();
+                // Rotation
+                ImGui::Text("Rot:   %.1f, %.1f, %.1f", or_.x, or_.y, or_.z);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X##resetRot")) soNode->resetOffsetRot();
+                // Scale
+                ImGui::Text("Scale: %.2f, %.2f, %.2f", os.x, os.y, os.z);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X##resetScl")) soNode->resetOffsetScale();
+                // Global reset
+                if (ImGui::SmallButton("Reset All")) soNode->resetOffsets();
+            }
+        }
+    }
+
     ImGui::Separator();
     renderRenameDelete();
 
@@ -277,6 +320,40 @@ void InspectorPanel::renderParamSpec() {
                     if (ImGui::MenuItem("Add to Timeline") && mAddToTimelineCb) {
                         mAddToTimelineCb(mSelectedNode, param.name, param.minVal, param.maxVal);
                     }
+                    ImGui::Separator();
+                    {
+                        auto& mlm = MidiLearnManager::instance();
+                        bool isLearning = mlm.isLearning() &&
+                            mlm.getLearnTarget().type == "port" &&
+                            mlm.getLearnTarget().nodeName == mSelectedNode &&
+                            mlm.getLearnTarget().portName == param.name;
+                        if (isLearning) {
+                            if (ImGui::MenuItem("Cancel MIDI Learn")) {
+                                mlm.cancelLearn();
+                            }
+                        } else {
+                            if (ImGui::MenuItem("MIDI Learn")) {
+                                MidiLearnTarget target;
+                                target.type = "port";
+                                target.nodeName = mSelectedNode;
+                                target.portName = param.name;
+                                mlm.startLearn(target);
+                            }
+                        }
+                        // Show current MIDI binding if any
+                        for (size_t bi = 0; bi < mlm.getBindings().size(); ++bi) {
+                            auto& b = mlm.getBindings()[bi];
+                            if (b.target.type == "port" && b.target.nodeName == mSelectedNode &&
+                                b.target.portName == param.name) {
+                                ImGui::TextDisabled("MIDI: %s#%d ch%d",
+                                    b.midiType.c_str(), b.number, b.channel);
+                                if (ImGui::MenuItem("Clear MIDI Binding")) {
+                                    mlm.removeBinding(static_cast<int>(bi));
+                                }
+                                break;
+                            }
+                        }
+                    }
                     ImGui::EndPopup();
                 }
                 if (ImGui::IsItemHovered()) {
@@ -308,9 +385,6 @@ void InspectorPanel::renderParamSpec() {
                 buf[sizeof(buf) - 1] = '\0';
                 if (ImGui::InputText(id.c_str(), buf, sizeof(buf))) {
                     param.stringVal = buf;
-                }
-                if (mLearnCb && ImGui::IsItemActive()) {
-                    mLearnCb(mSelectedNode, param.name);
                 }
                 break;
             }

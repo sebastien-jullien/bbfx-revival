@@ -204,7 +204,15 @@ Ogre::Real RootTimeNode::getTotalTime() const {
 }
 
 void RootTimeNode::setBPM(float bpm) {
-    if (bpm > 0.0f) mBPMPort->setValue(bpm);
+    if (bpm <= 0.0f) return;
+    float oldBPM = mBPMPort->getValue();
+    if (std::abs(bpm - oldBPM) > 0.01f && oldBPM > 0.0f) {
+        // Adjust totalTime so beat count stays continuous (no jump)
+        float currentBeat = mTotalTime * oldBPM / 60.0f;
+        mTotalTime = currentBeat * 60.0f / bpm;
+        mTotalTimePort->setValue(mTotalTime);
+    }
+    mBPMPort->setValue(bpm);
 }
 
 float RootTimeNode::getBPM() const {

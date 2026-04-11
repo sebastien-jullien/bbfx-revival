@@ -2,8 +2,8 @@
 
 namespace bbfx {
 
-TextureBlitterNode::TextureBlitterNode(const string& textureName)
-    : AnimationNode("TextureBlitterNode")
+TextureBlitterNode::TextureBlitterNode(const string& textureName, const std::string& nodeName)
+    : AnimationNode(nodeName)
     , mBlitter(std::make_unique<TextureBlitter>(textureName))
 {
     addInput(new AnimationPort("r", 1.0f));

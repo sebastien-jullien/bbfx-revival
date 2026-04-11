@@ -8,7 +8,7 @@ namespace bbfx {
 
 class ColorShiftNode : public AnimationNode {
 public:
-    explicit ColorShiftNode(const string& materialName);
+    explicit ColorShiftNode(const string& materialName, const std::string& nodeName = "ColorShiftNode");
     virtual ~ColorShiftNode();
     void update() override;
     void cleanup() override;

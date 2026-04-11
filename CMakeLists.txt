@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.2.2 LANGUAGES CXX)
+project(BBFx VERSION 3.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -133,6 +133,7 @@ find_package(Lua   REQUIRED)
 find_package(Boost REQUIRED COMPONENTS graph)
 find_package(Ogg REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(rtmidi CONFIG REQUIRED)
 find_package(PkgConfig QUIET)
 # libtheora doesn't have a CMake config — use manual find
 find_path(THEORA_INCLUDE_DIR theora/theoradec.h)
@@ -223,6 +224,16 @@ add_executable(bbfx-studio
     src/studio/ShaderPreviewRenderer.cpp
     src/studio/DagSnapshot.cpp
     src/studio/ToastSystem.cpp
+    src/midi/MidiDeviceManager.cpp
+    src/midi/MidiLearnManager.cpp
+    src/midi/MappingProfile.cpp
+    src/osc/OscMessage.cpp
+    src/network/UdpServer.cpp
+    src/studio/nodes/MidiInputNode.cpp
+    src/studio/nodes/MidiOutputNode.cpp
+    src/studio/nodes/OscInputNode.cpp
+    src/studio/nodes/OscOutputNode.cpp
+    src/studio/nodes/NdiOutputNode.cpp
     src/studio/Debugger.cpp
     src/studio/generators/MeshGenerator.cpp
     src/studio/nodes/SceneObjectNode.cpp
@@ -253,6 +264,10 @@ add_executable(bbfx-studio
     src/studio/panels/ShaderGalleryPanel.cpp
     src/studio/panels/MaterialEditorPanel.cpp
     src/studio/panels/UndoHistoryPanel.cpp
+    src/studio/panels/MidiActivityPanel.cpp
+    src/studio/panels/MidiMappingPanel.cpp
+    src/studio/panels/OutputPanel.cpp
+    src/studio/panels/OscBrowserPanel.cpp
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
     src/studio/panels/SetEditorPanel.cpp
@@ -283,6 +298,7 @@ target_link_libraries(bbfx-studio PRIVATE
     bbfx-core
     imgui_studio
     nlohmann_json::nlohmann_json
+    RtMidi::rtmidi
 )
 if(WIN32)
     target_link_libraries(bbfx-studio PRIVATE opengl32 comdlg32)
@@ -404,7 +420,7 @@ set(CPACK_PACKAGE_VENDOR            "Sébastien JULLIEN")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "BBFx Studio — Real-time 3D Animation Engine")
 set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_VERSION_MAJOR     "3")
-set(CPACK_PACKAGE_VERSION_MINOR     "1")
+set(CPACK_PACKAGE_VERSION_MINOR     "3")
 set(CPACK_PACKAGE_VERSION_PATCH     "0")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "BBFx-Studio")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

@@ -43,33 +43,13 @@ void TransformNodeCommand::applyValues(const float vals[9])
     auto* node = animator->getRegisteredNode(mNodeName);
     if (!node) return;
 
-    auto& inputs = node->getInputs();
-    auto setPort = [&](const std::string& portName, float val) {
-        auto it = inputs.find(portName);
-        if (it != inputs.end()) it->second->setValue(val);
-    };
-
-    setPort("position.x", vals[0]);
-    setPort("position.y", vals[1]);
-    setPort("position.z", vals[2]);
-    setPort("scale.x",    vals[3]);
-    setPort("scale.y",    vals[4]);
-    setPort("scale.z",    vals[5]);
-    setPort("rotation.x", vals[6]);
-    setPort("rotation.y", vals[7]);
-    setPort("rotation.z", vals[8]);
-
-    // Also update the OGRE SceneNode directly for immediate visual feedback
-    if (auto* soNode = dynamic_cast<SceneObjectNode*>(node)) {
-        auto* sn = soNode->getSceneNode();
-        if (sn) {
-            sn->setPosition(vals[0], vals[1], vals[2]);
-            sn->setScale(vals[3], vals[4], vals[5]);
-            Ogre::Quaternion qx(Ogre::Degree(vals[6]), Ogre::Vector3::UNIT_X);
-            Ogre::Quaternion qy(Ogre::Degree(vals[7]), Ogre::Vector3::UNIT_Y);
-            Ogre::Quaternion qz(Ogre::Degree(vals[8]), Ogre::Vector3::UNIT_Z);
-            sn->setOrientation(qy * qx * qz);
-        }
+    // Apply as OFFSETS on SceneObjectNode (v3.3 offset system).
+    // This preserves DAG animation — offsets are added on top of port values.
+    auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+    if (soNode) {
+        soNode->setOffsetPos(Ogre::Vector3(vals[0], vals[1], vals[2]));
+        soNode->setOffsetScale(Ogre::Vector3(vals[3], vals[4], vals[5]));
+        soNode->setOffsetRot(Ogre::Vector3(vals[6], vals[7], vals[8]));
     }
 }
 

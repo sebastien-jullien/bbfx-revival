@@ -1,4 +1,5 @@
 #include "StudioApp.h"
+#include "DagSnapshot.h"
 #include "commands/NodeCommands.h"
 #include "commands/SceneCommands.h"
 #include "../core/Animator.h"
@@ -19,6 +20,13 @@
 #include "../audio/AudioCapture.h"
 #include "../video/TheoraClipNode.h"
 #include "nodes/SceneObjectNode.h"
+#include "nodes/MidiInputNode.h"
+#include "nodes/MidiOutputNode.h"
+#include "nodes/OscInputNode.h"
+#include "nodes/OscOutputNode.h"
+#include "nodes/NdiOutputNode.h"
+#include "../midi/MidiDeviceManager.h"
+#include "../midi/MidiLearnManager.h"
 #include "nodes/LightNode.h"
 #include "nodes/ParticleNode.h"
 #include "nodes/CompositorNode.h"
@@ -140,6 +148,12 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mPerformanceModePanel->setCompositorStack(mCompositorStackPanel.get());
 
     // Shader Gallery + Material Editor (v3.2.5)
+    // MIDI Device Manager (v3.3) — auto-detect and open all devices
+    mMidiDeviceManager = std::make_unique<MidiDeviceManager>();
+    mMidiDeviceManager->openAll();
+    std::cout << "[Studio] MIDI auto-detect: " << mMidiDeviceManager->getInputDeviceCount()
+              << " input, " << mMidiDeviceManager->getOutputDeviceCount() << " output devices" << std::endl;
+
     mPreviewRenderer = std::make_unique<ShaderPreviewRenderer>();
     mPreviewRenderer->initialize(Ogre::Root::getSingletonPtr());
     mShaderGalleryPanel = std::make_unique<ShaderGalleryPanel>();
@@ -165,14 +179,32 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
         }
     );
     mUndoHistoryPanel = std::make_unique<UndoHistoryPanel>();
+    mMidiActivityPanel = std::make_unique<MidiActivityPanel>();
+    mMidiMappingPanel = std::make_unique<MidiMappingPanel>();
+    mOutputPanel = std::make_unique<OutputPanel>();
+    mOscBrowserPanel = std::make_unique<OscBrowserPanel>();
 
-    // Crash recovery: create lock file at startup, check for stale lock
+    // Crash recovery: create lock file at startup, check for stale lock + autosave
     {
         std::string lockPath = ".bbfx_lock";
         if (std::ifstream(lockPath).good()) {
-            // Lock file exists from previous run — possible crash
             std::cout << "[StudioApp] Stale lock file detected — possible previous crash" << std::endl;
-            // TODO: check autosave age and offer recovery dialog
+            // Check if an autosave exists
+            auto& settings = SettingsManager::instance();
+            std::string lastProject = settings.get().lastProjectPath;
+            if (!lastProject.empty()) {
+                std::string autosavePath = lastProject + ".autosave";
+                if (std::filesystem::exists(autosavePath)) {
+                    // Check if autosave is more recent than project
+                    auto projectTime = std::filesystem::last_write_time(lastProject);
+                    auto autosaveTime = std::filesystem::last_write_time(autosavePath);
+                    if (autosaveTime > projectTime) {
+                        mRecoveryAutosavePath = autosavePath;
+                        mShowRecoveryDialog = true;
+                        std::cout << "[StudioApp] Autosave found: " << autosavePath << " — offering recovery" << std::endl;
+                    }
+                }
+            }
         }
         createLockFile();
     }
@@ -192,12 +224,6 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mInspectorPanel->setRecordValueCallback(
         [this](const std::string& nodeName, const std::string& portName, float value, float beat) {
             if (mTimelinePanel) mTimelinePanel->recordValue(nodeName, portName, value, beat);
-        });
-
-    // Wire fader learn callback: Inspector → PerformanceMode
-    mInspectorPanel->setLearnCallback(
-        [this](const std::string& nodeName, const std::string& portName) {
-            if (mPerformanceModePanel) mPerformanceModePanel->onLearnParam(nodeName, portName);
         });
 
     initNodeTypeRegistry();
@@ -604,7 +630,7 @@ void StudioApp::run() {
                 std::cout << "[Studio] Loading default template" << std::endl;
                 loadProject(templatePath);
                 mProjectPath.clear();
-                SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
+                SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.3");
             }
         }
         if (mRecentProjects.empty() && !settings.get().recentProjects.empty()) {
@@ -613,7 +639,7 @@ void StudioApp::run() {
     }
 
     while (mRunning) {
-        // ── Process ALL deferred debugger ops (between frames, before anything touches the DAG) ──
+        // ── Process deferred debugger ops (between frames, before DAG evaluation) ──
         {
             sol::optional<sol::function> fn = mLua["_dbg_process_pending"];
             if (fn) (*fn)();
@@ -722,6 +748,12 @@ void StudioApp::run() {
             }
         }
 
+        // NOTE: Do NOT call _dbg_process_pending() here — even after the node update
+        // loop completes, the Animator may hold internal references that get invalidated
+        // by node creation/deletion. The ONLY safe place is at the TOP of the main loop.
+        // Test WL(3) accounts for this: op queued frame N → processed frame N+1 step 1
+        // → test resumes frame N+3 step 4.
+
         // NOTE: Compositors are NOT applied in Studio Mode (FBO corruption with ImGui).
         // They are applied in Performance Mode only, via PerformanceModePanel::applyCompositorChain().
 
@@ -789,6 +821,26 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
             }
             return;
         }
+        if (evt.key.key == SDLK_F11) {
+            if (mEngine && mEngine->isOutputOpen()) {
+                mEngine->toggleOutputFullscreen();
+            }
+            return;
+        }
+        // +/- : BPM up/down — Ctrl held: ±5, plain: ±1
+        {
+            const float bpmStep = (evt.key.mod & SDL_KMOD_CTRL) ? 5.0f : 1.0f;
+            if (evt.key.key == SDLK_PLUS || evt.key.key == SDLK_KP_PLUS ||
+                evt.key.key == SDLK_EQUALS) {
+                if (mTimelinePanel) mTimelinePanel->changeBPM(+bpmStep);
+                return;
+            }
+            if (evt.key.key == SDLK_MINUS || evt.key.key == SDLK_KP_MINUS) {
+                if (mTimelinePanel) mTimelinePanel->changeBPM(-bpmStep);
+                return;
+            }
+        }
+
         bool ctrl = (evt.key.mod & SDL_KMOD_CTRL) != 0;
         if (ctrl && evt.key.key == SDLK_S) {
             if (mProjectPath.empty()) {
@@ -813,7 +865,7 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         if (ctrl && evt.key.key == SDLK_N) {
             mProjectPath.clear();
             mProjectDirty = false;
-            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
+            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.3");
             return;
         }
         if (ctrl && evt.key.key == SDLK_O) {
@@ -962,10 +1014,10 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
 }
 
 void StudioApp::renderFrame() {
-    // Process deferred debugger operations (safe context — not inside Lua callback)
+    // Process deferred debugger operations (v3.2.5 original position — safe between ImGui frames)
     mLua.safe_script("if _dbg_process_pending then _dbg_process_pending() end", sol::script_pass_on_error);
 
-    // Process deferred deletions from DeleteNodeCommand (in namespace bbfx)
+    // Process deferred deletions from DeleteNodeCommand (v3.2.5 original position)
     {
         if (!bbfx::gPendingDeletes.empty()) {
             auto names = std::move(bbfx::gPendingDeletes);
@@ -992,12 +1044,9 @@ void StudioApp::renderFrame() {
                         if (camCtrl && camCtrl->getLockTarget() == soNode->getSceneNode())
                             camCtrl->setOrbitLockTarget(nullptr);
 
-                        // Clear Lua _sceneNodes reference to prevent dangling pointer
-                        // Also nil any cached _rotateTarget that points to this node
                         if (mLua["_sceneNodes"].valid()) {
                             sol::object sn = mLua["_sceneNodes"][n];
                             mLua["_sceneNodes"][n] = sol::nil;
-                            // Nil any global that cached this SceneNode pointer
                             if (sn.valid() && mLua["_rotateTarget"].valid()) {
                                 if (sn == mLua["_rotateTarget"])
                                     mLua["_rotateTarget"] = sol::nil;
@@ -1006,13 +1055,11 @@ void StudioApp::renderFrame() {
                     }
                 }
 
-                // Full removal: graph edges + ports + name map + queues
                 animator->removeNode(node);
                 try { node->cleanup(); } catch (...) {}
                 delete node;
             }
 
-            // Sync node editor visuals
             if (mNodeEditorPanel) mNodeEditorPanel->syncFromDAG();
         }
     }
@@ -1121,7 +1168,7 @@ void StudioApp::renderMenuBar() {
             }
             mProjectPath.clear();
             mProjectDirty = false;
-            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.2");
+            SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.3");
             std::cout << "[Studio] New project — DAG cleared" << std::endl;
         }
         if (ImGui::MenuItem("Open...", "Ctrl+O")) {
@@ -1190,6 +1237,7 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Shader Gallery",  nullptr, &mShowShaderGallery);
         ImGui::MenuItem("Material Editor", nullptr, &mShowMaterialEditor);
         ImGui::MenuItem("Undo History",   nullptr, &mShowUndoHistory);
+        ImGui::MenuItem("Output",         nullptr, &mShowOutput);
         if (mTestEngine && ImGui::MenuItem("Test Engine UI")) {
             ImGuiTestEngine_ShowTestEngineWindows(mTestEngine, nullptr);
         }
@@ -1217,6 +1265,65 @@ void StudioApp::renderMenuBar() {
                 if (mViewportPanel)
                     mViewportPanel->invalidateSize();
             }
+        }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Connect")) {
+        ImGui::MenuItem("MIDI Activity",  nullptr, &mShowMidiActivity);
+        ImGui::MenuItem("MIDI Mapping",   nullptr, &mShowMidiMapping);
+        ImGui::Separator();
+        ImGui::MenuItem("OSC Browser",    nullptr, &mShowOscBrowser);
+        ImGui::Separator();
+        // Load MIDI mapping preset
+        if (ImGui::BeginMenu("Load Mapping Preset")) {
+            namespace fs = std::filesystem;
+            std::string mappingsDir = "data/mappings";
+            if (fs::exists(mappingsDir) && fs::is_directory(mappingsDir)) {
+                for (auto& entry : fs::directory_iterator(mappingsDir)) {
+                    if (entry.path().extension() == ".bbfx-mapping") {
+                        std::string name = entry.path().stem().string();
+                        if (ImGui::MenuItem(name.c_str())) {
+                            try {
+                                std::ifstream ifs(entry.path().string());
+                                if (ifs.is_open()) {
+                                    nlohmann::json mj = nlohmann::json::parse(ifs);
+                                    MidiLearnManager::instance().fromJson(mj);
+                                    std::cout << "[Connect] Loaded mapping: " << name << std::endl;
+                                }
+                            } catch (const std::exception& e) {
+                                std::cerr << "[Connect] Failed to load mapping: " << e.what() << std::endl;
+                            }
+                        }
+                    }
+                }
+            } else {
+                ImGui::TextDisabled("(no mappings found)");
+            }
+            ImGui::EndMenu();
+        }
+        // Save current MIDI mapping as preset
+        if (ImGui::MenuItem("Save Mapping As...")) {
+            auto& bindings = MidiLearnManager::instance().getBindings();
+            if (!bindings.empty()) {
+                static const char* filter = "BBFx Mapping (*.bbfx-mapping)\0*.bbfx-mapping\0";
+                auto savePath = saveFileDialog(mEngine->getSDLWindow(), filter,
+                    "Save MIDI Mapping", "mapping.bbfx-mapping");
+                if (!savePath.empty()) {
+                    try {
+                        std::ofstream ofs(savePath);
+                        ofs << MidiLearnManager::instance().toJson().dump(2);
+                        std::cout << "[Connect] Saved mapping: " << savePath << std::endl;
+                    } catch (const std::exception& e) {
+                        std::cerr << "[Connect] Save failed: " << e.what() << std::endl;
+                    }
+                }
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Clear All Bindings")) {
+            MidiLearnManager::instance().getBindings().clear();
+            std::cout << "[Connect] All MIDI bindings cleared" << std::endl;
         }
         ImGui::EndMenu();
     }
@@ -1266,6 +1373,10 @@ void StudioApp::renderPanels() {
     if (mShowShaderGallery && mShaderGalleryPanel) mShaderGalleryPanel->render();
     if (mShowMaterialEditor && mMaterialEditorPanel) mMaterialEditorPanel->render();
     if (mShowUndoHistory && mUndoHistoryPanel) mUndoHistoryPanel->render();
+    if (mShowMidiActivity && mMidiActivityPanel) mMidiActivityPanel->render();
+    if (mShowMidiMapping && mMidiMappingPanel) mMidiMappingPanel->render();
+    if (mShowOutput && mOutputPanel) mOutputPanel->render(mEngine.get());
+    if (mShowOscBrowser && mOscBrowserPanel) mOscBrowserPanel->render();
 
     // Update shader/material preview renderer
     if (mPreviewRenderer) mPreviewRenderer->update(ImGui::GetIO().DeltaTime);
@@ -1310,7 +1421,7 @@ void StudioApp::renderPanels() {
         ImGui::SameLine(500);
 
         // Version
-        ImGui::TextDisabled("v3.2.5");
+        ImGui::TextDisabled("v3.3.0");
 
         ImGui::End();
         ImGui::PopStyleVar();
@@ -1326,6 +1437,7 @@ void StudioApp::renderPanels() {
     renderAboutDialog();
     renderShortcutsDialog();
     renderSettingsDialog();
+    renderRecoveryDialog();
     renderSplashScreen();
 }
 
@@ -1378,11 +1490,19 @@ void StudioApp::saveProject(const std::string& path) {
                 state.triggerPages[p][i].action = pages[p][i].action;
                 state.triggerPages[p][i].momentary = pages[p][i].momentary;
                 state.triggerPages[p][i].hue = pages[p][i].hue;
+                state.triggerPages[p][i].macroActions = pages[p][i].macroActions;
             }
         }
     }
     if (mCompositorStackPanel) {
         state.compositorStack = mCompositorStackPanel->getStackOrder();
+    }
+
+    // Chord snapshots
+    if (mPerformanceModePanel) {
+        for (auto& [name, snap] : mPerformanceModePanel->getChordSnapshots()) {
+            state.chordSnapshots[name] = snap.getData();
+        }
     }
 
     if (mSerializer.save(path, state)) {
@@ -1419,6 +1539,15 @@ void StudioApp::loadProject(const std::string& path) {
         mRecentProjects.insert(mRecentProjects.begin(), path);
         if (mRecentProjects.size() > 10) mRecentProjects.resize(10);
         SDL_SetWindowTitle(mEngine->getSDLWindow(), ("BBFx Studio — " + path).c_str());
+        // Persist last project for auto-reload on next startup (skip built-in templates)
+        if (path.find("data/templates/") == std::string::npos) {
+            auto& settings = SettingsManager::instance();
+            auto s = settings.get();
+            s.lastProjectPath = path;
+            s.recentProjects = mRecentProjects;
+            settings.set(s);
+            settings.save();
+        }
 
         // Restore node positions:
         // - Normal/project load: always apply project positions
@@ -1470,12 +1599,30 @@ void StudioApp::loadProject(const std::string& path) {
                         pages[p][i].action = state.triggerPages[p][i].action;
                         pages[p][i].momentary = state.triggerPages[p][i].momentary;
                         pages[p][i].hue = state.triggerPages[p][i].hue;
+                        pages[p][i].macroActions = state.triggerPages[p][i].macroActions;
                     }
                 }
             }
         }
         if (mCompositorStackPanel && !state.compositorStack.empty()) {
             mCompositorStackPanel->setStackOrder(state.compositorStack);
+        }
+
+        // Restore chord snapshots
+        if (mPerformanceModePanel && !state.chordSnapshots.empty()) {
+            std::map<std::string, DagSnapshot> snaps;
+            for (auto& [name, data] : state.chordSnapshots) {
+                DagSnapshot snap;
+                snap.setData(data);
+                snaps[name] = snap;
+            }
+            mPerformanceModePanel->setChordSnapshots(snaps);
+        }
+
+        // Rebuild fader/trigger MIDI bindings from MidiLearnManager (single source of truth)
+        if (mPerformanceModePanel) {
+            mPerformanceModePanel->syncMidiBindingsFromManager();
+            mPerformanceModePanel->resetRestSnapshot(); // recapture rest state from loaded project
         }
 
         std::cout << "[Studio] Loaded: " << path << std::endl;
@@ -1506,6 +1653,34 @@ void StudioApp::tickAutoSave() {
                 autoState.chords.push_back(cd);
             }
             autoState.automation = mTimelinePanel->getAutomation();
+        }
+        // Performance mode data (same as saveProject)
+        if (mPerformanceModePanel) {
+            auto& faders = mPerformanceModePanel->getFaders();
+            for (int i = 0; i < 8; ++i) {
+                autoState.faders[i].nodeName = faders[i].nodeName;
+                autoState.faders[i].portName = faders[i].portName;
+                autoState.faders[i].minVal = faders[i].minVal;
+                autoState.faders[i].maxVal = faders[i].maxVal;
+            }
+            auto& pages = mPerformanceModePanel->getTriggerPages();
+            autoState.triggerPages.resize(pages.size());
+            for (size_t p = 0; p < pages.size(); ++p) {
+                autoState.triggerPages[p].resize(16);
+                for (int i = 0; i < 16; ++i) {
+                    autoState.triggerPages[p][i].label = pages[p][i].label;
+                    autoState.triggerPages[p][i].action = pages[p][i].action;
+                    autoState.triggerPages[p][i].momentary = pages[p][i].momentary;
+                    autoState.triggerPages[p][i].hue = pages[p][i].hue;
+                    autoState.triggerPages[p][i].macroActions = pages[p][i].macroActions;
+                }
+            }
+            for (auto& [name, snap] : mPerformanceModePanel->getChordSnapshots()) {
+                autoState.chordSnapshots[name] = snap.getData();
+            }
+        }
+        if (mCompositorStackPanel) {
+            autoState.compositorStack = mCompositorStackPanel->getStackOrder();
         }
         if (mSerializer.save(autoPath, autoState)) {
             std::cout << "[Studio] Auto-saved → " << autoPath << std::endl;
@@ -1570,7 +1745,7 @@ void StudioApp::initNodeTypeRegistry() {
     reg.registerType({"PerlinFxNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
         [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             std::string clonePrefix = uniqueName("studio_perlin");
-            auto* node = new PerlinFxNode("ogrehead.mesh", clonePrefix);
+            auto* node = new PerlinFxNode("ogrehead.mesh", clonePrefix, name);
             // Clones are created dynamically in resolveTargets() when entity links are made
             auto* animator = Animator::instance();
             if (animator) {
@@ -1625,7 +1800,7 @@ void StudioApp::initNodeTypeRegistry() {
     reg.registerType({"TextureBlitterNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
         [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             std::string texName = uniqueName("studio_blittex");
-            auto* node = new TextureBlitterNode(texName);
+            auto* node = new TextureBlitterNode(texName, name);
             auto* animator = Animator::instance();
             if (animator) {
                 for (auto& [pname, port] : node->getInputs()) animator->add(port);
@@ -1641,7 +1816,7 @@ void StudioApp::initNodeTypeRegistry() {
             auto* sceneMgr = Engine::instance()->getSceneManager();
             if (!sceneMgr) return nullptr;
             std::string cloneName = uniqueName("studio_wave");
-            auto* node = new WaveVertexShader("ogrehead.mesh", cloneName);
+            auto* node = new WaveVertexShader("ogrehead.mesh", cloneName, name);
             // Entity creation is deferred — the clone mesh is prepared in frameStarted().
             // We store the entity/scenenode names for deferred creation (same pattern as PerlinFxNode).
             node->setStudioNames(uniqueName("studio_ent"), uniqueName("studio_sn"));
@@ -1666,28 +1841,33 @@ void StudioApp::initNodeTypeRegistry() {
         [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             auto* sceneMgr = Engine::instance()->getSceneManager();
             if (!sceneMgr) return nullptr;
-            // Get materials of the existing demo ogrehead — apply color to ALL sub-entities
-            std::string firstMat;
+            // Find the first SceneObjectNode's entity to get materials
             Ogre::Entity* targetEntity = nullptr;
-            if (sceneMgr->hasEntity("StudioHead")) {
-                targetEntity = sceneMgr->getEntity("StudioHead");
-            } else {
-                targetEntity = sceneMgr->createEntity(uniqueName("studio_ent"), "ogrehead.mesh");
-                auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(uniqueName("studio_sn"));
-                sceneNode->attachObject(targetEntity);
+            auto* animator = Animator::instance();
+            if (animator) {
+                for (auto& nodeName : animator->getRegisteredNodeNames()) {
+                    auto* node = animator->getRegisteredNode(nodeName);
+                    if (node && node->getTypeName() == "SceneObjectNode") {
+                        auto* soNode = dynamic_cast<SceneObjectNode*>(node);
+                        if (soNode && soNode->getEntity()) {
+                            targetEntity = soNode->getEntity();
+                            if (targetEntity) break;
+                        }
+                    }
+                }
             }
-            firstMat = targetEntity->getSubEntity(0)->getMaterialName();
-            auto* node = new ColorShiftNode(firstMat);
-            // Add all other sub-entity materials so color applies everywhere
+            if (!targetEntity) return nullptr; // No SceneObjectNode in scene
+            std::string firstMat = targetEntity->getSubEntity(0)->getMaterialName();
+            auto* node = new ColorShiftNode(firstMat, name);
             for (unsigned i = 1; i < targetEntity->getNumSubEntities(); i++) {
                 node->addMaterial(targetEntity->getSubEntity(i)->getMaterialName());
             }
-            auto* animator = Animator::instance();
-            if (animator) {
-                for (auto& [pname, port] : node->getInputs()) animator->add(port);
-                for (auto& [pname, port] : node->getOutputs()) animator->add(port);
-                node->setListener(animator);
-                animator->registerNode(node);
+            auto* anim2 = Animator::instance();
+            if (anim2) {
+                for (auto& [pname, port] : node->getInputs()) anim2->add(port);
+                for (auto& [pname, port] : node->getOutputs()) anim2->add(port);
+                node->setListener(anim2);
+                anim2->registerNode(node);
             }
             return node;
         }});
@@ -2008,6 +2188,62 @@ void StudioApp::initNodeTypeRegistry() {
             registerInAnimator(node);
             return node;
         }});
+
+    // MIDI nodes (v3.3)
+    reg.registerType({"MidiInputNode", "Input", {0.9f, 0.2f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MidiInputNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"OscInputNode", "Input", {0.2f, 0.8f, 0.5f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new OscInputNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"OscOutputNode", "Output", {0.5f, 0.8f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new OscOutputNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"MidiOutputNode", "Output", {0.6f, 0.2f, 0.9f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MidiOutputNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"NdiOutputNode", "Output", {0.2f, 0.7f, 0.9f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new NdiOutputNode(name);
+            registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
 }
 
 // ── Status bar ──────────────────────────────────────────────────────────────
@@ -2073,6 +2309,33 @@ void StudioApp::renderStatusBar() {
             ImGui::TextDisabled("Audio: Off");
         }
 
+        // MIDI indicator
+        {
+            auto* midiMgr = MidiDeviceManager::instance();
+            ImGui::SameLine();
+            ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+            ImGui::SameLine();
+            if (midiMgr && midiMgr->getInputDeviceCount() > 0) {
+                int bindingCount = static_cast<int>(MidiLearnManager::instance().getBindings().size());
+                ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "MIDI: %d dev, %d bind",
+                                   midiMgr->getInputDeviceCount(), bindingCount);
+            } else {
+                ImGui::TextDisabled("MIDI: Off");
+            }
+        }
+
+        // Output window indicator
+        {
+            ImGui::SameLine();
+            ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+            ImGui::SameLine();
+            if (mEngine && mEngine->isOutputOpen()) {
+                ImGui::TextColored({0.3f, 0.8f, 1.0f, 1.0f}, "Output: On");
+            } else {
+                ImGui::TextDisabled("Output: Off");
+            }
+        }
+
         // Project dirty indicator
         if (mProjectDirty) {
             ImGui::SameLine();
@@ -2096,7 +2359,7 @@ void StudioApp::renderAboutDialog() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
     if (ImGui::BeginPopupModal("About BBFx Studio", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("BBFx Studio v3.2.0");
+        ImGui::Text("BBFx Studio v3.3.0");
         ImGui::Separator();
         ImGui::Text("Real-time 3D animation and effects engine");
         ImGui::Spacing();
@@ -2155,6 +2418,19 @@ void StudioApp::renderShortcutsDialog() {
             row("1-9",     "Restore bookmark (Node Editor)");
             row("Delete",  "Delete selected node/link");
             row("Escape",  "Exit Performance Mode / Quit");
+            row("F11",     "Toggle output fullscreen");
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored({0.0f, 1.0f, 1.0f, 1.0f}, "--- Connect ---");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled("");
+
+            row("M (fader)", "MIDI Learn for fader");
+            row("Right-click trig", "MIDI Learn for trigger");
+            row("Right-click port", "MIDI Learn for DAG port");
+            row("1-9 / Q-W-E-R-T", "Trigger shortcuts (F5 mode)");
+            row("Tab",      "Cycle trigger pages (F5 mode)");
 
             ImGui::EndTable();
         }
@@ -2167,6 +2443,46 @@ void StudioApp::renderShortcutsDialog() {
 }
 
 // ── Settings dialog ─────────────────────────────────────────────────────────
+
+void StudioApp::renderRecoveryDialog() {
+    if (mShowRecoveryDialog) {
+        ImGui::OpenPopup("Recover Autosave");
+        mShowRecoveryDialog = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
+    if (ImGui::BeginPopupModal("Recover Autosave", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored({1.0f, 0.8f, 0.0f, 1.0f}, "Previous session may have crashed.");
+        ImGui::Spacing();
+        ImGui::Text("An autosave was found that is more recent than your last save.");
+        ImGui::Text("File: %s", mRecoveryAutosavePath.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Recover Autosave", {180, 0})) {
+            loadProject(mRecoveryAutosavePath);
+            std::cout << "[Studio] Recovered from autosave: " << mRecoveryAutosavePath << std::endl;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Ignore", {100, 0})) {
+            std::cout << "[Studio] Autosave recovery declined" << std::endl;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Delete Autosave", {140, 0})) {
+            try {
+                std::filesystem::remove(mRecoveryAutosavePath);
+                std::cout << "[Studio] Autosave deleted: " << mRecoveryAutosavePath << std::endl;
+            } catch (...) {}
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
 
 void StudioApp::renderSettingsDialog() {
     if (mShowSettings) {
@@ -2374,7 +2690,7 @@ void StudioApp::renderSplashScreen() {
     ImGui::Begin("BBFx Studio", &mShowSplash,
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove);
 
-    ImGui::TextColored({0.0f, 1.0f, 0.8f, 1.0f}, "BBFx Studio v3.2.5");
+    ImGui::TextColored({0.0f, 1.0f, 0.8f, 1.0f}, "BBFx Studio v3.3.0 Connect");
     ImGui::TextDisabled("Performance Pro & Final Polish");
     ImGui::Separator();
 

@@ -32,15 +32,15 @@ void DagSnapshot::apply(const DagSnapshot& a, const DagSnapshot& b, float t,
             // Key in both: lerp
             result[key] = valA * (1.0f - t) + itB->second * t;
         } else {
-            // Key only in A: hold A until t > 0.5 then snap to 0
-            result[key] = (t < 0.5f) ? valA : 0.0f;
+            // Key only in A: keep A's value (no snap to 0)
+            result[key] = valA;
         }
     }
 
     for (auto& [key, valB] : b.mData) {
         if (a.mData.find(key) == a.mData.end()) {
-            // Key only in B: 0 until t > 0.5 then snap to B
-            result[key] = (t < 0.5f) ? 0.0f : valB;
+            // Key only in B: keep B's value (no snap from 0)
+            result[key] = valB;
         }
     }
 

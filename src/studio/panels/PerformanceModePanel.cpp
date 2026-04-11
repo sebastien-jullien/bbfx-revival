@@ -9,6 +9,9 @@
 #include "../../audio/BeatDetector.h"
 
 #include "../../core/ParamSpec.h"
+#include "../../midi/MidiDeviceManager.h"
+#include "../../midi/MidiMessage.h"
+#include "../../midi/MidiLearnManager.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -23,6 +26,44 @@
 #include <cstring>
 
 namespace bbfx {
+
+/// Generate a human-readable auto-label for a trigger action (max ~10 chars)
+static std::string autoLabel(const std::string& action) {
+    if (action.empty()) return "+";
+    auto cp = action.find(':');
+    if (cp == std::string::npos) return action.substr(0, 10);
+    std::string prefix = action.substr(0, cp);
+    std::string target = action.substr(cp + 1);
+    if (prefix == "enable") {
+        std::string l = "En " + target;
+        return l.size() > 10 ? l.substr(0, 9) + "." : l;
+    }
+    if (prefix == "disable") {
+        std::string l = "Di " + target;
+        return l.size() > 10 ? l.substr(0, 9) + "." : l;
+    }
+    if (prefix == "chord") return target.size() > 10 ? target.substr(0, 9) + "." : target;
+    if (prefix == "preset") {
+        std::string l = "P:" + target;
+        return l.size() > 10 ? l.substr(0, 9) + "." : l;
+    }
+    if (prefix == "compositor") {
+        std::string l = "C:" + target;
+        return l.size() > 10 ? l.substr(0, 9) + "." : l;
+    }
+    if (prefix == "set_param") {
+        auto dotPos = target.find('.');
+        if (dotPos != std::string::npos) {
+            auto eqPos = target.find('=', dotPos);
+            std::string port = target.substr(dotPos + 1, eqPos != std::string::npos ? eqPos - dotPos - 1 : std::string::npos);
+            std::string val = eqPos != std::string::npos ? target.substr(eqPos) : "";
+            std::string l = "S:" + port + val;
+            return l.size() > 10 ? l.substr(0, 9) + "." : l;
+        }
+        return "S:" + target.substr(0, 8);
+    }
+    return action.substr(0, 10);
+}
 
 PerformanceModePanel::PerformanceModePanel(sol::state& lua) : mLua(lua) {
     // Initialize first trigger page with default chord names
@@ -41,30 +82,18 @@ PerformanceModePanel::PerformanceModePanel(sol::state& lua) : mLua(lua) {
     mTriggerPages.push_back(page1);
 }
 
-void PerformanceModePanel::onLearnParam(const std::string& nodeName, const std::string& portName) {
-    if (mLearnFaderIndex < 0 || mLearnFaderIndex >= 8) return;
-    auto& slot = mFaders[mLearnFaderIndex];
-    slot.nodeName = nodeName;
-    slot.portName = portName;
-    slot.value = 0.0f;
-    slot.minVal = 0.0f;
-    slot.maxVal = 1.0f;
-    // Try to read min/max from ParamSpec
-    auto* animator = Animator::instance();
-    if (animator) {
-        auto* node = animator->getRegisteredNode(nodeName);
-        if (node && node->getParamSpec()) {
-            auto* p = node->getParamSpec()->getParam(portName);
-            if (p && p->type == ParamType::FLOAT) {
-                slot.minVal = p->minVal;
-                slot.maxVal = p->maxVal;
-            }
-        }
-    }
-    mLearnFaderIndex = -1;
-}
 
 void PerformanceModePanel::render(StudioEngine* engine) {
+    // Capture rest snapshot on first render (for PANIC restore)
+    if (!mRestCaptured) {
+        auto* animator = Animator::instance();
+        if (animator) {
+            mRestSnapshot.capture(*animator);
+            mRestCaptured = true;
+            std::cout << "[PerfMode] Rest snapshot captured (" << mRestSnapshot.getData().size() << " ports)" << std::endl;
+        }
+    }
+
     // Fill the entire screen with the OGRE viewport
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
@@ -123,6 +152,8 @@ void PerformanceModePanel::render(StudioEngine* engine) {
     renderTriggerGrid();
     ImGui::Separator();
     renderFaders();
+    ImGui::Separator();
+    renderCrossfader();
     ImGui::EndChild();
 
     // Bottom overlays (drawn over the viewport)
@@ -155,9 +186,92 @@ void PerformanceModePanel::render(StudioEngine* engine) {
         }
     }
 
-    // Crossfader A/B (above panic button)
-    ImGui::SetCursorPos({10, viewH - 90});
-    renderCrossfader();
+    // ── MIDI poll: update faders and triggers from MIDI messages (v3.3) ─────
+    {
+        auto* midiMgr = MidiDeviceManager::instance();
+        if (midiMgr) {
+            auto midiMsgs = midiMgr->poll();
+
+            // Feed MidiLearnManager first (captures learn if active)
+            auto& mlm = MidiLearnManager::instance();
+            if (mlm.isLearning()) {
+                size_t bindingsBefore = mlm.getBindings().size();
+                mlm.processMessages(midiMsgs);
+                // If a new binding was created, sync all fader/trigger MIDI slots
+                if (mlm.getBindings().size() > bindingsBefore) {
+                    syncMidiBindingsFromManager();
+                }
+            }
+
+            for (auto& msg : midiMsgs) {
+                uint8_t type = msg.type();
+
+                // CC → fader bindings
+                if (type == MidiMessage::ControlChange) {
+                    for (int fi = 0; fi < 8; ++fi) {
+                        auto& fader = mFaders[fi];
+                        if (fader.midiCC == msg.data1 &&
+                            (fader.midiChannel == -1 || fader.midiChannel == msg.channel) &&
+                            (fader.midiDeviceId == -1 || fader.midiDeviceId == msg.deviceId)) {
+                            float normalized = msg.data2 / 127.0f;
+                            fader.value = fader.minVal + normalized * (fader.maxVal - fader.minVal);
+                            // Push to DAG
+                            auto* animator = Animator::instance();
+                            if (animator && !fader.nodeName.empty()) {
+                                auto* node = animator->getRegisteredNode(fader.nodeName);
+                                if (node) {
+                                    auto& inputs = node->getInputs();
+                                    auto it = inputs.find(fader.portName);
+                                    if (it != inputs.end()) it->second->setValue(fader.value);
+                                }
+                            }
+                            // Record if recording
+                            if (mIsRecording && mRecordValueCb)
+                                mRecordValueCb(fader.nodeName, fader.portName, fader.value, mCurrentBeat);
+                        }
+                    }
+
+                    // Also apply MidiLearnManager bindings for CC → DAG port
+                    auto* binding = mlm.findBindingForCC(msg.data1, msg.channel);
+                    if (binding && binding->target.type == "port" &&
+                        !binding->target.nodeName.empty() && !binding->target.portName.empty()) {
+                        float normalized = msg.data2 / 127.0f;
+                        float val = binding->min + normalized * (binding->max - binding->min);
+                        auto* animator = Animator::instance();
+                        if (animator) {
+                            auto* node = animator->getRegisteredNode(binding->target.nodeName);
+                            if (node) {
+                                auto& inputs = node->getInputs();
+                                auto it = inputs.find(binding->target.portName);
+                                if (it != inputs.end()) it->second->setValue(val);
+                            }
+                        }
+                    }
+                }
+
+                // Note → trigger bindings
+                if (type == MidiMessage::NoteOn || type == MidiMessage::NoteOff) {
+                    bool noteOn = (type == MidiMessage::NoteOn && msg.data2 > 0);
+                    if (!mTriggerPages.empty()) {
+                        auto& page = mTriggerPages[mCurrentTriggerPage];
+                        for (int ti = 0; ti < 16; ++ti) {
+                            auto& trig = page[ti];
+                            if (trig.midiNote == msg.data1 &&
+                                (trig.midiChannel == -1 || trig.midiChannel == msg.channel)) {
+                                if (noteOn && !trig.active) {
+                                    trig.active = true;
+                                    activateTrigger(trig);
+                                } else if (!noteOn && trig.momentary && trig.active) {
+                                    trig.active = false;
+                                    deactivateTrigger(trig);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Panic button (bottom center of viewport)
     ImGui::SetCursorPos({viewW / 2 - 60, viewH - 50});
@@ -177,7 +291,8 @@ void PerformanceModePanel::render(StudioEngine* engine) {
         for (int i = 0; i < 9; ++i) {
             if (ImGui::IsKeyPressed(numKeys[i])) {
                 page[i].active = !page[i].active;
-                executeTriggerAction(page[i].action);
+                if (page[i].active) activateTrigger(page[i]);
+                else deactivateTrigger(page[i]);
             }
         }
         ImGuiKey qwerKeys[] = {ImGuiKey_Q,ImGuiKey_W,ImGuiKey_E,ImGuiKey_R,ImGuiKey_T};
@@ -186,7 +301,8 @@ void PerformanceModePanel::render(StudioEngine* engine) {
                 int idx = 9 + i;
                 if (idx < 16) {
                     page[idx].active = !page[idx].active;
-                    executeTriggerAction(page[idx].action);
+                    if (page[idx].active) activateTrigger(page[idx]);
+                    else deactivateTrigger(page[idx]);
                 }
             }
         }
@@ -258,6 +374,15 @@ void PerformanceModePanel::renderTriggerGrid() {
             auto cp = trig.action.find(':');
             if (cp != std::string::npos) prefix = trig.action.substr(0, cp);
         }
+        // Chord snapshot indicator (cyan dot top-right)
+        if (prefix == "chord") {
+            auto chordTarget = trig.action.substr(trig.action.find(':') + 1);
+            if (hasChordSnapshot(chordTarget)) {
+                ImGui::GetWindowDrawList()->AddCircleFilled(
+                    {ImGui::GetCursorScreenPos().x + 52, ImGui::GetCursorScreenPos().y + 4}, 4.0f,
+                    IM_COL32(0, 220, 220, 255));
+            }
+        }
         if (prefix == "enable" || prefix == "disable") {
             auto target = trig.action.substr(trig.action.find(':') + 1);
             if (animator) {
@@ -276,28 +401,28 @@ void PerformanceModePanel::renderTriggerGrid() {
 
         std::string lbl = trig.label + "##tg" + std::to_string(i);
         ImGui::Button(lbl.c_str(), {56, 48});
+        // Tooltip with full action description
+        if (ImGui::IsItemHovered() && !trig.action.empty()) {
+            ImGui::SetTooltip("%s", trig.action.c_str());
+        }
         if (trig.momentary) {
             // Momentary: active while button held
             bool pressed = ImGui::IsItemActive();
             if (pressed && !trig.active) {
                 trig.active = true;
-                executeTriggerAction(trig.action);
+                activateTrigger(trig);
             } else if (!pressed && trig.active) {
                 trig.active = false;
-                if (trig.action.find("enable:") == 0) {
-                    executeTriggerAction("disable:" + trig.action.substr(7));
-                } else if (trig.action.find("disable:") == 0) {
-                    executeTriggerAction("enable:" + trig.action.substr(8));
-                }
+                deactivateTrigger(trig);
             }
         } else {
             // Toggle: flip on click
             if (ImGui::IsItemClicked()) {
                 trig.active = !trig.active;
-                if (!trig.macroActions.empty()) {
-                    mMacroRunner.start(trig.macroActions);
+                if (trig.active) {
+                    activateTrigger(trig);
                 } else {
-                    executeTriggerAction(trig.action);
+                    deactivateTrigger(trig);
                 }
             }
         }
@@ -315,7 +440,7 @@ void PerformanceModePanel::renderTriggerGrid() {
                     for (auto& name : animator->getRegisteredNodeNames()) {
                         if (ImGui::MenuItem(name.c_str())) {
                             trig.action = "enable:" + name;
-                            trig.label = "En:" + name.substr(0, std::min((size_t)4, name.size()));
+                            trig.label = autoLabel(trig.action);
                         }
                     }
                     ImGui::EndMenu();
@@ -324,11 +449,84 @@ void PerformanceModePanel::renderTriggerGrid() {
                     for (auto& name : animator->getRegisteredNodeNames()) {
                         if (ImGui::MenuItem(name.c_str())) {
                             trig.action = "disable:" + name;
-                            trig.label = "Di:" + name.substr(0, std::min((size_t)4, name.size()));
+                            trig.label = autoLabel(trig.action);
                         }
                     }
                     ImGui::EndMenu();
                 }
+                // Toggle Compositor sub-menu
+                if (ImGui::BeginMenu("Toggle Compositor")) {
+                    for (auto& name : animator->getRegisteredNodeNames()) {
+                        auto* node = animator->getRegisteredNode(name);
+                        if (node && node->getTypeName() == "CompositorNode") {
+                            if (ImGui::MenuItem(name.c_str())) {
+                                trig.action = "compositor:" + name;
+                                trig.label = autoLabel(trig.action);
+                            }
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                // Set Param sub-menu
+                if (ImGui::BeginMenu("Set Param")) {
+                    for (auto& nodeName : animator->getRegisteredNodeNames()) {
+                        auto* node = animator->getRegisteredNode(nodeName);
+                        if (!node) continue;
+                        if (ImGui::BeginMenu(nodeName.c_str())) {
+                            for (auto& [portName, port] : node->getInputs()) {
+                                ImGui::PushID((nodeName + "." + portName).c_str());
+                                char portLabel[64];
+                                snprintf(portLabel, sizeof(portLabel), "%s = %.2f", portName.c_str(), port->getValue());
+                                if (ImGui::BeginMenu(portLabel)) {
+                                    // Use per-port static map to retain user edits across frames
+                                    static std::map<std::string, float> editValues;
+                                    // Safety cap: clear stale entries if map grows too large
+                                    if (editValues.size() > 64) editValues.clear();
+                                    std::string key = nodeName + "." + portName;
+                                    if (editValues.find(key) == editValues.end()) {
+                                        editValues[key] = port->getValue();
+                                    }
+                                    ImGui::SetNextItemWidth(100);
+                                    ImGui::InputFloat("Value", &editValues[key]);
+                                    if (ImGui::Button("Assign")) {
+                                        char valBuf[32];
+                                        snprintf(valBuf, sizeof(valBuf), "%.4g", editValues[key]);
+                                        trig.action = "set_param:" + nodeName + "." + portName + "=" + valBuf;
+                                        trig.label = autoLabel(trig.action);
+                                        editValues.erase(key);
+                                        ImGui::CloseCurrentPopup();
+                                    }
+                                    ImGui::SameLine();
+                                    if (ImGui::Button("Reset")) {
+                                        editValues[key] = port->getValue();
+                                    }
+                                    ImGui::EndMenu();
+                                }
+                                ImGui::PopID();
+                            }
+                            ImGui::EndMenu();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+            }
+            // Load Preset sub-menu
+            if (ImGui::BeginMenu("Load Preset")) {
+                try {
+                    std::string presetsDir = "lua/presets/";
+                    if (std::filesystem::exists(presetsDir)) {
+                        for (auto& entry : std::filesystem::directory_iterator(presetsDir)) {
+                            if (entry.path().extension() == ".lua") {
+                                std::string name = entry.path().stem().string();
+                                if (ImGui::MenuItem(name.c_str())) {
+                                    trig.action = "preset:" + name;
+                                    trig.label = autoLabel(trig.action);
+                                }
+                            }
+                        }
+                    }
+                } catch (...) {}
+                ImGui::EndMenu();
             }
             ImGui::Separator();
 
@@ -361,6 +559,49 @@ void PerformanceModePanel::renderTriggerGrid() {
                 ImGui::EndMenu();
             }
 
+            // Chord snapshot capture/clear (only for chord: triggers)
+            if (trig.action.rfind("chord:", 0) == 0) {
+                std::string chordName = trig.action.substr(6);
+                ImGui::Separator();
+                if (hasChordSnapshot(chordName)) {
+                    ImGui::TextDisabled("Snapshot: captured");
+                    if (ImGui::MenuItem("Clear Snapshot")) {
+                        removeChordSnapshot(chordName);
+                    }
+                } else {
+                    if (ImGui::MenuItem("Capture Current as Snapshot")) {
+                        captureChordSnapshot(chordName);
+                    }
+                }
+            }
+
+            ImGui::Separator();
+            // MIDI Learn for trigger
+            {
+                auto& mlm = MidiLearnManager::instance();
+                bool midiLearning = mlm.isLearning() &&
+                    mlm.getLearnTarget().type == "trigger" && mlm.getLearnTarget().index == i;
+                if (midiLearning) {
+                    if (ImGui::MenuItem("Cancel MIDI Learn")) {
+                        mlm.cancelLearn();
+                    }
+                } else {
+                    if (ImGui::MenuItem("MIDI Learn")) {
+                        MidiLearnTarget target;
+                        target.type = "trigger";
+                        target.index = i;
+                        mlm.startLearn(target);
+                    }
+                }
+                if (trig.midiNote >= 0) {
+                    ImGui::TextDisabled("MIDI: Note %d ch%d", trig.midiNote, trig.midiChannel);
+                    if (ImGui::MenuItem("Clear MIDI")) {
+                        trig.midiNote = -1;
+                        trig.midiChannel = -1;
+                        trig.midiDeviceId = -1;
+                    }
+                }
+            }
             ImGui::Separator();
             ImGui::SliderFloat("Hue", &trig.hue, 0.0f, 1.0f);
             ImGui::Checkbox("Momentary", &trig.momentary);
@@ -416,22 +657,64 @@ void PerformanceModePanel::renderFaders() {
 
         // Numeric value
         ImGui::Text("%.2f", slot.value);
-        // Label
-        std::string caption = slot.portName.empty() ? "---" :
-            (slot.nodeName.substr(0, std::min((size_t)6, slot.nodeName.size())) + "." + slot.portName);
-        ImGui::TextDisabled("%s", caption.c_str());
-        // Tooltip with full name
-        if (ImGui::IsItemHovered() && !slot.portName.empty()) {
-            ImGui::SetTooltip("%s / %s", slot.nodeName.c_str(), slot.portName.c_str());
+        // Label: full nodeName.portName (truncated with tooltip)
+        {
+            std::string caption = slot.portName.empty() ? "---" :
+                (slot.nodeName + "." + slot.portName);
+            float maxW = 44.0f; // match fader width
+            ImVec2 textSize = ImGui::CalcTextSize(caption.c_str());
+            if (textSize.x > maxW && !slot.portName.empty()) {
+                // Truncate with ellipsis
+                std::string truncated = caption;
+                while (truncated.size() > 3 && ImGui::CalcTextSize((truncated + "..").c_str()).x > maxW) {
+                    truncated.pop_back();
+                }
+                truncated += "..";
+                ImGui::TextDisabled("%s", truncated.c_str());
+            } else {
+                ImGui::TextDisabled("%s", caption.c_str());
+            }
+            if (ImGui::IsItemHovered() && !slot.portName.empty()) {
+                ImGui::SetTooltip("%s / %s", slot.nodeName.c_str(), slot.portName.c_str());
+            }
         }
-        // Learn button
-        bool isLearning = (mLearnFaderIndex == i);
-        if (isLearning) ImGui::PushStyleColor(ImGuiCol_Button, {1.0f, 0.3f, 0.0f, 1.0f});
-        if (ImGui::SmallButton(isLearning ? ("L##learn" + std::to_string(i)).c_str()
-                                          : ("L##learn" + std::to_string(i)).c_str())) {
-            mLearnFaderIndex = isLearning ? -1 : i;
+        // Port indicator (green if assigned, gray if empty)
+        {
+            bool assigned = !slot.portName.empty();
+            ImVec4 indicatorCol = assigned ? ImVec4(0.2f, 0.8f, 0.2f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, indicatorCol);
+            std::string shortPort = assigned ? slot.portName.substr(0, std::min((size_t)5, slot.portName.size())) : "---";
+            ImGui::TextUnformatted(shortPort.c_str());
+            ImGui::PopStyleColor();
+            if (assigned && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s / %s", slot.nodeName.c_str(), slot.portName.c_str());
+            }
         }
-        if (isLearning) ImGui::PopStyleColor();
+        // MIDI Learn button
+        ImGui::SameLine();
+        {
+            auto& mlm = MidiLearnManager::instance();
+            bool midiLearning = mlm.isLearning() &&
+                mlm.getLearnTarget().type == "fader" && mlm.getLearnTarget().index == i;
+            if (midiLearning) ImGui::PushStyleColor(ImGuiCol_Button, {1.0f, 0.0f, 1.0f, 1.0f});
+            if (ImGui::SmallButton(("M##midi" + std::to_string(i)).c_str())) {
+                if (midiLearning) {
+                    mlm.cancelLearn();
+                } else {
+                    MidiLearnTarget target;
+                    target.type = "fader";
+                    target.index = i;
+                    mlm.startLearn(target);
+                }
+            }
+            if (midiLearning) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) {
+                if (slot.midiCC >= 0)
+                    ImGui::SetTooltip("MIDI CC#%d ch%d", slot.midiCC, slot.midiChannel);
+                else
+                    ImGui::SetTooltip("MIDI Learn");
+            }
+        }
         ImGui::EndGroup();
 
         // Right-click context menu for port assignment
@@ -440,6 +723,39 @@ void PerformanceModePanel::renderFaders() {
             ImGui::OpenPopup(ctxId.c_str());
         }
         if (ImGui::BeginPopup(ctxId.c_str())) {
+            // Quick Assign: heuristic ports (amplitude, speed, etc.)
+            if (animator && ImGui::BeginMenu("Quick Assign")) {
+                static const char* heuristicNames[] = {
+                    "amplitude", "speed", "frequency", "scale", "intensity",
+                    "amount", "radius", "decay", "attack"
+                };
+                for (auto& nodeName : animator->getRegisteredNodeNames()) {
+                    auto* node = animator->getRegisteredNode(nodeName);
+                    if (!node || !node->getParamSpec()) continue;
+                    for (auto& param : node->getParamSpec()->getParams()) {
+                        if (param.type != ParamType::FLOAT) continue;
+                        std::string lowerName = param.name;
+                        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                        bool isHeuristic = false;
+                        for (auto* h : heuristicNames) {
+                            if (lowerName.find(h) != std::string::npos) { isHeuristic = true; break; }
+                        }
+                        if (!isHeuristic) continue;
+                        char menuLabel[128];
+                        snprintf(menuLabel, sizeof(menuLabel), "%s / %s (%.1f-%.1f)",
+                                 nodeName.c_str(), param.name.c_str(), param.minVal, param.maxVal);
+                        if (ImGui::MenuItem(menuLabel)) {
+                            slot.nodeName = nodeName;
+                            slot.portName = param.name;
+                            slot.minVal = param.minVal;
+                            slot.maxVal = param.maxVal;
+                            slot.value = param.floatVal;
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             ImGui::TextDisabled("Assign Port");
             if (animator) {
                 for (auto& name : animator->getRegisteredNodeNames()) {
@@ -451,6 +767,14 @@ void PerformanceModePanel::renderFaders() {
                                 slot.nodeName = name;
                                 slot.portName = portName;
                                 slot.value = port->getValue();
+                                // Try to set min/max from ParamSpec
+                                if (node->getParamSpec()) {
+                                    auto* p = node->getParamSpec()->getParam(portName);
+                                    if (p && p->type == ParamType::FLOAT) {
+                                        slot.minVal = p->minVal;
+                                        slot.maxVal = p->maxVal;
+                                    }
+                                }
                             }
                         }
                         ImGui::EndMenu();
@@ -462,6 +786,8 @@ void PerformanceModePanel::renderFaders() {
                 slot.nodeName.clear();
                 slot.portName.clear();
                 slot.value = 0.0f;
+                slot.minVal = 0.0f;
+                slot.maxVal = 1.0f;
             }
             ImGui::EndPopup();
         }
@@ -575,9 +901,24 @@ void PerformanceModePanel::renderPanicButton() {
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  {1.0f, 0.3f, 0.3f, 1.0f});
 
     if (ImGui::Button("PANIC", {120, 36})) {
-        // Reset all DAG port values to 0
         auto* animator = Animator::instance();
-        if (animator) {
+        if (animator && !mRestSnapshot.empty()) {
+            // Restore DAG to rest state
+            DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
+
+            // Reset fader values to rest snapshot
+            for (int i = 0; i < 8; ++i) {
+                if (!mFaders[i].nodeName.empty() && !mFaders[i].portName.empty()) {
+                    std::string key = mFaders[i].nodeName + "." + mFaders[i].portName;
+                    auto& data = mRestSnapshot.getData();
+                    auto it = data.find(key);
+                    if (it != data.end()) mFaders[i].value = it->second;
+                }
+            }
+
+            std::cout << "[PerfMode] PANIC -- restored to rest state (" << mRestSnapshot.getData().size() << " ports)" << std::endl;
+        } else if (animator) {
+            // Fallback: no rest snapshot, reset to 0
             for (auto& name : animator->getRegisteredNodeNames()) {
                 auto* node = animator->getRegisteredNode(name);
                 if (!node) continue;
@@ -585,11 +926,102 @@ void PerformanceModePanel::renderPanicButton() {
                     port->setValue(0.0f);
                 }
             }
+            std::cout << "[PerfMode] PANIC -- all ports reset to 0 (no rest snapshot)" << std::endl;
         }
-        std::cout << "[PerfMode] PANIC — all ports reset to 0" << std::endl;
+
+        // Cancel MacroRunner
+        mMacroRunner.cancel();
+
+        // Reset crossfader
+        mCrossfadePos = 0.0f;
+        mCrossfadeActive = false;
+        mAutoFading = false;
+
+        // Reset all triggers on current page
+        if (!mTriggerPages.empty()) {
+            for (auto& trig : mTriggerPages[mCurrentTriggerPage]) {
+                trig.active = false;
+            }
+        }
+
+        // ChordSystem panic via Lua
+        try {
+            sol::object obj = mLua["ChordSystem"];
+            if (obj.valid()) {
+                sol::table cs = obj.as<sol::table>();
+                sol::function fn = cs["panic"];
+                if (fn.valid()) fn(cs);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[PerfMode] ChordSystem panic error: " << e.what() << std::endl;
+        }
     }
 
     ImGui::PopStyleColor(3);
+}
+
+void PerformanceModePanel::activateTrigger(TriggerSlot& trig) {
+    if (!trig.macroActions.empty()) {
+        mMacroRunner.start(trig.macroActions);
+        return;
+    }
+    executeTriggerAction(trig.action);
+}
+
+void PerformanceModePanel::deactivateTrigger(TriggerSlot& trig) {
+    std::string prefix, target;
+    auto cp = trig.action.find(':');
+    if (cp != std::string::npos) {
+        prefix = trig.action.substr(0, cp);
+        target = trig.action.substr(cp + 1);
+    }
+
+    if (prefix == "preset") {
+        // Direct deletion of preset nodes (synchronous, no async chain)
+        auto* animator = Animator::instance();
+        if (animator) {
+            // Collect all nodes to delete: exact match + prefix match
+            std::vector<std::string> toDelete;
+            std::string nodePrefix = target + "_";
+            for (auto& name : animator->getRegisteredNodeNames()) {
+                if (name == target || name.rfind(nodePrefix, 0) == 0) {
+                    toDelete.push_back(name);
+                }
+            }
+
+            if (!toDelete.empty()) {
+                // Delete FX nodes first (so they cleanup clones before the mesh is destroyed)
+                // Then delete SceneObjectNodes (which destroy the OGRE mesh)
+                std::stable_sort(toDelete.begin(), toDelete.end(), [&](const std::string& a, const std::string& b) {
+                    auto* na = animator->getRegisteredNode(a);
+                    auto* nb = animator->getRegisteredNode(b);
+                    bool aIsFx = na && (na->getTypeName() == "PerlinFxNode" || na->getTypeName() == "WaveVertexShader"
+                                     || na->getTypeName() == "ShaderFxNode" || na->getTypeName() == "ColorShiftNode");
+                    bool bIsFx = nb && (nb->getTypeName() == "PerlinFxNode" || nb->getTypeName() == "WaveVertexShader"
+                                     || nb->getTypeName() == "ShaderFxNode" || nb->getTypeName() == "ColorShiftNode");
+                    return aIsFx > bIsFx; // FX first
+                });
+
+                for (auto& name : toDelete) {
+                    auto* node = animator->getRegisteredNode(name);
+                    if (!node) continue;
+                    animator->removeNode(node);
+                    try { node->cleanup(); } catch (...) {}
+                    delete node;
+                }
+                std::cout << "[PerfMode] Trigger '" << target << "' deactivated — deleted "
+                          << toDelete.size() << " nodes" << std::endl;
+            }
+        }
+    } else if (prefix == "enable") {
+        executeTriggerAction("disable:" + target);
+    } else if (prefix == "disable") {
+        executeTriggerAction("enable:" + target);
+    } else if (prefix == "chord") {
+        executeTriggerAction(trig.action);
+    } else if (prefix == "compositor") {
+        executeTriggerAction(trig.action);
+    }
 }
 
 void PerformanceModePanel::executeTriggerAction(const std::string& action) {
@@ -604,8 +1036,23 @@ void PerformanceModePanel::executeTriggerAction(const std::string& action) {
             sol::object obj = mLua["ChordSystem"];
             if (obj.valid()) {
                 sol::table cs = obj.as<sol::table>();
-                sol::function fn = cs["toggle"];
-                if (fn.valid()) fn(cs, target);
+                sol::function toggleFn = cs["toggle"];
+                if (toggleFn.valid()) toggleFn(cs, target);
+
+                // Apply or restore chord snapshot if one exists
+                sol::function isActiveFn = cs["isActive"];
+                if (isActiveFn.valid() && hasChordSnapshot(target)) {
+                    bool active = isActiveFn(cs, target);
+                    if (active) {
+                        applyChordSnapshot(target);
+                    } else {
+                        // Restore rest state
+                        auto* animator = Animator::instance();
+                        if (animator && !mRestSnapshot.empty()) {
+                            DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
+                        }
+                    }
+                }
             }
         } catch (const std::exception& e) {
             std::cerr << "[PerfMode] Chord toggle error: " << e.what() << std::endl;
@@ -728,6 +1175,73 @@ void PerformanceModePanel::removeCompositorChain(StudioEngine* engine) {
     mLastPerfH = 0;
 }
 
+void PerformanceModePanel::captureChordSnapshot(const std::string& chordName) {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+    mChordSnapshots[chordName].capture(*animator);
+    std::cout << "[PerfMode] Captured chord snapshot '" << chordName
+              << "' (" << mChordSnapshots[chordName].getData().size() << " ports)" << std::endl;
+}
+
+void PerformanceModePanel::applyChordSnapshot(const std::string& chordName) {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+    auto it = mChordSnapshots.find(chordName);
+    if (it == mChordSnapshots.end() || it->second.empty()) return;
+    DagSnapshot::apply(mRestSnapshot, it->second, 1.0f, *animator);
+}
+
+void PerformanceModePanel::removeChordSnapshot(const std::string& chordName) {
+    auto* animator = Animator::instance();
+    if (animator && !mRestSnapshot.empty()) {
+        DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
+    }
+    mChordSnapshots.erase(chordName);
+    std::cout << "[PerfMode] Removed chord snapshot '" << chordName << "'" << std::endl;
+}
+
+void PerformanceModePanel::syncMidiBindingsFromManager() {
+    // Clear all MIDI bindings on faders and triggers
+    for (int i = 0; i < 8; ++i) {
+        mFaders[i].midiCC = -1;
+        mFaders[i].midiChannel = -1;
+        mFaders[i].midiDeviceId = -1;
+    }
+    for (auto& page : mTriggerPages) {
+        for (auto& trig : page) {
+            trig.midiNote = -1;
+            trig.midiChannel = -1;
+            trig.midiDeviceId = -1;
+        }
+    }
+
+    // Rebuild from MidiLearnManager
+    auto& bindings = MidiLearnManager::instance().getBindings();
+    for (auto& b : bindings) {
+        if (b.target.type == "fader" && b.midiType == "cc" &&
+            b.target.index >= 0 && b.target.index < 8) {
+            mFaders[b.target.index].midiCC = b.number;
+            mFaders[b.target.index].midiChannel = b.channel;
+            mFaders[b.target.index].midiDeviceId = b.deviceId;
+        } else if (b.target.type == "trigger" && b.midiType == "note" &&
+                   b.target.index >= 0 && b.target.index < 16) {
+            if (!mTriggerPages.empty()) {
+                // Apply to current page (trigger indices are per-page)
+                auto& trig = mTriggerPages[mCurrentTriggerPage][b.target.index];
+                trig.midiNote = b.number;
+                trig.midiChannel = b.channel;
+                trig.midiDeviceId = b.deviceId;
+            }
+        }
+    }
+}
+
+void PerformanceModePanel::autoAssignAllFaders() {
+    auto* animator = Animator::instance();
+    if (!animator) return;
+    autoAssignFaders(animator->getRegisteredNodeNames());
+}
+
 void PerformanceModePanel::autoAssignFaders(const std::vector<std::string>& createdNodeNames) {
     auto* animator = Animator::instance();
     if (!animator) return;
@@ -822,31 +1336,32 @@ void PerformanceModePanel::renderCrossfader() {
     auto* animator = Animator::instance();
     if (!animator) return;
 
-    float availW = ImGui::GetContentRegionAvail().x - 20;
-    if (availW < 100) availW = 100;
+    ImGui::TextColored({0.0f, 1.0f, 1.0f, 1.0f}, "CROSSFADER");
 
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {4, 2});
+    float availW = ImGui::GetContentRegionAvail().x;
+    if (availW < 80) availW = 80;
 
-    // Enable toggle
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {4, 4});
+
+    // Enable toggle + labels row
     ImGui::Checkbox("##cfActive", &mCrossfadeActive);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enable crossfader");
     ImGui::SameLine();
 
-    // A label
+    // A label (blue, clickable)
     ImGui::TextColored({0.3f, 0.5f, 1.0f, 1.0f}, "A");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mSnapshotAName.c_str());
-    // Right-click A → assign
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right-click to assign A\n%s", mSnapshotAName.c_str());
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("AssignA");
     ImGui::SameLine();
 
-    // Slider
-    ImGui::SetNextItemWidth(availW - 200);
+    // Slider (full width)
+    ImGui::SetNextItemWidth(availW - 100);
     ImGui::SliderFloat("##crossfade", &mCrossfadePos, 0.0f, 1.0f, "%.0f%%");
     ImGui::SameLine();
 
-    // B label
+    // B label (orange, clickable)
     ImGui::TextColored({1.0f, 0.5f, 0.2f, 1.0f}, "B");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mSnapshotBName.c_str());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Right-click to assign B\n%s", mSnapshotBName.c_str());
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("AssignB");
     ImGui::SameLine();
 
@@ -904,6 +1419,11 @@ void PerformanceModePanel::renderCrossfader() {
     };
     renderAssignPopup("AssignA", mSnapshotA, mSnapshotAName);
     renderAssignPopup("AssignB", mSnapshotB, mSnapshotBName);
+
+    // Snapshot names below slider
+    ImGui::TextColored({0.3f, 0.5f, 1.0f, 0.8f}, "A: %s", mSnapshotAName.c_str());
+    ImGui::SameLine(availW - 80);
+    ImGui::TextColored({1.0f, 0.5f, 0.2f, 0.8f}, "B: %s", mSnapshotBName.c_str());
 
     // Apply crossfade each frame
     if (mCrossfadeActive && !mSnapshotA.empty() && !mSnapshotB.empty()) {

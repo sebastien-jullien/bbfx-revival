@@ -85,7 +85,18 @@ int main(int argc, char* argv[]) {
                 forceDefault = true;
             } else if (arg == "--build") {
                 std::cout << "[Studio] --build: rebuilding..." << std::endl;
-                int rc = std::system("cmake --build ../.. --config Debug --target bbfx-studio");
+#ifdef BBFX_WIN32
+                char exePathBuf[MAX_PATH] = {};
+                GetModuleFileNameA(nullptr, exePathBuf, MAX_PATH);
+                auto exeDir = std::filesystem::path(exePathBuf).parent_path();
+                // exe is at build/windows-debug/Debug/ → cmake bundled 3 levels up
+                auto cmakeExe = (exeDir / ".." / ".." / ".." / "extern" / "cmake" / "bin" / "cmake.exe").lexically_normal();
+                auto buildDir = (exeDir / "..").lexically_normal();
+                std::string cmd = "\"" + cmakeExe.string() + "\" --build \"" + buildDir.string() + "\" --config Debug --target bbfx-studio";
+#else
+                std::string cmd = "cmake --build .. --config Debug --target bbfx-studio";
+#endif
+                int rc = std::system(cmd.c_str());
                 if (rc != 0) {
                     std::cerr << "[Studio] Build failed (exit " << rc << ")" << std::endl;
                     return 1;

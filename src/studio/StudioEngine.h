@@ -61,6 +61,26 @@ private:
     uint32_t mRTWidth = 1280;
     uint32_t mRTHeight = 720;
     int mCachedFBO = -1; // cached GL FBO ID for the RenderTexture
+
+    // ── Dual Output (v3.3) ──────────────────────────────────────────────────
+public:
+    bool openOutputWindow(int width = 1920, int height = 1080);
+    void closeOutputWindow();
+    bool isOutputOpen() const { return mOutputWindow != nullptr; }
+    void toggleOutputFullscreen();
+    void setOutputResolution(int w, int h);
+    void setOutputMonitor(int monitorIndex);
+    void updateOutputTarget();
+    ImTextureID getOutputTextureID() const;
+
+private:
+    SDL_Window* mOutputWindow = nullptr;
+    Ogre::TexturePtr mOutputTex;
+    Ogre::RenderTexture* mOutputTarget = nullptr;
+    uint32_t mOutputWidth = 1920;
+    uint32_t mOutputHeight = 1080;
+    int mOutputCachedFBO = -1;
+    bool mOutputFullscreen = false;
 };
 
 } // namespace bbfx

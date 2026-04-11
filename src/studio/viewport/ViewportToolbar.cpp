@@ -23,7 +23,7 @@ void ViewportToolbar::render()
         }
     };
 
-    toolBtn("W:Move", Tool::Translate);
+    toolBtn("A:Move", Tool::Translate);
     RichTooltip("Translate tool — move objects", "W");
     ImGui::SameLine();
     toolBtn("E:Rot",  Tool::Rotate);
@@ -47,11 +47,12 @@ void ViewportToolbar::render()
     ImGui::SameLine();
 
     // Snap toggle
-    if (mSnapOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.5f, 0.2f, 1.0f});
-    if (ImGui::SmallButton("Snap")) {
-        mSnapOn = !mSnapOn;
+    {
+        bool wasOn = mSnapOn;
+        if (wasOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.5f, 0.2f, 1.0f});
+        if (ImGui::SmallButton("Snap")) mSnapOn = !mSnapOn;
+        if (wasOn) ImGui::PopStyleColor();
     }
-    if (mSnapOn) ImGui::PopStyleColor();
     RichTooltip("Snap to grid when transforming", "Ctrl");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(50.0f);
@@ -62,21 +63,23 @@ void ViewportToolbar::render()
     ImGui::SameLine();
 
     // Grid toggle
-    if (mGridOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.4f, 0.6f, 1.0f});
-    if (ImGui::SmallButton("Grid")) {
-        mGridOn = !mGridOn;
+    {
+        bool wasOn = mGridOn;
+        if (wasOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.4f, 0.6f, 1.0f});
+        if (ImGui::SmallButton("Grid")) mGridOn = !mGridOn;
+        if (wasOn) ImGui::PopStyleColor();
     }
-    if (mGridOn) ImGui::PopStyleColor();
     RichTooltip("Toggle ground grid display");
 
     ImGui::SameLine();
 
     // Overlays toggle
-    if (mOverlaysOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.4f, 0.4f, 0.2f, 1.0f});
-    if (ImGui::SmallButton("Overlays")) {
-        mOverlaysOn = !mOverlaysOn;
+    {
+        bool wasOn = mOverlaysOn;
+        if (wasOn) ImGui::PushStyleColor(ImGuiCol_Button, {0.4f, 0.4f, 0.2f, 1.0f});
+        if (ImGui::SmallButton("Overlays")) mOverlaysOn = !mOverlaysOn;
+        if (wasOn) ImGui::PopStyleColor();
     }
-    if (mOverlaysOn) ImGui::PopStyleColor();
     RichTooltip("Toggle overlays (gizmos, outlines, labels)");
 
     ImGui::PopStyleVar(2);

@@ -13,9 +13,9 @@ namespace bbfx {
 
 using namespace Ogre;
 
-WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneName)
+WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneName, const std::string& nodeName)
     : SoftwareVertexShader(meshName, cloneName)
-    , AnimationNode("WaveVertexShader")
+    , AnimationNode(nodeName)
     , mCloneMeshName(cloneName)
 {
     AnimationNode::addInput(new AnimationPort("dt", 0.016f));
@@ -63,14 +63,22 @@ void WaveVertexShader::cleanup() {
     auto* sceneObj = findTargetSceneObj();
     if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
         sceneObj->getSceneNode()->setVisible(true);
-    if (!mStudioSceneNodeName.empty()) {
+    // Destroy FX clone OGRE objects (not just hide)
+    auto* engine = Engine::instance();
+    auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
+    if (sceneMgr && !mStudioSceneNodeName.empty()) {
         try {
-            auto* engine = Engine::instance();
-            auto* sceneMgr = engine ? engine->getSceneManager() : nullptr;
-            if (sceneMgr && sceneMgr->hasSceneNode(mStudioSceneNodeName)) {
-                sceneMgr->getSceneNode(mStudioSceneNodeName)->setVisible(false);
+            if (sceneMgr->hasSceneNode(mStudioSceneNodeName)) {
+                auto* sn = sceneMgr->getSceneNode(mStudioSceneNodeName);
+                sn->detachAllObjects();
+                sceneMgr->destroySceneNode(sn);
+            }
+            if (!mStudioEntityName.empty() && sceneMgr->hasEntity(mStudioEntityName)) {
+                sceneMgr->destroyEntity(mStudioEntityName);
             }
         } catch (...) {}
+        mStudioSceneNodeName.clear();
+        mStudioEntityName.clear();
     }
 }
 
@@ -143,9 +151,9 @@ void WaveVertexShader::resolveTarget() {
         return;
     }
 
-    // Whether FX is enabled or disabled, keep clone visible and hide original
-    // (disabled = frozen deformation, enabled = active deformation)
-    setFxVisible(true);
+    // Respect the SceneObjectNode's intended visibility (ParamSpec BOOL / DAG port).
+    // The clone replaces the original, so the original SceneNode is always hidden.
+    setFxVisible(sceneObj->isNodeVisible());
     sceneObj->getSceneNode()->setVisible(false);
 
     // Sync transform

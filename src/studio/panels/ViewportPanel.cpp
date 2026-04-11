@@ -501,6 +501,13 @@ void ViewportPanel::render() {
         }
     }
 
+    // ── Tool shortcuts (W/E/R — work when viewport is hovered) ──────────────
+    if (mIsHovered && !mFpsCaptured && !ImGui::GetIO().WantTextInput) {
+        if (ImGui::IsKeyPressed(ImGuiKey_A)) mToolbar.setTool(ViewportToolbar::Tool::Translate);
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) mToolbar.setTool(ViewportToolbar::Tool::Rotate);
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) mToolbar.setTool(ViewportToolbar::Tool::Scale);
+    }
+
     // ── Overlay ───────────────────────────────────────────────────────────────
     if (mShowOverlay) {
         ImVec2 overlayPos = ImGui::GetItemRectMin();

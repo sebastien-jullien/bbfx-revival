@@ -42,3 +42,6 @@ bbfx.log
 
 # FetchContent downloads (auto-fetched by CMake)
 _deps/
+
+# CMake bundlé — doc offline inutile dans le repo
+extern/cmake/doc/

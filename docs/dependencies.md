@@ -600,3 +600,30 @@ imgui-node-editor (thedmd/develop) necessite 2 patches automatiques pour ImGui v
 | Boost.Graph | latest | vcpkg |
 | nlohmann-json | 3.12+ | vcpkg |
 | libtheora/libogg | latest | vcpkg |
+
+## Etat des dependances v3.3 (Avril 2026)
+
+Deux nouvelles dependances ajoutees en v3.3 :
+
+| Dependance | Version | Source | Raison |
+|-----------|---------|--------|--------|
+| **rtmidi** | latest | vcpkg | Backend MIDI multi-device (MidiDeviceManager, MidiInputNode, MidiOutputNode) |
+| **oscpack** | latest | vcpkg | Protocole OSC : parsing/serialisation messages (OscInputNode, OscOutputNode, UdpServer) |
+
+### Stack complete v3.3
+
+| Dependance | Version | Source |
+|-----------|---------|--------|
+| OGRE 14 | 14.5.2 | vcpkg |
+| Dear ImGui | v1.92.7-docking | FetchContent |
+| imgui-node-editor | develop | FetchContent (thedmd, patche) |
+| imgui_test_engine | main | FetchContent (ocornut) |
+| SDL3 | latest | vcpkg |
+| sol2 | 3.3.0+ | vcpkg |
+| Lua | 5.5.0 | vcpkg |
+| Boost.Graph | latest | vcpkg |
+| nlohmann-json | 3.12+ | vcpkg |
+| libtheora/libogg | latest | vcpkg |
+| **rtmidi** | latest | vcpkg |
+| **oscpack** | latest | vcpkg |
+| NDI SDK | optional | externe (ifdef BBFX_HAS_NDI) |

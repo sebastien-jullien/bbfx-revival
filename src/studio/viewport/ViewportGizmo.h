@@ -79,6 +79,14 @@ private:
     TransformState mStartState;
     int mHighlightAxis = -1;
 
+    // Offset snapshot at drag start (for undo)
+    struct OffsetState {
+        Ogre::Vector3 pos{0,0,0};
+        Ogre::Vector3 rot{0,0,0};
+        Ogre::Vector3 scale{1,1,1};
+    };
+    OffsetState mStartOffsets;
+
     // Keyboard mode
     bool mKeyboardMode = false;
     int  mConstrainedAxis = -1; // -1=free, 0=X, 1=Y, 2=Z

@@ -284,6 +284,7 @@ void Animator::enqueueOutputs(AnimationNode* node, PortQueue& queue) {
 }
 
 void Animator::propagateFreshValues() {
+    int propCount = 0;
     while (!mPortQueue.empty()) {
         AnimationPort* port = mPortQueue.front();
         mPortQueue.pop_front();
@@ -292,10 +293,17 @@ void Animator::propagateFreshValues() {
         if (vi == mVertexMap.end()) continue;
 
         // BFS: propagate to adjacent ports
-        AdjacencyIterator ai, ai_end;
-        for (boost::tie(ai, ai_end) = boost::adjacent_vertices(vi->second, mGraph);
-             ai != ai_end; ++ai) {
-            auto pi = mPortMap.find(*ai);
+        // SAFETY: snapshot adjacency into local vector to avoid iterator invalidation
+        std::vector<Vertex> neighbors;
+        {
+            AdjacencyIterator ai, ai_end;
+            for (boost::tie(ai, ai_end) = boost::adjacent_vertices(vi->second, mGraph);
+                 ai != ai_end; ++ai) {
+                neighbors.push_back(*ai);
+            }
+        }
+        for (auto neighborV : neighbors) {
+            auto pi = mPortMap.find(neighborV);
             if (pi != mPortMap.end()) {
                 AnimationPort* target = pi->second;
                 target->setValue(port->getValue());
@@ -308,6 +316,7 @@ void Animator::propagateFreshValues() {
                 }
             }
         }
+        propCount++;
     }
 }
 
