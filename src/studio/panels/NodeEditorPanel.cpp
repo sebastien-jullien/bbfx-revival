@@ -52,6 +52,14 @@ static const std::map<std::string, ImVec4> kNodeColors = {
     {"TheoraClipNode",          {1.00f, 0.00f, 0.00f, 1.0f}},
     {"SubgraphNode",            {0.53f, 0.53f, 0.53f, 1.0f}}, // grey
     {"AccumulatorNode",         {0.40f, 0.40f, 0.40f, 1.0f}},
+    // v3.4 Stage nodes
+    {"WarpNode",                {0.90f, 0.50f, 0.10f, 1.0f}}, // orange (stage)
+    {"BlendNode",               {0.90f, 0.50f, 0.10f, 1.0f}},
+    // v3.4 Output nodes
+    {"SpoutOutputNode",         {0.30f, 0.90f, 0.60f, 1.0f}}, // cyan-green (legacy alias)
+    {"TextureShareOutputNode",  {0.30f, 0.90f, 0.60f, 1.0f}}, // cyan-green
+    {"NdiOutputNode",           {0.20f, 0.70f, 0.90f, 1.0f}}, // light blue
+    {"ArtnetOutputNode",        {0.90f, 0.50f, 0.90f, 1.0f}}, // magenta
 };
 
 ImVec4 NodeEditorPanel::nodeColor(const std::string& typeName) const {

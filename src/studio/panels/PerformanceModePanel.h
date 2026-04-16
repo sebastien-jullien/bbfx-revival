@@ -5,8 +5,10 @@
 #include <functional>
 #include <sol/forward.hpp>
 #include "../DagSnapshot.h"
+#include "../ZoneSnapshot.h"
 
-namespace bbfx { class StudioEngine; class CompositorStackPanel; }
+namespace Ogre { class Camera; }
+namespace bbfx { class StudioEngine; class CompositorStackPanel; class SurfaceMap; class OutputManager; }
 
 namespace bbfx {
 
@@ -23,6 +25,9 @@ public:
     void setRecordValueCallback(RecordValueCb cb) { mRecordValueCb = std::move(cb); }
     void setRecordingState(bool rec, float beat) { mIsRecording = rec; mCurrentBeat = beat; }
 
+    /// Trigger the PANIC action from external code (e.g. StudioApp::panicAll). (v3.4 Lot M)
+    void triggerPanic();
+
 private:
     void renderTriggerGrid();
     void renderFaders();
@@ -31,6 +36,7 @@ private:
     void renderPanicButton();
 
     sol::state& mLua;
+    StudioEngine* mCurrentEngine = nullptr; ///< Transient, valid only during render()
 
     struct FaderSlot {
         std::string nodeName;
@@ -106,8 +112,13 @@ private:
     // Chord snapshots: chord name → DAG state
     std::map<std::string, DagSnapshot> mChordSnapshots;
 
+    // Zone snapshots: chord name → zone warp/blend + camera state (v3.4 Lot O)
+    std::map<std::string, ZoneSnapshot> mChordZoneSnapshots;
+    ZoneSnapshot mRestZoneSnapshot;
+
     // Crossfader A/B (v3.2.5)
     DagSnapshot mSnapshotA, mSnapshotB;
+    ZoneSnapshot mZoneSnapshotA, mZoneSnapshotB; ///< Zone snapshot crossfade (v3.4 Lot O)
     float mCrossfadePos = 0.0f;
     bool mCrossfadeActive = false;
     std::string mSnapshotAName = "(empty)";
@@ -148,6 +159,31 @@ public:
     auto& getChordSnapshots() { return mChordSnapshots; }
     const auto& getChordSnapshots() const { return mChordSnapshots; }
     void setChordSnapshots(const std::map<std::string, DagSnapshot>& snaps) { mChordSnapshots = snaps; }
+
+    /// Zone snapshot management (v3.4 Lot O — Scene Switcher)
+    void captureChordZoneSnapshot(const std::string& chordName, const SurfaceMap& map, const Ogre::Camera* cam);
+    void applyChordZoneSnapshot(const std::string& chordName, SurfaceMap& map, OutputManager& mgr, Ogre::Camera* cam);
+    void removeChordZoneSnapshot(const std::string& chordName);
+    bool hasChordZoneSnapshot(const std::string& chordName) const { return mChordZoneSnapshots.count(chordName) > 0; }
+    auto& getChordZoneSnapshots() { return mChordZoneSnapshots; }
+    const auto& getChordZoneSnapshots() const { return mChordZoneSnapshots; }
+    void setChordZoneSnapshots(const std::map<std::string, ZoneSnapshot>& snaps) { mChordZoneSnapshots = snaps; }
+    ZoneSnapshot& getRestZoneSnapshot() { return mRestZoneSnapshot; }
+
+    /// Returns the name of the active chord that has a zone snapshot, or empty string if none.
+    std::string getActiveSceneChord() const {
+        if (mTriggerPages.empty()) return {};
+        for (auto& page : mTriggerPages) {
+            for (auto& slot : page) {
+                if (!slot.active) continue;
+                if (slot.action.rfind("chord:", 0) == 0) {
+                    std::string chordName = slot.action.substr(6);
+                    if (mChordZoneSnapshots.count(chordName) > 0) return chordName;
+                }
+            }
+        }
+        return {};
+    }
 
     // Accessors for save/load
     auto& getTriggerPages() { return mTriggerPages; }

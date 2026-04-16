@@ -276,10 +276,12 @@ void ShaderFxNode::update() {
             val = mInputs[u.name]->getValue();
         }
         if (mVertParams) {
-            try { mVertParams->setNamedConstant(u.name, val); } catch (...) {}
+            try { mVertParams->setNamedConstant(u.name, val); }
+            catch (...) { /* Uniform may not exist in vertex shader — safe to ignore */ }
         }
         if (mFragParams) {
-            try { mFragParams->setNamedConstant(u.name, val); } catch (...) {}
+            try { mFragParams->setNamedConstant(u.name, val); }
+            catch (...) { /* Uniform may not exist in fragment shader — safe to ignore */ }
         }
     }
 

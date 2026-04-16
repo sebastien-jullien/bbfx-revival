@@ -30,7 +30,7 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     }
 
     json j;
-    j["version"] = "3.3";
+    j["version"] = "3.4";
 
     // Timestamp (ISO 8601)
     auto now = std::chrono::system_clock::now();
@@ -221,11 +221,26 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
         j["performance"]["chordSnapshots"] = csJson;
     }
 
+    // Zone snapshots (v3.4 Lot O — Scene Switcher)
+    if (!state.chordZoneSnapshotsJson.is_null() && !state.chordZoneSnapshotsJson.empty()) {
+        j["performance"]["chordZoneSnapshots"] = state.chordZoneSnapshotsJson;
+    }
+
     // ── Automation ──────────────────────────────────────────────────────────
     j["automation"] = state.automation.toJson();
 
     // ── MIDI mappings (v3.3) ────────────────────────────────────────────────
     j["midi_mappings"] = MidiLearnManager::instance().toJson();
+
+    // ── Outputs (v3.4) ───────────────────────────────────────────────────────
+    if (!state.outputsJson.is_null() && state.outputsJson.is_array()) {
+        j["outputs"] = state.outputsJson;
+    }
+
+    // ── Extra extensible data (v3.4 Lot E+) ─────────────────────────────────
+    if (!state.extraJson.is_null() && state.extraJson.is_object()) {
+        j["extra"] = state.extraJson;
+    }
 
     // ── Media paths ──────────────────────────────────────────────────────────
     j["media"]["videos"]  = json::array();
@@ -578,6 +593,13 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 }
             }
 
+            // Zone snapshots (v3.4 Lot O — Scene Switcher)
+            if (perf.contains("chordZoneSnapshots") && perf["chordZoneSnapshots"].is_object()) {
+                outState->chordZoneSnapshotsJson = perf["chordZoneSnapshots"];
+            } else {
+                outState->chordZoneSnapshotsJson = json(); // backward compat: no zone snapshots
+            }
+
             if (perf.contains("quickAccess")) {
                 auto& qa = perf["quickAccess"];
                 for (int i = 0; i < 8 && i < static_cast<int>(qa.size()); ++i) {
@@ -598,6 +620,22 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
             std::cout << "[ProjectSerializer] Restored "
                       << MidiLearnManager::instance().getBindings().size()
                       << " MIDI mappings" << std::endl;
+        }
+
+        // ── Restore outputs (v3.4) ────────────────────────────────────────────
+        if (outState) {
+            if (j.contains("outputs") && j["outputs"].is_array()) {
+                outState->outputsJson = j["outputs"];
+            } else {
+                // Backward compat v3.3: no "outputs" section → null, caller creates default slot
+                outState->outputsJson = json();
+            }
+            // ── Restore extra data (v3.4 Lot E+) ────────────────────────────
+            if (j.contains("extra") && j["extra"].is_object()) {
+                outState->extraJson = j["extra"];
+            } else {
+                outState->extraJson = json::object();
+            }
         }
 
         std::cout << "[ProjectSerializer] Loaded ← " << path

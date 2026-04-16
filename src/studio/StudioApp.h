@@ -16,9 +16,15 @@
 #include "panels/UndoHistoryPanel.h"
 #include "panels/MidiActivityPanel.h"
 #include "panels/MidiMappingPanel.h"
-#include "panels/OutputPanel.h"
+#include "panels/OutputManagerPanel.h"
 #include "panels/OscBrowserPanel.h"
+#include "panels/SurfaceEditorPanel.h"
+#include "panels/NetworkPanel.h"
+#include "panels/MasterViewPanel.h"
 #include "ShaderPreviewRenderer.h"
+#include "WarpWizard.h"
+#include "SurfaceMap.h"
+#include "../network/SyncManager.h"
 #include "../midi/MidiDeviceManager.h"
 #include "Debugger.h"
 #include "commands/CommandManager.h"
@@ -58,6 +64,14 @@ public:
     PerformanceModePanel* getPerformanceModePanel() { return mPerformanceModePanel.get(); }
     void saveProject(const std::string& path);
     void loadProject(const std::string& path);
+    WarpWizard&  getWarpWizard()  { return mWarpWizard; }
+    SurfaceMap*  getSurfaceMap()  { return mSurfaceMap.get(); }
+    SyncManager* getSyncManager() { return mSyncManager.get(); }
+    bool& showMasterView() { return mShowMasterView; }
+    MasterViewPanel* getMasterViewPanel() { return mMasterViewPanel.get(); }
+
+    /// PANIC ALL — reset all warps/blends, disconnect network, restore rest snapshot (v3.4 Lot M).
+    void panicAll();
 
 private:
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -122,8 +136,20 @@ private:
     std::unique_ptr<UndoHistoryPanel>      mUndoHistoryPanel;
     std::unique_ptr<MidiActivityPanel>     mMidiActivityPanel;
     std::unique_ptr<MidiMappingPanel>      mMidiMappingPanel;
-    std::unique_ptr<OutputPanel>           mOutputPanel;
+    std::unique_ptr<OutputManagerPanel>    mOutputManagerPanel;
     std::unique_ptr<OscBrowserPanel>       mOscBrowserPanel;
+    std::unique_ptr<SurfaceEditorPanel>    mSurfaceEditorPanel;
+    std::unique_ptr<NetworkPanel>          mNetworkPanel;
+    std::unique_ptr<MasterViewPanel>      mMasterViewPanel;
+
+    // ── Surface Map (v3.4 Lot E) ───────────────────────────────────────────────
+    std::unique_ptr<SurfaceMap>            mSurfaceMap;
+
+    // ── Network Sync (v3.4 Lot F) ─────────────────────────────────────────────
+    std::unique_ptr<SyncManager>           mSyncManager;
+
+    // ── Warp Calibration Wizard (v3.4 Lot D) ─────────────────────────────────
+    WarpWizard mWarpWizard;
 
     // ── Panel visibility toggles ──────────────────────────────────────────────
     bool mShowViewport      = true;
@@ -133,15 +159,18 @@ private:
     bool mShowPresetBrowser = true;
     bool mShowConsole       = false;
     bool mShowSetEditor     = false;
-    bool mShowSceneHierarchy = true;
+    bool mShowSceneHierarchy = false;
     bool mShowCompositorStack = false;
     bool mShowShaderGallery  = false;
     bool mShowMaterialEditor = false;
     bool mShowUndoHistory    = false;
     bool mShowMidiActivity   = false;
     bool mShowMidiMapping    = false;
-    bool mShowOutput         = false;
+    bool mShowOutputManager  = false;
     bool mShowOscBrowser     = false;
+    bool mShowSurfaceEditor  = false;
+    bool mShowNetworkPanel   = false;
+    bool mShowMasterView     = false;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;

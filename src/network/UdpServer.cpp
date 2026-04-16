@@ -4,8 +4,11 @@
 #include <cstring>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
 #else
 #include <sys/socket.h>
@@ -150,6 +153,11 @@ void UdpServer::listenLoop() {
         if (n > 0) {
             OscMessage msg;
             if (OscMessage::parse(buf, n, msg)) {
+                // Capture sender IP
+                char ipStr[INET_ADDRSTRLEN] = {};
+                inet_ntop(AF_INET, &from.sin_addr, ipStr, sizeof(ipStr));
+                msg.senderIp = ipStr;
+
                 // Track discovered addresses
                 {
                     std::lock_guard<std::mutex> lock(mAddressMutex);

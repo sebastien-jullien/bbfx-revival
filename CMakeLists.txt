@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.3.0 LANGUAGES CXX)
+project(BBFx VERSION 3.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,25 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ── Renderer selection ──────────────────────────────────────────────────────
 # Default: OpenGL 3+ (cross-platform). Use -DBBFX_USE_D3D11=ON for Direct3D11.
 option(BBFX_USE_D3D11 "Use Direct3D11 renderer instead of OpenGL 3+" OFF)
+
+# ── Optional feature flags (v3.4) ───────────────────────────────────────────
+option(BBFX_HAS_SPOUT  "Enable Spout output (Windows, requires Spout SDK)" OFF)
+option(BBFX_HAS_DMABUF "Enable DMA-BUF texture sharing (Linux, requires EGL + GBM)" OFF)
+if(BBFX_HAS_SPOUT)
+    message(STATUS "BBFx: Spout output enabled — link Spout SDK manually")
+    # target_include_directories(bbfx-studio PRIVATE <path-to-spout-sdk>)
+    # target_link_libraries(bbfx-studio PRIVATE <spout-lib>)
+else()
+    message(STATUS "BBFx: Spout output disabled (BBFX_HAS_SPOUT=OFF)")
+endif()
+if(BBFX_HAS_DMABUF)
+    message(STATUS "BBFx: DMA-BUF texture sharing enabled")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(EGL REQUIRED egl)
+    pkg_check_modules(GBM REQUIRED gbm)
+else()
+    message(STATUS "BBFx: DMA-BUF texture sharing disabled (BBFX_HAS_DMABUF=OFF)")
+endif()
 if(BBFX_USE_D3D11)
     add_compile_definitions(BBFX_USE_D3D11)
     message(STATUS "BBFx: Using Direct3D11 renderer")
@@ -226,6 +245,7 @@ add_executable(bbfx-studio
     src/studio/ToastSystem.cpp
     src/midi/MidiDeviceManager.cpp
     src/midi/MidiLearnManager.cpp
+    src/midi/MidiClockGenerator.cpp
     src/midi/MappingProfile.cpp
     src/osc/OscMessage.cpp
     src/network/UdpServer.cpp
@@ -266,7 +286,25 @@ add_executable(bbfx-studio
     src/studio/panels/UndoHistoryPanel.cpp
     src/studio/panels/MidiActivityPanel.cpp
     src/studio/panels/MidiMappingPanel.cpp
-    src/studio/panels/OutputPanel.cpp
+    src/studio/panels/OutputManagerPanel.cpp
+    src/studio/OutputManager.cpp
+    src/studio/WarpProfile.cpp
+    src/studio/BlendProfile.cpp
+    src/studio/GridWarpProfile.cpp
+    src/studio/WarpWizard.cpp
+    src/studio/SurfaceMap.cpp
+    src/studio/ZoneSnapshot.cpp
+    src/studio/panels/SurfaceEditorPanel.cpp
+    src/studio/panels/NetworkPanel.cpp
+    src/studio/panels/MasterViewPanel.cpp
+    src/studio/TextureShareSender.cpp
+    src/studio/SpoutTextureSender.cpp
+    src/studio/DmaBufTextureSender.cpp
+    src/studio/nodes/TextureShareOutputNode.cpp
+    src/studio/nodes/ArtnetOutputNode.cpp
+    src/network/SyncManager.cpp
+    src/studio/nodes/WarpNode.cpp
+    src/studio/nodes/BlendNode.cpp
     src/studio/panels/OscBrowserPanel.cpp
     src/studio/panels/PerformanceModePanel.cpp
     src/studio/panels/ConsolePanel.cpp
@@ -294,6 +332,14 @@ target_include_directories(bbfx-studio PRIVATE
     ${imgui_node_editor_SOURCE_DIR}
 )
 target_compile_definitions(bbfx-studio PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
+if(BBFX_HAS_SPOUT)
+    target_compile_definitions(bbfx-studio PRIVATE BBFX_HAS_SPOUT)
+endif()
+if(BBFX_HAS_DMABUF)
+    target_compile_definitions(bbfx-studio PRIVATE BBFX_HAS_DMABUF)
+    target_link_libraries(bbfx-studio PRIVATE ${EGL_LIBRARIES} ${GBM_LIBRARIES})
+    target_include_directories(bbfx-studio PRIVATE ${EGL_INCLUDE_DIRS} ${GBM_INCLUDE_DIRS})
+endif()
 target_link_libraries(bbfx-studio PRIVATE
     bbfx-core
     imgui_studio

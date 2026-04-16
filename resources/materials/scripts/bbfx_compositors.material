@@ -118,6 +118,7 @@ fragment_program BBFx/HeatDistort_fp glsl
         param_named time float 0
         param_named amplitude float 0.01
         param_named frequency float 10.0
+        param_named speed float 1.0
     }
 }
 
@@ -129,6 +130,39 @@ fragment_program BBFx/ASCII_fp glsl
         param_named tex0 int 0
         param_named char_size float 8.0
         param_named brightness float 1.0
+    }
+}
+
+// EdgeBlend — gamma-corrected edge fade for multi-projector overlap (v3.4)
+fragment_program BBFx/EdgeBlend_fp glsl
+{
+    source edge_blend.frag
+    default_params
+    {
+        param_named tex0         int   0
+        param_named blend_left   float 0.0
+        param_named blend_right  float 0.0
+        param_named blend_top    float 0.0
+        param_named blend_bottom float 0.0
+        param_named blend_gamma  float 2.2
+    }
+}
+
+// QuadWarp — 4-corner inverse bilinear warp for projection calibration (v3.4)
+fragment_program BBFx/QuadWarp_fp glsl
+{
+    source quad_warp.frag
+    default_params
+    {
+        param_named tex0  int   0
+        param_named tl_x  float 0.0
+        param_named tl_y  float 0.0
+        param_named tr_x  float 1.0
+        param_named tr_y  float 0.0
+        param_named bl_x  float 0.0
+        param_named bl_y  float 1.0
+        param_named br_x  float 1.0
+        param_named br_y  float 1.0
     }
 }
 
@@ -145,6 +179,70 @@ fragment_program BBFx/MotionTrail_fp glsl
 }
 
 // === Materials ===
+
+material BBFx/EdgeBlend
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/EdgeBlend_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/QuadWarp
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/QuadWarp_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// GridWarp — bilinear mesh deformation with 4x4 control-point grid (v3.4 Lot K)
+fragment_program BBFx/GridWarp_fp glsl
+{
+    source grid_warp.frag
+    default_params
+    {
+        param_named tex0  int  0
+    }
+}
+
+material BBFx/GridWarp
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/GridWarp_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
 
 material BBFx/Vignette
 {

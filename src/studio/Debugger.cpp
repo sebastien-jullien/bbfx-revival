@@ -27,6 +27,14 @@
 #include <OgreCompositorInstance.h>
 #include <OgreCompositor.h>
 #include <SDL3/SDL.h>
+#include "../network/SyncManager.h"
+#include "../network/SyncProtocol.h"
+#include "nodes/ArtnetOutputNode.h"
+#include "nodes/MidiOutputNode.h"
+#include "GridWarpProfile.h"
+#include "OutputManager.h"
+#include "ZoneSnapshot.h"
+#include "SurfaceMap.h"
 
 #include <iostream>
 #include <filesystem>
@@ -431,7 +439,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         // Deferred: loads preset file and creates node at start of next frame
         sPending.push_back({"preset", presetName, "", "", "", "", ""});
         std::cout << "[dbg] Queued: preset '" << presetName << "'" << std::endl;
-        return false;
+        return true;
     };
 
     // ── Link creation ──────────────────────────────────────────────────
@@ -498,15 +506,17 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     dbg["unlink"] = [](const std::string& fromNode, const std::string& fromPort,
                        const std::string& toNode, const std::string& toPort) -> bool {
         auto* animator = Animator::instance();
-        if (!animator) return false;
+        if (!animator) { std::cerr << "[dbg] unlink: no Animator" << std::endl; return false; }
         auto* fn = animator->getRegisteredNode(fromNode);
         auto* tn = animator->getRegisteredNode(toNode);
-        if (!fn || !tn) return false;
+        if (!fn) { std::cerr << "[dbg] unlink: node '" << fromNode << "' not found" << std::endl; return false; }
+        if (!tn) { std::cerr << "[dbg] unlink: node '" << toNode   << "' not found" << std::endl; return false; }
         auto& outs = fn->getOutputs();
         auto& ins = tn->getInputs();
         auto oit = outs.find(fromPort);
         auto iit = ins.find(toPort);
-        if (oit == outs.end() || iit == ins.end()) return false;
+        if (oit == outs.end()) { std::cerr << "[dbg] unlink: port '" << fromNode << "." << fromPort << "' not found" << std::endl; return false; }
+        if (iit == ins.end())  { std::cerr << "[dbg] unlink: port '" << toNode   << "." << toPort   << "' not found" << std::endl; return false; }
         animator->unlink(oit->second, iit->second);
         // Notify target node to rebuild targets from DAG
         if (fromPort == "entity" && toPort == "entity") {
@@ -520,9 +530,9 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
     // ── Set port value ─────────────────────────────────────────────────
     dbg["set"] = [](const std::string& nodeName, const std::string& portName, float value) -> bool {
         auto* animator = Animator::instance();
-        if (!animator) return false;
+        if (!animator) { std::cerr << "[dbg] set: no Animator" << std::endl; return false; }
         auto* node = animator->getRegisteredNode(nodeName);
-        if (!node) return false;
+        if (!node) { std::cerr << "[dbg] set: node '" << nodeName << "' not found" << std::endl; return false; }
         // Search inputs first, then outputs
         auto& ins = node->getInputs();
         auto it = ins.find(portName);
@@ -538,22 +548,23 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
             std::cout << "[dbg] " << nodeName << "." << portName << " = " << value << " (output)" << std::endl;
             return true;
         }
+        std::cerr << "[dbg] set: port '" << nodeName << "." << portName << "' not found" << std::endl;
         return false;
     };
 
     // ── Get port value ─────────────────────────────────────────────────
     dbg["get"] = [](const std::string& nodeName, const std::string& portName) -> float {
         auto* animator = Animator::instance();
-        if (!animator) return 0.0f;
+        if (!animator) { std::cerr << "[dbg] get: no Animator" << std::endl; return 0.0f; }
         auto* node = animator->getRegisteredNode(nodeName);
-        if (!node) return 0.0f;
-        // Check inputs first, then outputs
+        if (!node) { std::cerr << "[dbg] get: node '" << nodeName << "' not found" << std::endl; return 0.0f; }
         auto& ins = node->getInputs();
         auto it = ins.find(portName);
         if (it != ins.end()) return it->second->getValue();
         auto& outs = node->getOutputs();
         auto oit = outs.find(portName);
         if (oit != outs.end()) return oit->second->getValue();
+        std::cerr << "[dbg] get: port '" << nodeName << "." << portName << "' not found" << std::endl;
         return 0.0f;
     };
 
@@ -818,10 +829,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         }
     };
 
-    // ── Save/Load project ──────────────────────────────────────────────
-    dbg["save"] = [](const std::string& path) {
-        std::cout << "[dbg] Save to " << path << " (use File > Save)" << std::endl;
-    };
+    // save: see full implementation below (v3.2.5 Save/Load section)
 
     // ── Lock-on orbit test ──────────────────────────────────────────────
     // Full 360° orbit around the ogre: 8 screenshots every 45°.
@@ -939,17 +947,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::cout << "[dbg] select_nodes: " << names.size() << " nodes" << std::endl;
     };
 
-    // Align selected nodes (top/bottom/left/right)
-    dbg["align"] = [app](const std::string& direction) {
-        if (!app || !app->getNodeEditorPanel()) return;
-        std::cout << "[dbg] align: " << direction << " (requires UI multi-select)" << std::endl;
-    };
-
-    // Distribute selected nodes (horizontally/vertically)
-    dbg["distribute"] = [app](const std::string& direction) {
-        if (!app || !app->getNodeEditorPanel()) return;
-        std::cout << "[dbg] distribute: " << direction << " (requires UI multi-select)" << std::endl;
-    };
+    // align/distribute: see full implementations below (v3.2.5 Align/Distribute section)
 
     // Create node group from current selection
     dbg["group"] = [app](const std::string& name) {
@@ -1067,13 +1065,13 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         bool i1 = lua.script("return dbg.inspect('test_lua')").get<bool>();
         check("Inspect test_lua", i1);
 
-        // Test: set/get port
-        lua.script("dbg.set('test_lua', 'in', 3.14)");
-        float v = lua.script("return dbg.get('test_lua', 'in')").get<float>();
+        // Test: set/get port — use AccumulatorNode which has known port "delta"
+        lua.script("dbg.set('test_acc', 'delta', 3.14)");
+        float v = lua.script("return dbg.get('test_acc', 'delta')").get<float>();
         check("Set/Get port value", std::abs(v - 3.14f) < 0.01f);
 
-        // Test: link
-        bool lk = lua.script("return dbg.link('test_lua', 'out', 'test_acc', 'delta')").get<bool>();
+        // Test: link — MathNode has "out" output, AccumulatorNode has "delta" input
+        bool lk = lua.script("return dbg.link('test_math', 'out', 'test_acc', 'delta')").get<bool>();
         check("Create link", lk);
 
         // Test: links list
@@ -1082,7 +1080,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         check("Links count > 0", numLinks > 0);
 
         // Test: unlink
-        bool ulk = lua.script("return dbg.unlink('test_lua', 'out', 'test_acc', 'delta')").get<bool>();
+        bool ulk = lua.script("return dbg.unlink('test_math', 'out', 'test_acc', 'delta')").get<bool>();
         check("Unlink", ulk);
 
         // Test: delete (deferred by design — OGRE objects can't be destroyed during ImGui render)
@@ -1097,6 +1095,172 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         // Test: screenshot
         bool ss = lua.script("return dbg.screenshot('output/inspect/dbg_test.png')").get<bool>();
         check("Screenshot", ss);
+
+        // ── v3.4 Tests: Output Manager ──────────────────────────────────
+        std::cout << "\n--- v3.4: Output Manager ---" << std::endl;
+
+        // Add output
+        auto addResult = lua.script("return dbg.output_add(1280, 720)");
+        int outId = addResult.valid() ? addResult.get<int>() : -1;
+        check("output_add returns valid id", outId >= 0);
+
+        // Warp
+        lua.script("dbg.output_warp(" + std::to_string(outId) +
+            ", 0.05, 0.0, 0.95, 0.05, 0.0, 1.0, 1.0, 1.0)");
+        check("output_warp (no crash)", true);
+
+        // Warp reset
+        lua.script("dbg.output_warp_reset(" + std::to_string(outId) + ")");
+        check("output_warp_reset (no crash)", true);
+
+        // Blend
+        lua.script("dbg.output_blend(" + std::to_string(outId) +
+            ", 0.1, 0.1, 0.0, 0.0, 2.2)");
+        check("output_blend (no crash)", true);
+
+        // Blend reset
+        lua.script("dbg.output_blend_reset(" + std::to_string(outId) + ")");
+        check("output_blend_reset (no crash)", true);
+
+        // ── v3.4 Tests: Surface Zones ───────────────────────────────────
+        std::cout << "\n--- v3.4: Surface Zones ---" << std::endl;
+
+        auto zoneResult = lua.script("return dbg.zone_add('TestZone', 0.0, 0.0, 0.5, 1.0)");
+        int zoneId = zoneResult.valid() ? zoneResult.get<int>() : -1;
+        check("zone_add returns valid id", zoneId >= 0);
+
+        // Assign zone to output
+        lua.script("dbg.zone_assign(" + std::to_string(zoneId) + ", " + std::to_string(outId) + ")");
+        check("zone_assign (no crash)", true);
+
+        // ── v3.4 Tests: Scene Switcher ──────────────────────────────────
+        std::cout << "\n--- v3.4: Scene Switcher ---" << std::endl;
+
+        lua.script("dbg.scene_capture('test_scene_A')");
+        check("scene_capture (no crash)", true);
+
+        // Modify warp, capture a second scene
+        lua.script("dbg.output_warp(" + std::to_string(outId) +
+            ", 0.0, 0.05, 0.95, 0.0, 0.0, 1.0, 1.0, 1.0)");
+        lua.script("dbg.scene_capture('test_scene_B')");
+        check("scene_capture B (no crash)", true);
+
+        // Apply scene A
+        lua.script("dbg.scene_apply('test_scene_A')");
+        check("scene_apply (no crash)", true);
+
+        // ── v3.4 Tests: Grid Warp ───────────────────────────────────────
+        std::cout << "\n--- v3.4: Grid Warp ---" << std::endl;
+
+        lua.script("dbg.output_gridwarp(" + std::to_string(outId) + ", 1, 1, 0.3, 0.3)");
+        check("output_gridwarp set point (no crash)", true);
+
+        lua.script("dbg.output_gridwarp_reset(" + std::to_string(outId) + ")");
+        check("output_gridwarp_reset (no crash)", true);
+
+        // ── v3.4 Tests: Panic All ───────────────────────────────────────
+        std::cout << "\n--- v3.4: Panic All ---" << std::endl;
+
+        // First set warp+blend so panic has something to reset
+        lua.script("dbg.output_warp(" + std::to_string(outId) +
+            ", 0.05, 0.0, 0.95, 0.05, 0.0, 1.0, 1.0, 1.0)");
+        lua.script("dbg.output_blend(" + std::to_string(outId) +
+            ", 0.1, 0.1, 0.0, 0.0, 2.2)");
+        lua.script("dbg.panic_all()");
+        check("panic_all (no crash)", true);
+
+        // ── v3.4 Tests: set_param ───────────────────────────────────────
+        std::cout << "\n--- v3.4: set_param ---" << std::endl;
+        {
+            // Create a SceneObjectNode which has ParamSpec with mesh_file
+            lua.script("dbg.create('SceneObjectNode', 'test_param_obj')");
+            lua.script("_dbg_process_pending()");
+
+            auto spResult = lua.script("return dbg.set_param('test_param_obj', 'mesh_file', 'torus.mesh')");
+            bool spOk = spResult.valid() ? spResult.get<bool>() : false;
+            check("set_param returns true", spOk);
+
+            // Cleanup
+            lua.script("dbg.delete('test_param_obj')");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.4 Tests: Preset load ─────────────────────────────────────
+        std::cout << "\n--- v3.4: Preset ---" << std::endl;
+        {
+            lua.script("dbg.preset('perlin_pulse')");
+            lua.script("_dbg_process_pending()");
+
+            // perlin_pulse creates primary node "perlin_pulse_fx"
+            auto inspResult = lua.script("return dbg.inspect('perlin_pulse_fx')");
+            bool inspOk = inspResult.valid() ? inspResult.get<bool>() : false;
+            check("preset perlin_pulse: node exists", inspOk);
+
+            // Cleanup — delete both nodes created by preset
+            lua.script("dbg.delete('perlin_pulse_fx')");
+            lua.script("dbg.delete('perlin_pulse_mesh')");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.4 Tests: Undo / Redo ────────────────────────────────────
+        std::cout << "\n--- v3.4: Undo / Redo ---" << std::endl;
+        {
+            // Create a node via CommandManager (ui_delete uses it, so does create)
+            lua.script("dbg.create('MathNode', 'test_undo_node')");
+            lua.script("_dbg_process_pending()");
+
+            // Verify it exists
+            auto exists1 = lua.script("return dbg.inspect('test_undo_node')");
+            check("undo: node created", exists1.valid() && exists1.get<bool>());
+
+            // Delete via ui_delete (CommandManager, supports undo)
+            lua.script("dbg.ui_delete('test_undo_node')");
+            lua.script("_dbg_process_pending()");
+
+            // Undo the deletion
+            lua.script("dbg.undo()");
+            lua.script("_dbg_process_pending()");
+
+            auto exists2 = lua.script("return dbg.inspect('test_undo_node')");
+            check("undo: node restored after undo", exists2.valid() && exists2.get<bool>());
+
+            // Redo the deletion
+            lua.script("dbg.redo()");
+            lua.script("_dbg_process_pending()");
+
+            // Cleanup (might already be deleted by redo, but delete is safe on missing)
+            lua.script("dbg.delete('test_undo_node')");
+            lua.script("_dbg_process_pending()");
+            check("redo (no crash)", true);
+        }
+
+        // ── v3.4 Tests: Save project ────────────────────────────────────
+        std::cout << "\n--- v3.4: Save/Load ---" << std::endl;
+        {
+            auto saveResult = lua.script("return dbg.save('output/test_save.bbfx-project')");
+            bool saveOk = saveResult.valid() ? saveResult.get<bool>() : false;
+            check("save project returns true", saveOk);
+
+            // Load is deferred to next frame — just verify the command queues without crash.
+            auto loadResult = lua.script("return dbg.load('output/test_save.bbfx-project')");
+            bool loadOk = loadResult.valid() ? loadResult.get<bool>() : false;
+            check("load project queued (no crash)", loadOk);
+        }
+
+        // ── v3.4 Tests: scene_list ──────────────────────────────────────
+        std::cout << "\n--- v3.4: scene_list ---" << std::endl;
+        // scene_capture was called earlier with 'test_scene_A' and 'test_scene_B'
+        lua.script("dbg.scene_list()");
+        check("scene_list (no crash)", true);
+
+        // ── v3.4 Cleanup ────────────────────────────────────────────────
+        std::cout << "\n--- v3.4: Cleanup ---" << std::endl;
+
+        lua.script("dbg.zone_remove(" + std::to_string(zoneId) + ")");
+        check("zone_remove (no crash)", true);
+
+        lua.script("dbg.output_remove(" + std::to_string(outId) + ")");
+        check("output_remove (no crash)", true);
 
         std::cout << "\n=== Results: " << pass << " PASS, " << fail << " FAIL ===" << std::endl;
         if (fail == 0) std::cout << "ALL TESTS PASSED" << std::endl;
@@ -1439,6 +1603,46 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         return sol::as_table(result);
     };
 
+    // ── MIDI Clock commands (v3.4 Lot L) ────────────────────────────
+    dbg["midi_clock_start"] = [](std::string nodeName, float bpm) {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] midi_clock_start: no Animator" << std::endl; return; }
+        auto* n = animator->getRegisteredNode(nodeName);
+        if (!n || n->getTypeName() != "MidiOutputNode") {
+            std::cout << "[dbg] midi_clock_start: " << nodeName
+                      << " is not a MidiOutputNode" << std::endl;
+            return;
+        }
+        static_cast<MidiOutputNode*>(n)->clockStart(bpm);
+    };
+
+    dbg["midi_clock_stop"] = [](std::string nodeName) {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] midi_clock_stop: no Animator" << std::endl; return; }
+        auto* n = animator->getRegisteredNode(nodeName);
+        if (!n || n->getTypeName() != "MidiOutputNode") {
+            std::cout << "[dbg] midi_clock_stop: " << nodeName
+                      << " is not a MidiOutputNode" << std::endl;
+            return;
+        }
+        static_cast<MidiOutputNode*>(n)->clockStop();
+    };
+
+    dbg["midi_clock_status"] = [](std::string nodeName) {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] midi_clock_status: no Animator" << std::endl; return; }
+        auto* n = animator->getRegisteredNode(nodeName);
+        if (!n || n->getTypeName() != "MidiOutputNode") {
+            std::cout << "[dbg] midi_clock_status: " << nodeName
+                      << " is not a MidiOutputNode" << std::endl;
+            return;
+        }
+        auto* mn = static_cast<MidiOutputNode*>(n);
+        std::cout << "[dbg] midi_clock_status: " << nodeName
+                  << " running=" << (mn->isClockRunning() ? "yes" : "no")
+                  << " bpm=" << mn->getClockBpm() << std::endl;
+    };
+
     // ── MIDI Learn commands (v3.3) ──────────────────────────────────
     dbg["midi_learn_fader"] = [](int faderIndex) {
         MidiLearnTarget target;
@@ -1518,6 +1722,446 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         }
     };
 
+    // ── Output commands (v3.4) ─────────────────────────────────────────
+    dbg["output_add"] = [app](int w, int h) -> int {
+        if (app && app->getEngine() && app->getEngine()->getOutputManager()) {
+            auto* sceneMgr = Engine::instance()->getSceneManager();
+            int id = app->getEngine()->getOutputManager()->addOutput(w, h, sceneMgr);
+            std::cout << "[dbg] output_add(" << w << "x" << h << ") → id=" << id << std::endl;
+            return id;
+        }
+        return -1;
+    };
+
+    dbg["output_remove"] = [app](int id) {
+        if (app && app->getEngine() && app->getEngine()->getOutputManager()) {
+            app->getEngine()->getOutputManager()->removeOutput(id);
+            std::cout << "[dbg] output_remove(id=" << id << ")" << std::endl;
+        }
+    };
+
+    dbg["output_list"] = [app]() {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) {
+            std::cout << "[dbg] output_list: OutputManager not available" << std::endl;
+            return;
+        }
+        const auto& slots = app->getEngine()->getOutputManager()->getAllSlots();
+        std::cout << "[dbg] Outputs: " << slots.size() << std::endl;
+        for (const auto& s : slots) {
+            std::cout << "  [" << s.id << "] "
+                      << s.width << "x" << s.height
+                      << " monitor=" << s.monitorIndex
+                      << " fullscreen=" << (s.fullscreen ? "yes" : "no")
+                      << " warp=" << (s.warpEnabled ? "on" : "off")
+                      << std::endl;
+        }
+    };
+
+    // Warp commands (v3.4)
+    dbg["output_warp"] = [app](int id,
+                               float tl_x, float tl_y,
+                               float tr_x, float tr_y,
+                               float bl_x, float bl_y,
+                               float br_x, float br_y) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto* mgr = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) { std::cout << "[dbg] output_warp: slot " << id << " not found" << std::endl; return; }
+        float* c = slot->warpProfile.corners;
+        c[0]=tl_x; c[1]=tl_y; c[2]=tr_x; c[3]=tr_y;
+        c[4]=bl_x; c[5]=bl_y; c[6]=br_x; c[7]=br_y;
+        if (!slot->warpEnabled) mgr->enableWarp(id);
+        mgr->updateWarpParams(id);
+        std::cout << "[dbg] output_warp(" << id << "): TL=(" << tl_x << "," << tl_y
+                  << ") TR=(" << tr_x << "," << tr_y
+                  << ") BL=(" << bl_x << "," << bl_y
+                  << ") BR=(" << br_x << "," << br_y << ")" << std::endl;
+    };
+
+    dbg["output_warp_reset"] = [app](int id) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto* mgr = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) return;
+        slot->warpProfile.reset();
+        if (slot->warpEnabled) mgr->updateWarpParams(id);
+        std::cout << "[dbg] output_warp_reset(" << id << "): identity restored" << std::endl;
+    };
+
+    dbg["output_warp_panic"] = [app]() {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        app->getEngine()->getOutputManager()->resetAllWarps();
+        std::cout << "[dbg] output_warp_panic: all warps reset" << std::endl;
+    };
+
+    // Blend commands (v3.4)
+    dbg["output_blend"] = [app](int id,
+                                float left, float right,
+                                float top, float bottom, float gamma) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto* mgr = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) { std::cout << "[dbg] output_blend: slot " << id << " not found" << std::endl; return; }
+        slot->blendProfile.left   = left;
+        slot->blendProfile.right  = right;
+        slot->blendProfile.top    = top;
+        slot->blendProfile.bottom = bottom;
+        slot->blendProfile.gamma  = gamma;
+        if (!slot->blendEnabled) mgr->enableBlend(id);
+        mgr->updateBlendParams(id);
+        std::cout << "[dbg] output_blend(" << id << "): L=" << left << " R=" << right
+                  << " T=" << top << " B=" << bottom << " g=" << gamma << std::endl;
+    };
+
+    dbg["output_blend_reset"] = [app](int id) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto* mgr = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) return;
+        slot->blendProfile.reset();
+        if (slot->blendEnabled) mgr->updateBlendParams(id);
+        std::cout << "[dbg] output_blend_reset(" << id << "): cleared" << std::endl;
+    };
+
+    // ── WarpWizard commands (v3.4 Lot D) ──────────────────────────────────────
+
+    dbg["wizard_start"] = [app](int slotId) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto& wizard = app->getWarpWizard();
+        if (wizard.isActive()) {
+            std::cout << "[dbg] wizard_start: wizard already active on slot "
+                      << wizard.getOutputSlotId() << std::endl;
+            return;
+        }
+        wizard.start(slotId, app->getEngine()->getOutputManager());
+        std::cout << "[dbg] wizard_start(" << slotId << "): state="
+                  << wizard.getInstructionText() << std::endl;
+    };
+
+    dbg["wizard_click"] = [app](float nx, float ny) {
+        if (!app) return;
+        auto& wizard = app->getWarpWizard();
+        if (!wizard.isActive()) {
+            std::cout << "[dbg] wizard_click: no wizard active" << std::endl;
+            return;
+        }
+        wizard.handleMouseClick(nx, ny);
+        std::cout << "[dbg] wizard_click(" << nx << ", " << ny
+                  << "): clicks=" << wizard.getNumClicked()
+                  << " state=" << wizard.getInstructionText() << std::endl;
+    };
+
+    dbg["wizard_cancel"] = [app]() {
+        if (!app) return;
+        auto& wizard = app->getWarpWizard();
+        if (!wizard.isActive()) {
+            std::cout << "[dbg] wizard_cancel: no wizard active" << std::endl;
+            return;
+        }
+        wizard.cancel();
+        std::cout << "[dbg] wizard_cancel: done" << std::endl;
+    };
+
+    dbg["wizard_state"] = [app]() {
+        if (!app) return;
+        auto& wizard = app->getWarpWizard();
+        if (!wizard.isActive()) {
+            std::cout << "[dbg] wizard_state: IDLE" << std::endl;
+        } else {
+            std::cout << "[dbg] wizard_state: slot=" << wizard.getOutputSlotId()
+                      << " clicks=" << wizard.getNumClicked()
+                      << " text=\"" << wizard.getInstructionText() << "\"" << std::endl;
+        }
+    };
+
+    // ── Surface Map / Zone commands (v3.4 Lot E) ──────────────────────────────
+
+    dbg["zone_add"] = [app](std::string name, float x, float y, float w, float h) -> int {
+        if (!app) return -1;
+        auto* sm = app->getSurfaceMap();
+        if (!sm) { std::cout << "[dbg] zone_add: SurfaceMap not available" << std::endl; return -1; }
+        int id = sm->addZone(name, x, y, w, h);
+        std::cout << "[dbg] zone_add(\"" << name << "\", " << x << ", " << y
+                  << ", " << w << ", " << h << ") → id=" << id << std::endl;
+        return id;
+    };
+
+    dbg["zone_remove"] = [app](int id) {
+        if (!app) return;
+        auto* sm = app->getSurfaceMap();
+        if (!sm) return;
+        sm->removeZone(id);
+        std::cout << "[dbg] zone_remove(" << id << ")" << std::endl;
+    };
+
+    dbg["zone_assign"] = [app](int zoneId, int outputSlotId) {
+        if (!app) return;
+        auto* sm = app->getSurfaceMap();
+        if (!sm) return;
+        sm->assignZoneToSlot(zoneId, outputSlotId);
+        // Also set slot.zoneId so the blit shader knows which zone to crop
+        if (app->getEngine() && app->getEngine()->getOutputManager()) {
+            auto* s = app->getEngine()->getOutputManager()->getSlot(outputSlotId);
+            if (s) s->zoneId = zoneId;
+        }
+        std::cout << "[dbg] zone_assign(" << zoneId << ", " << outputSlotId << ")" << std::endl;
+    };
+
+    dbg["zone_list"] = [app]() {
+        auto* sm = app->getSurfaceMap();
+        if (!sm) { std::cout << "[dbg] zone_list: no SurfaceMap" << std::endl; return; }
+        std::cout << "[dbg] Zones (" << sm->size() << "):" << std::endl;
+        for (const auto& z : sm->getAllZones()) {
+            std::cout << "  [" << z.id << "] \"" << z.name << "\""
+                      << " pos=(" << z.x << "," << z.y << ")"
+                      << " size=(" << z.width << "," << z.height << ")"
+                      << " output=" << z.outputSlotId << std::endl;
+        }
+    };
+
+    // ── Network Sync (v3.4 Lot F) ─────────────────────────────────────────────
+
+    dbg["sync_start"] = [app](std::string role) {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync) { std::cout << "[dbg] sync_start: SyncManager not available" << std::endl; return; }
+        SyncRole r = syncRoleFromString(role);
+        sync->setRole(r);
+        sync->start();
+        std::cout << "[dbg] sync_start(\"" << role << "\"): started as " << syncRoleName(r) << std::endl;
+    };
+
+    dbg["sync_stop"] = [app]() {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync) { std::cout << "[dbg] sync_stop: SyncManager not available" << std::endl; return; }
+        sync->stop();
+        std::cout << "[dbg] sync_stop: stopped" << std::endl;
+    };
+
+    dbg["sync_peers"] = [app]() {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync) { std::cout << "[dbg] sync_peers: SyncManager not available" << std::endl; return; }
+        const auto& peers = sync->getPeers();
+        std::cout << "[dbg] sync_peers: " << peers.size() << " peer(s)" << std::endl;
+        for (const auto& p : peers) {
+            std::cout << "  " << p.hostname << " (" << p.ip << ")"
+                      << " role=" << syncRoleName(p.role)
+                      << " " << (p.connected ? "online" : "lost") << std::endl;
+        }
+    };
+
+    dbg["sync_chord"] = [app](std::string name) {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync || !sync->isRunning()) { std::cout << "[dbg] sync_chord: not running" << std::endl; return; }
+        sync->sendChord(name);
+        std::cout << "[dbg] sync_chord(\"" << name << "\"): sent" << std::endl;
+    };
+
+    dbg["sync_panic"] = [app]() {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync || !sync->isRunning()) { std::cout << "[dbg] sync_panic: not running" << std::endl; return; }
+        sync->sendPanic();
+        std::cout << "[dbg] sync_panic: PANIC sent to all slaves" << std::endl;
+    };
+
+    dbg["sync_beat"] = [app](float bpm, int beat) {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync || !sync->isRunning()) { std::cout << "[dbg] sync_beat: not running" << std::endl; return; }
+        sync->pushBeat(bpm, beat);
+        std::cout << "[dbg] sync_beat(" << bpm << ", " << beat << "): sent" << std::endl;
+    };
+
+    // ── PANIC ALL (v3.4 Lot M) ───────────────────────────────────────────────
+    dbg["panic_all"] = [app]() {
+        if (!app) { std::cout << "[dbg] panic_all: no StudioApp" << std::endl; return; }
+        app->panicAll();
+    };
+
+    // ── Spout Output (v3.4 Lot H) ─────────────────────────────────────────────
+
+    dbg["spout_enable"] = [app](int slotId, sol::optional<std::string> name) {
+        auto* mgr = app && app->getEngine() ? app->getEngine()->getOutputManager() : nullptr;
+        if (!mgr) { std::cout << "[dbg] spout_enable: OutputManager not available" << std::endl; return; }
+        std::string srcName = name.value_or("");
+        mgr->enableTextureShare(slotId, srcName);
+        std::cout << "[dbg] spout_enable(" << slotId << ", \"" << srcName << "\")" << std::endl;
+    };
+
+    dbg["spout_disable"] = [app](int slotId) {
+        auto* mgr = app && app->getEngine() ? app->getEngine()->getOutputManager() : nullptr;
+        if (!mgr) { std::cout << "[dbg] spout_disable: OutputManager not available" << std::endl; return; }
+        mgr->disableTextureShare(slotId);
+        std::cout << "[dbg] spout_disable(" << slotId << ")" << std::endl;
+    };
+
+    // ── NDI Output (v3.4 Lot I) ───────────────────────────────────────────────
+
+    dbg["ndi_status"] = []() {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] ndi_status: no Animator" << std::endl; return; }
+        bool found = false;
+        for (const auto& n : animator->getRegisteredNodeNames()) {
+            auto* node = animator->getRegisteredNode(n);
+            if (node && node->getTypeName() == "NdiOutputNode") {
+                found = true;
+                std::cout << "[dbg] ndi_status: NdiOutputNode \"" << n << "\" active" << std::endl;
+            }
+        }
+        if (!found) std::cout << "[dbg] ndi_status: no NdiOutputNode in DAG" << std::endl;
+    };
+
+    // ── Artnet/DMX (v3.4 Lot J) ──────────────────────────────────────────────
+
+    dbg["artnet_send"] = [](std::string ip, int universe, sol::variadic_args channels) {
+        // Build a minimal Art-Net packet and log a hex dump
+        std::vector<uint8_t> data;
+        for (auto ch : channels) {
+            float v = ch.get<float>();
+            data.push_back(static_cast<uint8_t>(std::clamp(static_cast<int>(v * 255.f), 0, 255)));
+        }
+        if (data.empty()) { std::cout << "[dbg] artnet_send: no channels" << std::endl; return; }
+        auto pkt = ArtnetOutputNode::buildPacket(universe, data, 1);
+        std::cout << "[dbg] artnet_send(" << ip << ", uni=" << universe
+                  << ", ch=" << data.size() << ") packet=" << pkt.size() << " bytes" << std::endl;
+        std::cout << "[dbg] hex:";
+        for (size_t i = 0; i < std::min(pkt.size(), size_t(32)); ++i)
+            printf(" %02X", pkt[i]);
+        std::cout << std::endl;
+    };
+
+    dbg["artnet_quick_assign"] = [](std::string nodeName) {
+        auto* animator = Animator::instance();
+        if (!animator) { std::cout << "[dbg] artnet_quick_assign: no Animator" << std::endl; return; }
+        auto* n = animator->getRegisteredNode(nodeName);
+        if (!n || n->getTypeName() != "ArtnetOutputNode") {
+            std::cout << "[dbg] artnet_quick_assign: " << nodeName << " is not an ArtnetOutputNode" << std::endl;
+            return;
+        }
+        static_cast<ArtnetOutputNode*>(n)->quickAssignAudio();
+    };
+
+    // dbg.output_gridwarp(id, row, col, x, y) — move one grid point on output <id>
+    dbg["output_gridwarp"] = [app](int id, int row, int col, float x, float y) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) {
+            std::cout << "[dbg] output_gridwarp: OutputManager not available" << std::endl;
+            return;
+        }
+        auto* mgr  = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) {
+            std::cout << "[dbg] output_gridwarp: no slot with id=" << id << std::endl;
+            return;
+        }
+        if (row < 0 || row >= GridWarpProfile::N || col < 0 || col >= GridWarpProfile::N) {
+            std::cout << "[dbg] output_gridwarp: row/col out of range (0-" << GridWarpProfile::N - 1 << ")" << std::endl;
+            return;
+        }
+        slot->gridWarpProfile.setPoint(row, col, x, y);
+        if (!slot->gridWarpEnabled) mgr->enableGridWarp(id);
+        mgr->updateGridWarpParams(id);
+        std::cout << "[dbg] output_gridwarp: slot=" << id
+                  << " pt(" << row << "," << col << ")=(" << x << "," << y << ")" << std::endl;
+    };
+
+    // dbg.output_gridwarp_reset(id) — reset grid warp to identity on output <id>
+    dbg["output_gridwarp_reset"] = [app](int id) {
+        if (!app || !app->getEngine() || !app->getEngine()->getOutputManager()) return;
+        auto* mgr  = app->getEngine()->getOutputManager();
+        auto* slot = mgr->getSlot(id);
+        if (!slot) return;
+        slot->gridWarpProfile.reset();
+        if (slot->gridWarpEnabled) mgr->updateGridWarpParams(id);
+        std::cout << "[dbg] output_gridwarp_reset: slot=" << id << " reset to identity" << std::endl;
+    };
+
+    dbg["sync_role"] = [app]() {
+        auto* sync = app ? app->getSyncManager() : nullptr;
+        if (!sync) { std::cout << "[dbg] sync_role: not available" << std::endl; return; }
+        std::cout << "[dbg] sync_role: " << syncRoleName(sync->getRole())
+                  << " running=" << (sync->isRunning() ? "yes" : "no")
+                  << " clockOffset=" << sync->getClockOffset() << " ms" << std::endl;
+    };
+
+    // Master View panel toggle (v3.4 Lot N)
+    dbg["master_view"] = [app]() {
+        if (!app) return;
+        bool& show = app->showMasterView();
+        show = !show;
+        std::cout << "[dbg] master_view: visible=" << (show ? "true" : "false") << std::endl;
+    };
+
+    // Scene Switcher commands (v3.4 Lot O)
+    dbg["scene_capture"] = [app](const std::string& chordName) {
+        if (!app || !app->getPerformanceModePanel()) {
+            std::cout << "[dbg] scene_capture: no perf panel" << std::endl;
+            return;
+        }
+        if (chordName.empty()) {
+            std::cout << "[dbg] scene_capture: usage: dbg.scene_capture('chordName')" << std::endl;
+            return;
+        }
+        auto* surfMap = app->getSurfaceMap();
+        Ogre::Camera* cam = nullptr;
+        if (app->getEngine() && app->getEngine()->getSceneManager()) {
+            auto it = app->getEngine()->getSceneManager()->getCameraIterator();
+            if (it.hasMoreElements()) cam = it.peekNextValue();
+        }
+        if (!surfMap) {
+            std::cout << "[dbg] scene_capture: no surface map" << std::endl;
+            return;
+        }
+        app->getPerformanceModePanel()->captureChordZoneSnapshot(chordName, *surfMap, cam);
+        auto& snaps = app->getPerformanceModePanel()->getChordZoneSnapshots();
+        auto it2 = snaps.find(chordName);
+        int n = (it2 != snaps.end()) ? static_cast<int>(it2->second.zoneCount()) : 0;
+        std::cout << "[dbg] scene_capture: captured zone snapshot '" << chordName << "' (" << n << " zones)" << std::endl;
+    };
+
+    dbg["scene_apply"] = [app](const std::string& chordName) {
+        if (!app || !app->getPerformanceModePanel()) {
+            std::cout << "[dbg] scene_apply: no perf panel" << std::endl;
+            return;
+        }
+        if (chordName.empty()) {
+            std::cout << "[dbg] scene_apply: usage: dbg.scene_apply('chordName')" << std::endl;
+            return;
+        }
+        if (!app->getPerformanceModePanel()->hasChordZoneSnapshot(chordName)) {
+            std::cout << "[dbg] scene_apply: no zone snapshot for chord '" << chordName << "'" << std::endl;
+            return;
+        }
+        auto* surfMap = app->getSurfaceMap();
+        auto* outMgr = (app->getEngine()) ? app->getEngine()->getOutputManager() : nullptr;
+        Ogre::Camera* cam = nullptr;
+        if (app->getEngine() && app->getEngine()->getSceneManager()) {
+            auto it = app->getEngine()->getSceneManager()->getCameraIterator();
+            if (it.hasMoreElements()) cam = it.peekNextValue();
+        }
+        if (!surfMap || !outMgr) {
+            std::cout << "[dbg] scene_apply: no surface map or output manager" << std::endl;
+            return;
+        }
+        app->getPerformanceModePanel()->applyChordZoneSnapshot(chordName, *surfMap, *outMgr, cam);
+        std::cout << "[dbg] scene_apply: applied zone snapshot '" << chordName << "'" << std::endl;
+    };
+
+    dbg["scene_list"] = [app]() {
+        if (!app || !app->getPerformanceModePanel()) {
+            std::cout << "[dbg] scene_list: no perf panel" << std::endl;
+            return;
+        }
+        auto& snaps = app->getPerformanceModePanel()->getChordZoneSnapshots();
+        if (snaps.empty()) {
+            std::cout << "[dbg] scene_list: no zone snapshots" << std::endl;
+            return;
+        }
+        std::cout << "[dbg] scene_list: " << snaps.size() << " zone snapshot(s)" << std::endl;
+        for (auto& [name, zs] : snaps) {
+            std::cout << "  '" << name << "': " << zs.zoneCount() << " zones, camera("
+                      << zs.camPosX() << ", " << zs.camPosY() << ", " << zs.camPosZ()
+                      << ") FOV=" << zs.camFov() << std::endl;
+        }
+    };
+
     dbg["run_ui_tests"] = [app]() {
         if (!app || !app->getTestEngine()) {
             std::cout << "[dbg] run_ui_tests: test engine not available" << std::endl;
@@ -1569,17 +2213,69 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::cout << "  dbg.midi_monitor(bool)              Toggle MIDI monitor" << std::endl;
         std::cout << "  dbg.midi_send(ch,st,d1,d2)          Send MIDI output" << std::endl;
         std::cout << "  dbg.midi_poll()                     Poll MIDI messages" << std::endl;
+        std::cout << "--- MIDI Clock Master (v3.4 Lot L) ---" << std::endl;
+        std::cout << "  dbg.midi_clock_start(node,bpm)      Start clock master on MidiOutputNode" << std::endl;
+        std::cout << "  dbg.midi_clock_stop(node)           Stop clock master" << std::endl;
+        std::cout << "  dbg.midi_clock_status(node)         Show clock running state + BPM" << std::endl;
         std::cout << "  dbg.midi_learn_fader(index)         Start MIDI Learn for fader" << std::endl;
         std::cout << "  dbg.midi_learn_trigger(index)       Start MIDI Learn for trigger" << std::endl;
         std::cout << "  dbg.midi_learn_port(node,port)      Start MIDI Learn for DAG port" << std::endl;
         std::cout << "  dbg.midi_learn_cancel()             Cancel MIDI Learn" << std::endl;
         std::cout << "  dbg.midi_bindings()                 List MIDI bindings" << std::endl;
         std::cout << "  dbg.midi_clear_bindings()           Clear all MIDI bindings" << std::endl;
-        std::cout << "--- Output (v3.3) ---" << std::endl;
-        std::cout << "  dbg.output_open(w,h)                Open output window" << std::endl;
-        std::cout << "  dbg.output_close()                  Close output window" << std::endl;
-        std::cout << "  dbg.output_fullscreen()             Toggle output fullscreen" << std::endl;
-        std::cout << "  dbg.output_resolution(w,h)          Set output resolution" << std::endl;
+        std::cout << "--- Output (v3.3 compat) ---" << std::endl;
+        std::cout << "  dbg.output_open(w,h)                Open output window (slot 0)" << std::endl;
+        std::cout << "  dbg.output_close()                  Close output window (slot 0)" << std::endl;
+        std::cout << "  dbg.output_fullscreen()             Toggle output fullscreen (slot 0)" << std::endl;
+        std::cout << "  dbg.output_resolution(w,h)          Set output resolution (slot 0)" << std::endl;
+        std::cout << "--- Output (v3.4 multi) ---" << std::endl;
+        std::cout << "  dbg.output_add(w,h)                 Add output window, returns id" << std::endl;
+        std::cout << "  dbg.output_remove(id)               Remove output window by id" << std::endl;
+        std::cout << "  dbg.output_list()                   List all active outputs" << std::endl;
+        std::cout << "--- Warp (v3.4) ---" << std::endl;
+        std::cout << "  dbg.output_warp(id,tl_x,tl_y,tr_x,tr_y,bl_x,bl_y,br_x,br_y)" << std::endl;
+        std::cout << "  dbg.output_warp_reset(id)           Reset warp to identity" << std::endl;
+        std::cout << "  dbg.output_warp_panic()             Reset all warps (all outputs)" << std::endl;
+        std::cout << "--- Blend (v3.4) ---" << std::endl;
+        std::cout << "  dbg.output_blend(id,left,right,top,bottom,gamma)" << std::endl;
+        std::cout << "  dbg.output_blend_reset(id)          Reset blend to zero" << std::endl;
+        std::cout << "--- Warp Wizard (v3.4 Lot D) ---" << std::endl;
+        std::cout << "  dbg.wizard_start(slotId)            Start calibration wizard" << std::endl;
+        std::cout << "  dbg.wizard_click(nx, ny)            Simulate a click (normalised 0-1)" << std::endl;
+        std::cout << "  dbg.wizard_cancel()                 Cancel wizard and restore warp" << std::endl;
+        std::cout << "  dbg.wizard_state()                  Show current wizard state" << std::endl;
+        std::cout << "--- Surface Map (v3.4 Lot E) ---" << std::endl;
+        std::cout << "  dbg.zone_add(name, x, y, w, h)      Add zone (normalised 0-1 coords)" << std::endl;
+        std::cout << "  dbg.zone_remove(id)                 Remove zone by id" << std::endl;
+        std::cout << "  dbg.zone_assign(zoneId, outputId)   Assign zone to output slot" << std::endl;
+        std::cout << "  dbg.zone_list()                     List all zones" << std::endl;
+        std::cout << "--- Grid Warp (v3.4 Lot K) ---" << std::endl;
+        std::cout << "  dbg.output_gridwarp(id,row,col,x,y)  Move grid control point (row,col) on output id" << std::endl;
+        std::cout << "  dbg.output_gridwarp_reset(id)        Reset grid warp to identity on output id" << std::endl;
+        std::cout << "--- Network Sync (v3.4 Lot F) ---" << std::endl;
+        std::cout << "  dbg.sync_start(role)                Start sync (role: master/slave/standalone)" << std::endl;
+        std::cout << "  dbg.sync_stop()                     Stop sync" << std::endl;
+        std::cout << "  dbg.sync_peers()                    List discovered peers" << std::endl;
+        std::cout << "  dbg.sync_role()                     Show current role + status" << std::endl;
+        std::cout << "  dbg.sync_chord(name)                Send chord to slaves (master only)" << std::endl;
+        std::cout << "  dbg.sync_beat(bpm, beat)            Push beat to slaves (master only)" << std::endl;
+        std::cout << "  dbg.sync_panic()                    Send PANIC to all slaves (master only)" << std::endl;
+        std::cout << "--- Spout Output (v3.4 Lot H) ---" << std::endl;
+        std::cout << "  dbg.spout_enable(id, name)          Enable Spout on output slot" << std::endl;
+        std::cout << "  dbg.spout_disable(id)               Disable Spout on output slot" << std::endl;
+        std::cout << "--- NDI Output (v3.4 Lot I) ---" << std::endl;
+        std::cout << "  dbg.ndi_status()                    Show NDI sender status" << std::endl;
+        std::cout << "--- Artnet/DMX (v3.4 Lot J) ---" << std::endl;
+        std::cout << "  dbg.artnet_send(ip, uni, ...ch)     Send Art-Net DMX packet" << std::endl;
+        std::cout << "  dbg.artnet_quick_assign(name)       Auto-link audio bands to DMX ch1-3" << std::endl;
+        std::cout << "--- Master View (v3.4 Lot N) ---" << std::endl;
+        std::cout << "  dbg.master_view()                   Toggle Master View panel" << std::endl;
+        std::cout << "--- Scene Switcher (v3.4 Lot O) ---" << std::endl;
+        std::cout << "  dbg.scene_capture('name')           Capture zone snapshot for chord" << std::endl;
+        std::cout << "  dbg.scene_apply('name')             Apply zone snapshot (t=1.0)" << std::endl;
+        std::cout << "  dbg.scene_list()                    List all zone snapshots" << std::endl;
+        std::cout << "--- PANIC ---" << std::endl;
+        std::cout << "  dbg.panic_all()                     Reset all warps, blends, DMX, Spout, network" << std::endl;
         std::cout << "  dbg.help()                          This help" << std::endl;
     };
 

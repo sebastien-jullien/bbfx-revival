@@ -2,6 +2,8 @@
 #include "../../midi/MidiDeviceManager.h"
 #include "../../midi/MidiMessage.h"
 #include "../../core/AnimationPort.h"
+#include <algorithm>
+#include <iostream>
 
 namespace bbfx {
 
@@ -15,6 +17,7 @@ MidiOutputNode::MidiOutputNode(const std::string& name) : AnimationNode(name) {
     addInput(new AnimationPort("led_note", -1.0f));  // LED feedback: note number (-1=off)
     addInput(new AnimationPort("led_velocity", 0.0f)); // LED feedback: velocity (0=off, color)
     addInput(new AnimationPort("dt", 0.016f));
+    addInput(new AnimationPort("bpm", 120.0f)); // BPM for clock master mode
 
     {
         ParamDef d;
@@ -23,8 +26,47 @@ MidiOutputNode::MidiOutputNode(const std::string& name) : AnimationNode(name) {
         d.label = "Channel";
         mSpec.addParam(d);
     }
+    {
+        // mode: 0 = note_cc (default), 1 = clock_master
+        ParamDef d;
+        d.name = "mode"; d.type = ParamType::INT;
+        d.intVal = 0; d.minVal = 0; d.maxVal = 1;
+        d.label = "Mode (0=Note/CC, 1=Clock Master)";
+        mSpec.addParam(d);
+    }
+    {
+        ParamDef d;
+        d.name = "clock_bpm"; d.type = ParamType::FLOAT;
+        d.floatVal = 120.0f; d.minVal = 20.0f; d.maxVal = 300.0f;
+        d.label = "Clock BPM";
+        mSpec.addParam(d);
+    }
 
     setParamSpec(&mSpec);
+    mClockGen = std::make_unique<MidiClockGenerator>();
+}
+
+MidiOutputNode::~MidiOutputNode() {
+    if (mClockGen && mClockGen->isRunning()) mClockGen->stop();
+}
+
+void MidiOutputNode::clockStart(float bpm) {
+    if (!mClockGen) return;
+    if (mClockGen->isRunning()) mClockGen->stop();
+    mClockGen->start(bpm);
+    mLastClockBpm = bpm;
+}
+
+void MidiOutputNode::clockStop() {
+    if (mClockGen) mClockGen->stop();
+}
+
+bool MidiOutputNode::isClockRunning() const {
+    return mClockGen && mClockGen->isRunning();
+}
+
+float MidiOutputNode::getClockBpm() const {
+    return mClockGen ? mClockGen->getBpm() : 0.0f;
 }
 
 void MidiOutputNode::update() {
@@ -32,6 +74,39 @@ void MidiOutputNode::update() {
     if (!mgr) return;
 
     auto& ins = getInputs();
+
+    // ── Clock Master mode (v3.4 Lot L) ───────────────────────────────────────
+    auto* modeParam = mSpec.getParam("mode");
+    int mode = modeParam ? modeParam->intVal : 0;
+
+    if (mode == 1) {
+        // In clock_master mode: use bpm input port (or param) and tick
+        auto* bpmParam = mSpec.getParam("clock_bpm");
+        float bpm = bpmParam ? bpmParam->floatVal : 120.0f;
+
+        // Allow the "bpm" input port to override the param
+        auto bpmIt = ins.find("bpm");
+        if (bpmIt != ins.end()) {
+            float portBpm = static_cast<float>(bpmIt->second->getValue());
+            if (portBpm > 20.0f) bpm = portBpm;
+        }
+        bpm = std::clamp(bpm, 20.0f, 300.0f);
+
+        if (!mClockGen->isRunning()) {
+            mClockGen->start(bpm);
+            mLastClockBpm = bpm;
+        } else if (std::fabs(bpm - mLastClockBpm) > 0.01f) {
+            mClockGen->setBpm(bpm);
+            mLastClockBpm = bpm;
+        }
+        mClockGen->update(); // send pending ticks
+        fireUpdate();
+        return; // skip note/CC logic in clock master mode
+    }
+
+    // Stop clock if switching away from clock mode
+    if (mClockGen->isRunning()) mClockGen->stop();
+
     int channel = 1;
     auto* chanParam = mSpec.getParam("channel");
     if (chanParam) channel = chanParam->intVal;

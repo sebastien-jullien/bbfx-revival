@@ -37,6 +37,14 @@
 24. [BBFx Studio Content (v3.2)](#24-bbfx-studio-content-v32)
 25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
 
+**Sections compactes (v3.2.2 → v3.4)**
+- [v3.2.2 — Multi-Object Scene](#v322--multi-object-scene)
+- [v3.2.3 — Timeline Automation](#v323--timeline-automation)
+- [v3.2.4 — Asset Pipeline & Visual Application](#v324--asset-pipeline--visual-application)
+- [v3.2.5 — Performance Pro & Final Polish](#v325--performance-pro--final-polish)
+- [v3.3 — Connect](#v33--connect)
+- [v3.4 — Stage](#v34--stage)
+
 ---
 
 ## 1. Vue d'ensemble
@@ -1636,7 +1644,7 @@ Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infi
 
 ---
 
-## BBFx Studio — Architecture v3.0 → v3.3
+## BBFx Studio — Architecture v3.0 → v3.4
 
 Le BBFx Revival v3.x ajoute une couche Studio GUI complete au-dessus du moteur headless v2.x :
 
@@ -1746,4 +1754,37 @@ SceneHierarchyPanel (F8, visibility/lock par objet). SceneObjectNamer (nommage B
 **Lots J-N — Performance Mode Polish (23 iter, I-886→I-908) :** Serialiser macroActions triggers + MIDI bindings via MidiLearnManager source unique de verite. PANIC fix (rest snapshot capture au premier rendu + recapture apres loadProject, PANIC = restore). Trigger assignment UX (sous-menus Load Preset/Toggle Compositor/Set Param, ChordSystem connecte a DagSnapshot, "Capture as Chord Snapshot", labels auto-descriptifs). Fader UX fix (retrait bouton L legacy, "Quick Assign" right-click, value display ameliore). Crossfader polish (fix lerp ports manquants, repositionnement colonne droite).
 
 **Audit & fixes finaux (29 iter, I-909→I-937) :** Fix Set Param InputFloat static. Nettoyage code mort LearnCb InspectorPanel. Fix MidiMappingPanel deconnecte de MidiLearnManager. Learn conflict detection. Status bar MIDI/OSC/Output. Help shortcuts MIDI/OSC/Connect. Output fullscreen F11. MIDI Learn NodeEditor context menu. OSC Browser tree. MidiInputNode relative CC encoder. MidiOutputNode LED feedback. CC auto-assign global. Startup auto-detect MIDI. OSC preset recall + BPM via OSC. MappingProfile class. Multi-monitor preview OutputPanel. NdiOutputNode skeleton. Tests consolides MIDI/OSC/Output. Fix MappingProfile const-correctness. Fix autosave incomplet. Fix static map editValues. Fix trigger activation/desactivation proper. Fix FX nodes noms hardcodes (ColorShiftNode/PerlinFxNode/WaveVertexShader/TextureBlitterNode). Fix PerlinFxNode/WaveVertexShader cleanup clones OGRE. Fix deactivateTrigger suppression synchrone. Fix ColorShiftNode factory ogre fantome. Clean code (logs debug, liens dupliques, variable inutilisee). Autosave recovery dialog startup. MidiDeviceManager deviceId proper via CallbackData.
+
+### v3.4 — Stage
+**352 iterations (I-938 → I-1280 + I-FIX-1 → I-FIX-11), 17 lots (A-Q) + 62 fix iterations, 7 epics (EPIC-155 → EPIC-161)**
+
+**Lot A — OutputManager multi-slot (20 iter) :** OutputManager (src/output/) : architecture multi-slot (jusqu'a 8 sorties independantes), OutputSlot struct (RenderTexture, dimensions, nom, enabled), create/remove/resize slots, blit vers fenetre principale. OutputPanel (src/studio/panels/) : liste des slots actifs, add/remove/rename, resolution picker par slot, preview thumbnails, enable/disable toggle. Integration StudioEngine (render loop blit chaque slot actif). Serialisation ProjectSerializer section "outputs".
+
+**Lot B — QuadWarp per-output (20 iter) :** WarpProfile (src/output/) : 4 corners (Vector2 normalise 0-1), calcul matrice perspective bilineaire, serialisation JSON. GLSL distortion shader (warp_quad.glsl) : uniform mat4 perspective, fullscreen quad, texture lookup avec correction. QuadWarpEditor (src/studio/) : drag handles (4 coins + centre), keyboard precision mode (fleches 1px, Shift+fleches 10px), reset to default, preview overlay wireframe. Integration OutputPanel : bouton "Edit Warp" par slot, overlay QuadWarpEditor sur ViewportPanel. WarpProfile par OutputSlot, serialisation save/load.
+
+**Lot C — EdgeBlend per-output (20 iter) :** BlendProfile (src/output/) : zones overlap (left, right, top, bottom) avec largeur pixels + gamma + RGB per-channel. GLSL blend shader (edge_blend.glsl) : mix smoothstep sur zones bordures, correction gamma, color control. EdgeBlendEditor : sliders par zone (largeur, gamma, R/G/B), preview overlay gradient. Integration OutputPanel : bouton "Edit Blend" par slot. BlendProfile par OutputSlot. Combinaison warp + blend dans pipeline rendu (warp applique en premier, blend en second).
+
+**Lot D — GridWarp (20 iter) :** GridWarpProfile (src/output/) : grille NxM control points (Vector2[]), mesh deformation, interpolation bilineaire entre points. GLSL grid shader (warp_grid.glsl) : vertex displacement mesh-based. GridWarpEditor : drag control points, grid density slider (2x2 a 16x16), reset-to-grid, selection multi-points. Integration WarpProfile : flag isGrid, switch QuadWarp/GridWarp dans editor. Serialisation grille complete.
+
+**Lot E — WarpWizard (16 iter) :** WarpWizard (src/studio/) : workflow step-by-step (1. Select Output → 2. Choose Warp Type → 3. Adjust Parameters → 4. Preview → 5. Apply). UI wizard modal ImGui (Next/Back/Cancel/Apply). Live preview durant calibration. Integration undo/redo (CompoundCommand warp + blend). Bouton "Wizard" dans OutputPanel. Quick presets (No Warp, Corner Pin, Barrel, Pincushion).
+
+**Lot F — SurfaceMap multi-zone (20 iter) :** SurfaceMap (src/surface/) : collection de zones nommees, chaque zone = output assignment + WarpProfile + BlendProfile + GridWarpProfile. Zone management : add/remove/rename/duplicate/reorder. SurfaceEditorPanel (src/studio/panels/) : liste zones, drag-reorder, zone-to-output assignment dropdown, per-zone warp/blend inline. Select zone → edit dans OutputPanel. ZoneSnapshot (src/surface/) : capture etat complet warp+blend d'une zone, apply/restore. Serialisation ProjectSerializer section "surfaces".
+
+**Lot G — SyncManager (20 iter) :** SyncManager (src/network/) : UDP clock protocol custom (packet = BPM + beat + bar + phase + timestamp), master/slave auto-detect (premier emetteur = master), slave sync (PLL phase-locked loop, drift correction), latency compensation (RTT measurement, offset), broadcast heartbeat. Integration BeatDetector : master broadcast BPM changes, slave override local BPM. NetworkPanel (src/studio/panels/) : master/slave status indicator, connected peers list, latency per peer, manual BPM override, Start/Stop sync controls, network statistics.
+
+**Lot H — Spout/NDI/Artnet (20 iter) :** TextureShareSender (src/share/) : abstraction cross-platform texture sharing, factory pattern (SpoutSender Windows via spout2dx, DmaBufSender Linux stub, NullSender fallback). Integration OutputManager : per-slot Spout enable/config, sender name = slot name. NdiOutputNode (src/studio/nodes/) : implementation complete libndi (remplace skeleton v3.3), resolution/fps/source_name ParamSpec, pixel readback OGRE → NDI send, enable/disable. ArtnetOutputNode (src/studio/nodes/) : Art-Net DMX output, universe/channel addressing (ParamSpec), 8 input ports DAG-driven → DMX channels, UDP broadcast. vcpkg : +spout2, +libndi.
+
+**Fix iterations post-Lot H (46 iter, I-1182→I-1227) :** Corrections pipeline blit (uber-shader GL3.3 fullscreen quad remplace glBlitFramebuffer, fix AMD driver bug RenderTexture). Win32 native windows (CreateWindowEx + wglCreateContext + wglShareLists, contournement complet bug AMD). Fix QuadWarp matrice perspective (inversion coordonnees UV). Fix EdgeBlend gamma correction (linearize avant blend, re-gamma apres). Fix GridWarp interpolation bords (clamp control points). Fix SyncManager latency drift (filtre median sur RTT). Fix NetworkPanel refresh rate. Fix Spout sender release/recreate on resize. Fix NDI pixel format (BGRA vs RGBA). Fix Artnet universe overflow. Stabilisation multi-output (stress test 4 sorties simultanées).
+
+**Lot N — TextureShareSender cross-platform (12 iter, I-1228→I-1239) :** Refactoring TextureShareSender : interface abstraite pure (init/send/release/isAvailable), SpoutSender implementation Windows (CreateSender/SendTexture/ReleaseSender via spout2dx.h), DmaBufSender stub Linux (structure + logs, implementation future), NullSender fallback (no-op gracieux). Factory pattern (createSender() selon plateforme). 8 fichiers : TextureShareSender.h/.cpp, SpoutSender.h/.cpp, DmaBufSender.h/.cpp, NullSender.h/.cpp. Integration OutputManager : per-slot sender, enable/disable toggle, sender name configuration.
+
+**Fix iterations post-Lot N (4 iter, I-1240→I-1244) :** Fix SpoutSender context sharing GL. Fix NullSender log spam. Fix sender lifecycle (recreate on output resize). Fix CMake spout2 find_package.
+
+**Lot O — Master View (20 iter, I-1245→I-1264) :** MasterViewPanel (src/studio/panels/) : mosaic layout de tous les outputs actifs, live thumbnails via RTT downscale, per-output status overlay (resolution, warp type, blend status, Spout/NDI indicators), click-to-select output (synchro avec OutputPanel), fullscreen preview mode (double-clic), auto-layout grille (calcul optimal lignes/colonnes), resize responsive. MidiClockNode (src/studio/nodes/) : MIDI Clock output 24ppq, Start/Stop/Continue messages, tempo-synced BeatDetector, ParamSpec (enabled, device). Integration menu View : "Master View" toggle.
+
+**Lot P — Scene Switcher (20 iter, I-1265→I-1274) :** SceneSwitcher (src/studio/) : ZoneSnapshot capture (warp + blend + output assignment par zone), apply snapshot (restaure configuration complete), chord integration (ChordSystem → ZoneSnapshot, capture/apply sur chord blocks), crossfade transitions (interpolation WarpProfile/BlendProfile entre scenes, configurable duration), PANIC restore (snapshot de securite capture au demarrage, restore instantane). SceneSwitcherPanel (src/studio/panels/) : liste scenes sauvegardees, capture/rename/delete/apply, preview thumbnails, crossfade duration slider. Integration PerformanceModePanel : triggers "Load Scene" action, auto-descriptive labels.
+
+**Lot Q — Integration O+P (6 iter, I-1275→I-1280) :** Integration MasterViewPanel ↔ OutputPanel (selection synchronisee, actions contextuelles). Integration SceneSwitcher ↔ ChordSystem (scenes comme chord snapshots). Integration SyncManager ↔ SceneSwitcher (scene changes synchronises entre master/slave). Tests consolides (34 tests, 0 FAIL). Serialisation complete v3.4 (outputs, surfaces, scenes, sync config, texture share). Documentation interne.
+
+**Fix iterations finales (11 iter, I-FIX-1→I-FIX-11) :** Fix architecture blit (I-1241 : refactoring pipeline complet, uber-shader GL3.3). Fix MasterView refresh (throttle 30fps thumbnails). Fix SceneSwitcher crossfade (interpolation lineaire WarpProfile corners). Fix SyncManager reconnect (auto-retry sur deconnexion). Fix serialisation backward compat v3.3→v3.4. Fix OutputPanel UI (scroll zones longues). Fix ArtnetOutputNode channel mapping. Fix MidiClockNode tempo jitter. Fix TextureShareSender shutdown cleanup. I-FIX-10 : reconciliation suivi (iterations/worklog alignes sur 352/17lots/A-Q). I-FIX-11 : isolation tests (saveProject/loadProject skip settings persist pour fichiers "output/test_*", empeche pollution lastProjectPath par les tests automatises).
 

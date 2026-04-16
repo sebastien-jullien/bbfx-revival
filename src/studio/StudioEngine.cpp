@@ -19,6 +19,9 @@
 // On Windows this resolves to the system opengl32.lib. For GL function calls
 // we rely on the loader; raw legacy calls (glViewport etc.) are in opengl32.
 #ifdef _WIN32
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <windows.h>
 #  include <GL/gl.h>
 #else
@@ -91,8 +94,12 @@ StudioEngine::StudioEngine(sol::state& lua)
     // Create the initial RenderTexture at default resolution.
     initRenderTexture(mRTWidth, mRTHeight);
 
+    // Create OutputManager (v3.4 — multi-output).
+    mOutputManager = std::make_unique<OutputManager>(mGLContext, mWindow);
+    mOutputManager->setSourceTexture(mRenderTex);
+
     // Set window title and resize to a comfortable default for the Studio.
-    SDL_SetWindowTitle(mWindow, "BBFx Studio v3.1");
+    SDL_SetWindowTitle(mWindow, "BBFx Studio v3.4");
     SDL_SetWindowSize(mWindow, 1400, 900);
     SDL_SetWindowPosition(mWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
@@ -101,6 +108,9 @@ StudioEngine::StudioEngine(sol::state& lua)
 }
 
 StudioEngine::~StudioEngine() {
+    // Destroy output windows before GL context is destroyed.
+    mOutputManager.reset();
+
     // RenderTexture and Texture are managed by OGRE's TextureManager — let OGRE destroy them.
     mRenderTarget = nullptr;
     mRenderTex.reset();
@@ -114,12 +124,19 @@ StudioEngine::~StudioEngine() {
 void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
     if (!mRoot) return;
 
+    // Ensure main GL context is current before any OGRE texture operations.
+    SDL_GL_MakeCurrent(mWindow, mGLContext);
+
     // Destroy previous textures if they exist.
+    // Drop ALL references before remove() so the old GL FBO is fully freed
+    // before createManual() — avoids crash from two RenderTextures coexisting.
     if (mRenderTex) {
-        Ogre::TextureManager::getSingleton().remove("StudioRenderTexture",
-            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+        if (mOutputManager)
+            mOutputManager->setSourceTexture(nullptr);
         mRenderTarget = nullptr;
         mRenderTex.reset();
+        Ogre::TextureManager::getSingleton().remove("StudioRenderTexture",
+            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
     }
     mRTWidth  = width;
     mRTHeight = height;
@@ -151,18 +168,33 @@ void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
         cam->setAspectRatio(ar);
     }
 
+    // Update OutputManager's source texture reference (it blits this to output windows).
+    if (mOutputManager)
+        mOutputManager->setSourceTexture(mRenderTex);
+
     std::cout << "[StudioEngine] initRenderTexture " << width << "x" << height
               << std::endl;
 }
 
 void StudioEngine::resizeRenderTexture(uint32_t width, uint32_t height) {
-    if (width == mRTWidth && height == mRTHeight) return;
+    // Clamp to minimum 64×64 — smaller textures cause GL driver crashes
+    // (e.g. ImGui panels can report 16×1 during layout).
+    if (width  < 64) width  = 64;
+    if (height < 64) height = 64;
+    if (!mForceRTRebuild && width == mRTWidth && height == mRTHeight) return;
+    mForceRTRebuild = false;
     initRenderTexture(width, height);
     mCachedFBO = -1;       // new FBO — must re-discover ID
 }
 
 void StudioEngine::updateRenderTarget() {
     if (!mRenderTarget || mRenderTarget->getNumViewports() == 0) return;
+
+    // Ensure we're on the main window GL context before OGRE rendering.
+    // OutputManager::updateAll() may have switched to an output window context.
+    SDL_GL_MakeCurrent(mWindow, mGLContext);
+
+
 
     // Force correct aspect ratio every frame.
     auto* vp = mRenderTarget->getViewport(0);
@@ -276,96 +308,47 @@ void StudioEngine::startRendering() {
     ImGui::DestroyContext();
 }
 
-// ── Dual Output (v3.3) ──────────────────────────────────────────────────────
+// ── Output Manager delegates (v3.4 — replaces dual output v3.3) ─────────────
 
 bool StudioEngine::openOutputWindow(int width, int height) {
-    if (mOutputWindow) return true;
-    mOutputWidth = width;
-    mOutputHeight = height;
-
-    mOutputWindow = SDL_CreateWindow("BBFx Output", width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS);
-    if (!mOutputWindow) {
-        std::cerr << "[Output] Failed to create window: " << SDL_GetError() << std::endl;
-        return false;
-    }
-
-    try {
-        mOutputTex = Ogre::TextureManager::getSingleton().createManual(
-            "OutputRenderTexture",
-            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
-            Ogre::TEX_TYPE_2D, width, height, 0,
-            Ogre::PF_R8G8B8A8, Ogre::TU_RENDERTARGET);
-        mOutputTarget = mOutputTex->getBuffer()->getRenderTarget();
-        mOutputTarget->setAutoUpdated(false);
-        if (mSceneManager && mSceneManager->hasCamera("MainCamera")) {
-            auto* cam = mSceneManager->getCamera("MainCamera");
-            auto* vp = mOutputTarget->addViewport(cam);
-            vp->setBackgroundColour(Ogre::ColourValue(0.0f, 0.0f, 0.0f));
-            vp->setOverlaysEnabled(false);
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[Output] RT error: " << e.what() << std::endl;
-        SDL_DestroyWindow(mOutputWindow);
-        mOutputWindow = nullptr;
-        return false;
-    }
-
-    std::cout << "[Output] Window " << width << "x" << height << std::endl;
-    return true;
+    if (!mOutputManager) return false;
+    if (mOutputManager->count() > 0) return true; // already open
+    return mOutputManager->addOutput(width, height, mSceneManager) >= 0;
 }
 
 void StudioEngine::closeOutputWindow() {
-    if (!mOutputWindow) return;
-    if (mOutputTex) {
-        Ogre::TextureManager::getSingleton().remove("OutputRenderTexture",
-            Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
-        mOutputTarget = nullptr;
-        mOutputTex.reset();
-    }
-    SDL_DestroyWindow(mOutputWindow);
-    mOutputWindow = nullptr;
-    std::cout << "[Output] Closed" << std::endl;
+    if (!mOutputManager || mOutputManager->count() == 0) return;
+    std::cout << "[StudioEngine::closeOutputWindow] calling removeOutput" << std::endl;
+    mOutputManager->removeOutput(mOutputManager->getAllSlots().front().id);
+}
+
+bool StudioEngine::isOutputOpen() const {
+    return mOutputManager && mOutputManager->count() > 0;
 }
 
 void StudioEngine::toggleOutputFullscreen() {
-    if (!mOutputWindow) return;
-    mOutputFullscreen = !mOutputFullscreen;
-    SDL_SetWindowFullscreen(mOutputWindow, mOutputFullscreen);
+    if (!mOutputManager || mOutputManager->count() == 0) return;
+    mOutputManager->toggleFullscreen(mOutputManager->getAllSlots().front().id);
 }
 
 void StudioEngine::setOutputResolution(int w, int h) {
-    if (!mOutputWindow) return;
-    closeOutputWindow();
-    openOutputWindow(w, h);
+    if (!mOutputManager || mOutputManager->count() == 0) return;
+    mOutputManager->setResolution(mOutputManager->getAllSlots().front().id, w, h, mSceneManager);
 }
 
 void StudioEngine::setOutputMonitor(int idx) {
-    if (!mOutputWindow) return;
-    int count = 0;
-    auto* displays = SDL_GetDisplays(&count);
-    if (idx >= 0 && idx < count && displays) {
-        SDL_Rect bounds;
-        SDL_GetDisplayBounds(displays[idx], &bounds);
-        SDL_SetWindowPosition(mOutputWindow, bounds.x, bounds.y);
-    }
-    SDL_free(displays);
+    if (!mOutputManager || mOutputManager->count() == 0) return;
+    mOutputManager->setMonitor(mOutputManager->getAllSlots().front().id, idx);
 }
 
 void StudioEngine::updateOutputTarget() {
-    if (!mOutputTarget || !mOutputWindow) return;
-    GLStateGuard guard;
-    mOutputTarget->update();
-    SDL_GL_MakeCurrent(mOutputWindow, mGLContext);
-    SDL_GL_SwapWindow(mOutputWindow);
-    SDL_GL_MakeCurrent(mWindow, mGLContext);
+    if (!mOutputManager) return;
+    mOutputManager->updateAll();
 }
 
 ImTextureID StudioEngine::getOutputTextureID() const {
-    if (!mOutputTex) return 0;
-    unsigned int glId = 0;
-    mOutputTex->getCustomAttribute("GLID", &glId);
-    return static_cast<ImTextureID>(glId);
+    if (!mOutputManager || mOutputManager->count() == 0) return 0;
+    return mOutputManager->getTextureID(mOutputManager->getAllSlots().front().id);
 }
 
 } // namespace bbfx

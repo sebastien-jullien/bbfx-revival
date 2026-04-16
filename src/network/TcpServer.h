@@ -9,8 +9,11 @@
 #include <utility>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
 using SocketType = SOCKET;
 constexpr SocketType INVALID_SOCK = INVALID_SOCKET;
 #else

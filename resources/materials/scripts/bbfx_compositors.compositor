@@ -243,3 +243,63 @@ compositor MotionTrail
         }
     }
 }
+
+// EdgeBlend — gamma-corrected edge fade for multi-projector overlap (v3.4)
+// Applied before QuadWarp in the compositor chain (scene → EdgeBlend → QuadWarp → display).
+compositor EdgeBlend
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/EdgeBlend
+                input 0 rt0
+            }
+        }
+    }
+}
+
+// QuadWarp — 4-corner inverse bilinear warp for projection calibration (v3.4)
+// Only applied on Output RTs, not the Studio viewport.
+compositor QuadWarp
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/QuadWarp
+                input 0 rt0
+            }
+        }
+    }
+}
+
+// GridWarp — bilinear 4x4 mesh deformation for multi-point projection calibration (v3.4 Lot K)
+// Applied after QuadWarp (or standalone) for finer warp control.
+compositor GridWarp
+{
+    technique
+    {
+        texture rt0 target_width target_height PF_A8R8G8B8
+        target rt0 { input previous }
+        target_output
+        {
+            input none
+            pass render_quad
+            {
+                material BBFx/GridWarp
+                input 0 rt0
+            }
+        }
+    }
+}

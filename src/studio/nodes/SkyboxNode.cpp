@@ -1,4 +1,5 @@
 #include "SkyboxNode.h"
+
 namespace bbfx {
 
 SkyboxNode::SkyboxNode(const std::string& name, Ogre::SceneManager* scene)
@@ -14,14 +15,23 @@ SkyboxNode::SkyboxNode(const std::string& name, Ogre::SceneManager* scene)
 }
 
 void SkyboxNode::update() {
-    // Apply background color from ParamSpec
-    if (mScene) {
-        auto* p = mSpec.getParam("bg_color");
-        if (p) {
-            // Background color is set via viewport, not scene — this is a placeholder
-            // Real implementation needs StudioEngine viewport access
-        }
+    if (!mScene) { fireUpdate(); return; }
+
+    auto* p = mSpec.getParam("bg_color");
+    if (p) {
+        Ogre::ColourValue col(p->colorVal[0], p->colorVal[1], p->colorVal[2]);
+        mScene->setAmbientLight(col);
     }
+
+    // Apply skybox rotation from input port.
+    auto& ins = getInputs();
+    auto rotIt = ins.find("rotation");
+    if (rotIt != ins.end()) {
+        float rot = rotIt->second->getValue();
+        auto* skyNode = mScene->getSkyBoxNode();
+        if (skyNode) skyNode->setOrientation(Ogre::Quaternion(Ogre::Degree(rot), Ogre::Vector3::UNIT_Y));
+    }
+
     fireUpdate();
 }
 } // namespace bbfx

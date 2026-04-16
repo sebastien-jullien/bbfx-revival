@@ -4,6 +4,9 @@
 #include <iostream>
 
 #ifdef _WIN32
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <windows.h>
 #  include <GL/gl.h>
 #else

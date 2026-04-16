@@ -52,7 +52,7 @@ void MappingProfile::captureFromManager() {
 json MappingProfile::toJson() const {
     json j;
     j["name"] = name;
-    j["version"] = "3.3";
+    j["version"] = "3.4";
 
     // MIDI bindings — serialize from this profile's data, not the manager
     json midiArr = json::array();

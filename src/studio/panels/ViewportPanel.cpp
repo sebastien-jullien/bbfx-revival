@@ -53,11 +53,17 @@ void ViewportPanel::updateOgreRender() {
 }
 
 void ViewportPanel::syncSize() {
-    if (mPendingW > 0 && mPendingH > 0 &&
-        (mPendingW != mLastWidth || mPendingH != mLastHeight)) {
-        mEngine->resizeRenderTexture(mPendingW, mPendingH);
-        mLastWidth  = mPendingW;
-        mLastHeight = mPendingH;
+    // The RT uses the main window size as reference — not the panel size.
+    // This gives outputs and performance mode a consistent, high-res source.
+    // The viewport panel displays the RT in "cover" mode (see render()).
+    int winW = 0, winH = 0;
+    SDL_GetWindowSize(mEngine->getSDLWindow(), &winW, &winH);
+    auto w = static_cast<uint32_t>(winW > 0 ? winW : 1280);
+    auto h = static_cast<uint32_t>(winH > 0 ? winH : 720);
+    if (w != mLastWidth || h != mLastHeight) {
+        mEngine->resizeRenderTexture(w, h);
+        mLastWidth  = w;
+        mLastHeight = h;
     }
 }
 
@@ -87,7 +93,29 @@ void ViewportPanel::render() {
 
     ImTextureID texId = mEngine->getRenderTextureID();
     if (texId) {
-        ImGui::Image(texId, panelSize, {0.0f, 0.0f}, {1.0f, 1.0f});
+        // Cover mode: fill the panel without distortion, cropping edges that overflow.
+        // Like CSS background-size:cover — no bars, no stretch.
+        float rtW = static_cast<float>(mLastWidth);
+        float rtH = static_cast<float>(mLastHeight);
+        float panelRatio = panelSize.x / panelSize.y;
+        float rtRatio    = rtW / rtH;
+
+        float uMin = 0.0f, vMin = 0.0f, uMax = 1.0f, vMax = 1.0f;
+        if (panelRatio < rtRatio) {
+            // Panel is more portrait than RT → crop left/right
+            float visibleFrac = panelRatio / rtRatio;
+            float margin = (1.0f - visibleFrac) * 0.5f;
+            uMin = margin;
+            uMax = 1.0f - margin;
+        } else if (panelRatio > rtRatio) {
+            // Panel is more landscape than RT → crop top/bottom
+            float visibleFrac = rtRatio / panelRatio;
+            float margin = (1.0f - visibleFrac) * 0.5f;
+            vMin = margin;
+            vMax = 1.0f - margin;
+        }
+
+        ImGui::Image(texId, panelSize, {uMin, vMin}, {uMax, vMax});
     } else {
         ImGui::TextDisabled("(OGRE RenderTexture not ready)");
     }

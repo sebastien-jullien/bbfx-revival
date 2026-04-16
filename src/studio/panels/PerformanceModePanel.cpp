@@ -12,6 +12,8 @@
 #include "../../midi/MidiDeviceManager.h"
 #include "../../midi/MidiMessage.h"
 #include "../../midi/MidiLearnManager.h"
+#include "../SurfaceMap.h"
+#include "../OutputManager.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -19,6 +21,8 @@
 #include <OgreRoot.h>
 #include <OgreViewport.h>
 #include <OgreCompositorManager.h>
+#include <OgreSceneManager.h>
+#include <OgreCamera.h>
 #include <algorithm>
 #include <set>
 #include <iostream>
@@ -84,11 +88,20 @@ PerformanceModePanel::PerformanceModePanel(sol::state& lua) : mLua(lua) {
 
 
 void PerformanceModePanel::render(StudioEngine* engine) {
+    mCurrentEngine = engine; // store for sub-renders (renderTriggerGrid etc.)
+
     // Capture rest snapshot on first render (for PANIC restore)
     if (!mRestCaptured) {
         auto* animator = Animator::instance();
         if (animator) {
             mRestSnapshot.capture(*animator);
+            // Capture rest zone snapshot alongside DAG rest (v3.4 Lot O)
+            if (engine && engine->getOutputManager() && engine->getOutputManager()->getSurfaceMap()) {
+                Ogre::Camera* cam = nullptr;
+                if (engine->getSceneManager()->hasCamera("MainCamera"))
+                    cam = engine->getSceneManager()->getCamera("MainCamera");
+                mRestZoneSnapshot.capture(*engine->getOutputManager()->getSurfaceMap(), cam);
+            }
             mRestCaptured = true;
             std::cout << "[PerfMode] Rest snapshot captured (" << mRestSnapshot.getData().size() << " ports)" << std::endl;
         }
@@ -108,11 +121,13 @@ void PerformanceModePanel::render(StudioEngine* engine) {
     float viewW = avail.x * 0.80f;
     float viewH = avail.y;
 
-    // Resize RenderTexture to match performance viewport size
+    // RT is sized to main window (set by ViewportPanel::syncSize each frame).
+    // Performance mode no longer resizes the RT — it just re-applies compositors
+    // if the RT was rebuilt (e.g. after window resize while in perf mode).
     auto w = static_cast<uint32_t>(viewW);
     auto h = static_cast<uint32_t>(viewH);
-    if (engine && (w != mLastPerfW || h != mLastPerfH)) {
-        engine->resizeRenderTexture(w, h);
+    if (w != mLastPerfW || h != mLastPerfH) {
+        // Size changed (window resized) — compositors need re-applying
         if (mCompositorStack) {
             mCompositorStack->invalidateApplied();
             mCompositorsPending = true;
@@ -138,11 +153,26 @@ void PerformanceModePanel::render(StudioEngine* engine) {
     // Render scene + compositors to RT1
     if (engine) engine->updateRenderTarget();
 
-    // Display RT1 (with compositor effects applied)
+    // Display RT1 (with compositor effects applied) — cover mode
     if (engine) {
         ImTextureID texId = engine->getRenderTextureID();
         if (texId) {
-            ImGui::Image(texId, {viewW, viewH}, {0.0f, 0.0f}, {1.0f, 1.0f});
+            // Cover mode: fill the perf viewport without distortion
+            int winW = 0, winH = 0;
+            SDL_GetWindowSize(engine->getSDLWindow(), &winW, &winH);
+            float rtRatio    = (winH > 0) ? static_cast<float>(winW) / winH : 1.0f;
+            float panelRatio = viewW / viewH;
+            float uMin = 0.0f, vMin = 0.0f, uMax = 1.0f, vMax = 1.0f;
+            if (panelRatio < rtRatio) {
+                float frac = panelRatio / rtRatio;
+                float m = (1.0f - frac) * 0.5f;
+                uMin = m; uMax = 1.0f - m;
+            } else if (panelRatio > rtRatio) {
+                float frac = rtRatio / panelRatio;
+                float m = (1.0f - frac) * 0.5f;
+                vMin = m; vMax = 1.0f - m;
+            }
+            ImGui::Image(texId, {viewW, viewH}, {uMin, vMin}, {uMax, vMax});
         }
     }
 
@@ -573,6 +603,24 @@ void PerformanceModePanel::renderTriggerGrid() {
                         captureChordSnapshot(chordName);
                     }
                 }
+                // Zone snapshot (Scene) capture/clear (v3.4 Lot O)
+                if (hasChordZoneSnapshot(chordName)) {
+                    ImGui::TextDisabled("Scene: captured (%d zones)", mChordZoneSnapshots[chordName].zoneCount());
+                    if (ImGui::MenuItem("Clear Scene")) {
+                        removeChordZoneSnapshot(chordName);
+                    }
+                } else {
+                    if (ImGui::MenuItem("Capture Scene")) {
+                        if (mCurrentEngine && mCurrentEngine->getOutputManager() &&
+                            mCurrentEngine->getOutputManager()->getSurfaceMap()) {
+                            Ogre::Camera* cam = nullptr;
+                            if (mCurrentEngine->getSceneManager()->hasCamera("MainCamera"))
+                                cam = mCurrentEngine->getSceneManager()->getCamera("MainCamera");
+                            captureChordZoneSnapshot(chordName,
+                                *mCurrentEngine->getOutputManager()->getSurfaceMap(), cam);
+                        }
+                    }
+                }
             }
 
             ImGui::Separator();
@@ -895,66 +943,70 @@ void PerformanceModePanel::renderBPMOverlay() {
                   IM_COL32(0, 220, 220, 255), bpmStr);
 }
 
+void PerformanceModePanel::triggerPanic() {
+    auto* animator = Animator::instance();
+    if (animator && !mRestSnapshot.empty()) {
+        // Restore DAG to rest state
+        DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
+
+        // Reset fader values to rest snapshot
+        for (int i = 0; i < 8; ++i) {
+            if (!mFaders[i].nodeName.empty() && !mFaders[i].portName.empty()) {
+                std::string key = mFaders[i].nodeName + "." + mFaders[i].portName;
+                auto& data = mRestSnapshot.getData();
+                auto it = data.find(key);
+                if (it != data.end()) mFaders[i].value = it->second;
+            }
+        }
+
+        std::cout << "[PerfMode] PANIC -- restored to rest state (" << mRestSnapshot.getData().size() << " ports)" << std::endl;
+    } else if (animator) {
+        // Fallback: no rest snapshot, reset to 0
+        for (auto& name : animator->getRegisteredNodeNames()) {
+            auto* node = animator->getRegisteredNode(name);
+            if (!node) continue;
+            for (auto& [_, port] : node->getInputs()) {
+                port->setValue(0.0f);
+            }
+        }
+        std::cout << "[PerfMode] PANIC -- all ports reset to 0 (no rest snapshot)" << std::endl;
+    }
+
+    // Cancel MacroRunner
+    mMacroRunner.cancel();
+
+    // Reset crossfader
+    mCrossfadePos = 0.0f;
+    mCrossfadeActive = false;
+    mAutoFading = false;
+
+    // Reset all triggers on current page
+    if (!mTriggerPages.empty()) {
+        for (auto& trig : mTriggerPages[mCurrentTriggerPage]) {
+            trig.active = false;
+        }
+    }
+
+    // ChordSystem panic via Lua
+    try {
+        sol::object obj = mLua["ChordSystem"];
+        if (obj.valid()) {
+            sol::table cs = obj.as<sol::table>();
+            sol::function fn = cs["panic"];
+            if (fn.valid()) fn(cs);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[PerfMode] ChordSystem panic error: " << e.what() << std::endl;
+    }
+}
+
 void PerformanceModePanel::renderPanicButton() {
     ImGui::PushStyleColor(ImGuiCol_Button,        {0.7f, 0.0f, 0.0f, 1.0f});
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {1.0f, 0.0f, 0.0f, 1.0f});
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  {1.0f, 0.3f, 0.3f, 1.0f});
 
     if (ImGui::Button("PANIC", {120, 36})) {
-        auto* animator = Animator::instance();
-        if (animator && !mRestSnapshot.empty()) {
-            // Restore DAG to rest state
-            DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
-
-            // Reset fader values to rest snapshot
-            for (int i = 0; i < 8; ++i) {
-                if (!mFaders[i].nodeName.empty() && !mFaders[i].portName.empty()) {
-                    std::string key = mFaders[i].nodeName + "." + mFaders[i].portName;
-                    auto& data = mRestSnapshot.getData();
-                    auto it = data.find(key);
-                    if (it != data.end()) mFaders[i].value = it->second;
-                }
-            }
-
-            std::cout << "[PerfMode] PANIC -- restored to rest state (" << mRestSnapshot.getData().size() << " ports)" << std::endl;
-        } else if (animator) {
-            // Fallback: no rest snapshot, reset to 0
-            for (auto& name : animator->getRegisteredNodeNames()) {
-                auto* node = animator->getRegisteredNode(name);
-                if (!node) continue;
-                for (auto& [_, port] : node->getInputs()) {
-                    port->setValue(0.0f);
-                }
-            }
-            std::cout << "[PerfMode] PANIC -- all ports reset to 0 (no rest snapshot)" << std::endl;
-        }
-
-        // Cancel MacroRunner
-        mMacroRunner.cancel();
-
-        // Reset crossfader
-        mCrossfadePos = 0.0f;
-        mCrossfadeActive = false;
-        mAutoFading = false;
-
-        // Reset all triggers on current page
-        if (!mTriggerPages.empty()) {
-            for (auto& trig : mTriggerPages[mCurrentTriggerPage]) {
-                trig.active = false;
-            }
-        }
-
-        // ChordSystem panic via Lua
-        try {
-            sol::object obj = mLua["ChordSystem"];
-            if (obj.valid()) {
-                sol::table cs = obj.as<sol::table>();
-                sol::function fn = cs["panic"];
-                if (fn.valid()) fn(cs);
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[PerfMode] ChordSystem panic error: " << e.what() << std::endl;
-        }
+        triggerPanic();
     }
 
     ImGui::PopStyleColor(3);
@@ -1041,9 +1093,9 @@ void PerformanceModePanel::executeTriggerAction(const std::string& action) {
 
                 // Apply or restore chord snapshot if one exists
                 sol::function isActiveFn = cs["isActive"];
-                if (isActiveFn.valid() && hasChordSnapshot(target)) {
-                    bool active = isActiveFn(cs, target);
-                    if (active) {
+                bool chordActive = isActiveFn.valid() && isActiveFn(cs, target);
+                if (hasChordSnapshot(target)) {
+                    if (chordActive) {
                         applyChordSnapshot(target);
                     } else {
                         // Restore rest state
@@ -1051,6 +1103,20 @@ void PerformanceModePanel::executeTriggerAction(const std::string& action) {
                         if (animator && !mRestSnapshot.empty()) {
                             DagSnapshot::apply(mRestSnapshot, mRestSnapshot, 0.0f, *animator);
                         }
+                    }
+                }
+                // Apply or restore zone snapshot (v3.4 Lot O)
+                if (mCurrentEngine && mCurrentEngine->getOutputManager() &&
+                    mCurrentEngine->getOutputManager()->getSurfaceMap()) {
+                    auto* surfMap = mCurrentEngine->getOutputManager()->getSurfaceMap();
+                    auto* outMgr = mCurrentEngine->getOutputManager();
+                    Ogre::Camera* cam = nullptr;
+                    if (mCurrentEngine->getSceneManager()->hasCamera("MainCamera"))
+                        cam = mCurrentEngine->getSceneManager()->getCamera("MainCamera");
+                    if (chordActive && hasChordZoneSnapshot(target)) {
+                        applyChordZoneSnapshot(target, *surfMap, *outMgr, cam);
+                    } else if (!chordActive && !mRestZoneSnapshot.empty()) {
+                        ZoneSnapshot::apply(mRestZoneSnapshot, mRestZoneSnapshot, 0.0f, *surfMap, *outMgr, cam);
                     }
                 }
             }
@@ -1198,6 +1264,27 @@ void PerformanceModePanel::removeChordSnapshot(const std::string& chordName) {
     }
     mChordSnapshots.erase(chordName);
     std::cout << "[PerfMode] Removed chord snapshot '" << chordName << "'" << std::endl;
+}
+
+// ── Zone Snapshot management (v3.4 Lot O — Scene Switcher) ───────────────────
+
+void PerformanceModePanel::captureChordZoneSnapshot(const std::string& chordName,
+                                                     const SurfaceMap& map, const Ogre::Camera* cam) {
+    mChordZoneSnapshots[chordName].capture(map, cam);
+    std::cout << "[PerfMode] Captured zone snapshot '" << chordName
+              << "' (" << mChordZoneSnapshots[chordName].zoneCount() << " zones)" << std::endl;
+}
+
+void PerformanceModePanel::applyChordZoneSnapshot(const std::string& chordName,
+                                                    SurfaceMap& map, OutputManager& mgr, Ogre::Camera* cam) {
+    auto it = mChordZoneSnapshots.find(chordName);
+    if (it == mChordZoneSnapshots.end() || it->second.empty()) return;
+    ZoneSnapshot::apply(mRestZoneSnapshot, it->second, 1.0f, map, mgr, cam);
+}
+
+void PerformanceModePanel::removeChordZoneSnapshot(const std::string& chordName) {
+    mChordZoneSnapshots.erase(chordName);
+    std::cout << "[PerfMode] Removed zone snapshot '" << chordName << "'" << std::endl;
 }
 
 void PerformanceModePanel::syncMidiBindingsFromManager() {
@@ -1378,10 +1465,18 @@ void PerformanceModePanel::renderCrossfader() {
 
     // Assign A popup
     // Helper lambda for assign popup content
-    auto renderAssignPopup = [&](const char* popupId, DagSnapshot& snap, std::string& snapName) {
+    auto renderAssignPopup = [&](const char* popupId, DagSnapshot& snap, ZoneSnapshot& zoneSnap, std::string& snapName) {
         if (ImGui::BeginPopup(popupId)) {
             if (ImGui::MenuItem("Capture Current")) {
                 snap.capture(*animator);
+                // Capture zone snapshot alongside (v3.4 Lot O)
+                if (mCurrentEngine && mCurrentEngine->getOutputManager() &&
+                    mCurrentEngine->getOutputManager()->getSurfaceMap()) {
+                    Ogre::Camera* cam = nullptr;
+                    if (mCurrentEngine->getSceneManager()->hasCamera("MainCamera"))
+                        cam = mCurrentEngine->getSceneManager()->getCamera("MainCamera");
+                    zoneSnap.capture(*mCurrentEngine->getOutputManager()->getSurfaceMap(), cam);
+                }
                 snapName = "Current";
             }
             ImGui::Separator();
@@ -1417,8 +1512,8 @@ void PerformanceModePanel::renderCrossfader() {
             ImGui::EndPopup();
         }
     };
-    renderAssignPopup("AssignA", mSnapshotA, mSnapshotAName);
-    renderAssignPopup("AssignB", mSnapshotB, mSnapshotBName);
+    renderAssignPopup("AssignA", mSnapshotA, mZoneSnapshotA, mSnapshotAName);
+    renderAssignPopup("AssignB", mSnapshotB, mZoneSnapshotB, mSnapshotBName);
 
     // Snapshot names below slider
     ImGui::TextColored({0.3f, 0.5f, 1.0f, 0.8f}, "A: %s", mSnapshotAName.c_str());
@@ -1447,6 +1542,21 @@ void PerformanceModePanel::renderCrossfader() {
         }
 
         DagSnapshot::apply(mSnapshotA, mSnapshotB, mCrossfadePos, *animator);
+
+        // Zone snapshot crossfade (v3.4 Lot O)
+        if (!mZoneSnapshotA.empty() || !mZoneSnapshotB.empty()) {
+            if (mCurrentEngine && mCurrentEngine->getOutputManager() &&
+                mCurrentEngine->getOutputManager()->getSurfaceMap()) {
+                auto* surfMap = mCurrentEngine->getOutputManager()->getSurfaceMap();
+                auto* outMgr = mCurrentEngine->getOutputManager();
+                Ogre::Camera* cam = nullptr;
+                if (mCurrentEngine->getSceneManager()->hasCamera("MainCamera"))
+                    cam = mCurrentEngine->getSceneManager()->getCamera("MainCamera");
+                const ZoneSnapshot& za = mZoneSnapshotA.empty() ? mRestZoneSnapshot : mZoneSnapshotA;
+                const ZoneSnapshot& zb = mZoneSnapshotB.empty() ? mRestZoneSnapshot : mZoneSnapshotB;
+                ZoneSnapshot::apply(za, zb, mCrossfadePos, *surfMap, *outMgr, cam);
+            }
+        }
     }
 
     ImGui::PopStyleVar();

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "../core/Engine.h"
+#include "OutputManager.h"
 #include <OgreTexture.h>
 #include <OgreRenderTexture.h>
 #include <SDL3/SDL.h>
 #include <imgui.h>
+#include <memory>
 
 namespace bbfx {
 
@@ -49,8 +51,9 @@ public:
 
     SDL_GLContext getGLContext() const { return mGLContext; }
 
-    /// Must be called when the RenderTexture is recreated (resets FBO cache).
-    void invalidateFBOCache() { mCachedFBO = -1; }
+    /// Must be called when compositor chain changes invalidate the FBO state.
+    /// Forces full RT rebuild on next resize (even if same dimensions).
+    void invalidateFBOCache() { mCachedFBO = -1; mForceRTRebuild = true; }
 
 private:
     SDL_GLContext mGLContext = nullptr;
@@ -60,27 +63,26 @@ private:
 
     uint32_t mRTWidth = 1280;
     uint32_t mRTHeight = 720;
-    int mCachedFBO = -1; // cached GL FBO ID for the RenderTexture
+    int mCachedFBO = -1;        // cached GL FBO ID for the RenderTexture
+    bool mForceRTRebuild = false; // force initRenderTexture even if same size
 
-    // ── Dual Output (v3.3) ──────────────────────────────────────────────────
+    // ── Output Manager (v3.4 — replaces dual output v3.3) ──────────────────
 public:
+    /// Backward-compatible v3.3 API — delegates to OutputManager slot 0.
     bool openOutputWindow(int width = 1920, int height = 1080);
     void closeOutputWindow();
-    bool isOutputOpen() const { return mOutputWindow != nullptr; }
+    bool isOutputOpen() const;
     void toggleOutputFullscreen();
     void setOutputResolution(int w, int h);
     void setOutputMonitor(int monitorIndex);
     void updateOutputTarget();
     ImTextureID getOutputTextureID() const;
 
+    /// Access the OutputManager for multi-output (v3.4).
+    OutputManager* getOutputManager() { return mOutputManager.get(); }
+
 private:
-    SDL_Window* mOutputWindow = nullptr;
-    Ogre::TexturePtr mOutputTex;
-    Ogre::RenderTexture* mOutputTarget = nullptr;
-    uint32_t mOutputWidth = 1920;
-    uint32_t mOutputHeight = 1080;
-    int mOutputCachedFBO = -1;
-    bool mOutputFullscreen = false;
+    std::unique_ptr<OutputManager> mOutputManager;
 };
 
 } // namespace bbfx

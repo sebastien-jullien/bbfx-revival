@@ -4,7 +4,7 @@
 #include <vector>
 #include <map>
 #include <sol/forward.hpp>
-#include <nlohmann/json_fwd.hpp>
+#include <nlohmann/json.hpp>
 
 namespace bbfx {
 
@@ -54,6 +54,9 @@ public:
         std::vector<std::string> compositorStack; // v3.2.4
         std::vector<std::vector<TriggerSlotData>> triggerPages; // v3.2.4
         std::map<std::string, std::map<std::string, float>> chordSnapshots; // v3.3: chord name → port values
+        nlohmann::json chordZoneSnapshotsJson; // v3.4 Lot O: zone snapshots (null if none)
+        nlohmann::json outputsJson; // v3.4: OutputManager slots array (null if not present in file)
+        nlohmann::json extraJson;   // v3.4: extensible extra data (surfaceMap, etc.)
     };
 
     bool save(const std::string& path, const ProjectState& state = {});

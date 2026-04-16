@@ -3,7 +3,10 @@
 #include <imgui.h>
 #include <sstream>
 #ifdef _WIN32
-#include <windows.h>
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
 #endif
 
 namespace bbfx {

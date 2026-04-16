@@ -9,7 +9,7 @@
 #include <map>
 #include <memory>
 
-namespace bbfx { class StudioEngine; }
+namespace bbfx { class StudioEngine; class PerformanceModePanel; }
 
 namespace bbfx {
 
@@ -28,6 +28,7 @@ public:
 
     const std::vector<bbfx::ChordBlock>& getChordBlocks() const { return mChordBlocks; }
     void setChordBlocks(const std::vector<bbfx::ChordBlock>& blocks) { mChordBlocks = blocks; }
+    void setPerformanceModePanel(PerformanceModePanel* p) { mPerfPanel = p; }
 
     AutomationData& getAutomation() { return mAutomation; }
     const AutomationData& getAutomation() const { return mAutomation; }
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<InputRecorder> mRecorder;
 
     std::vector<bbfx::ChordBlock> mChordBlocks;
+    PerformanceModePanel* mPerfPanel = nullptr;
     float mSpectrumBands[8] = {};
     int mDraggedBlock = -1;
 

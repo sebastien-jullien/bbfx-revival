@@ -59,7 +59,8 @@ void CreateNodeCommand::undo() {
     auto* node = animator->getRegisteredNode(mNodeName);
     if (node) {
         animator->removeNode(node);
-        try { node->cleanup(); } catch (...) {}
+        try { node->cleanup(); }
+        catch (...) { std::cerr << "[NodeCommands] cleanup() threw for '" << mNodeName << "'" << std::endl; }
         delete node;
     }
 }
@@ -112,7 +113,9 @@ void DeleteNodeCommand::execute() {
                     break;
                 }
             }
-        } catch (...) {}
+        } catch (...) {
+            std::cerr << "[NodeCommands] getNodePositions() threw for '" << mNodeName << "'" << std::endl;
+        }
     }
 
     gPendingDeletes.push_back(mNodeName);

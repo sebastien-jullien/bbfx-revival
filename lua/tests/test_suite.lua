@@ -129,9 +129,9 @@ dbg.clear(); WL()
 -- Create a SceneObjectNode (has ParamSpec with MESH, FLOAT, VEC3 etc.)
 dbg.create("SceneObjectNode", "ps_test"); WL()
 
--- F-020: FLOAT param
-dbg.set_param("ps_test", "position.x", "1.5")
-check("F-020", "FLOAT param set", true) -- no crash = pass
+-- F-020: FLOAT port value
+dbg.set("ps_test", "position.x", 1.5)
+check("F-020", "FLOAT port set", true) -- no crash = pass
 
 -- F-027: TEXTURE param (via TextureNode)
 dbg.create("TextureNode", "ps_tex"); WL()
@@ -404,7 +404,7 @@ dbg.create("SceneObjectNode", "sv_mesh")
 dbg.create("PerlinFxNode", "sv_perlin")
 WL()
 dbg.link("sv_mesh", "entity", "sv_perlin", "entity")
-dbg.set("sv_perlin", "amplitude", 0.5)
+dbg.set("sv_perlin", "displacement", 0.5)
 WS()
 local sv_nc = ncount()
 local sv_lc = lcount()

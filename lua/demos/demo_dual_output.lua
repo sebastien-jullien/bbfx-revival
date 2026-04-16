@@ -1,4 +1,4 @@
--- BBFx v3.3 Demo: Dual Output
+-- BBFx v3.4 Demo: Dual Output
 -- Opens a secondary output window for projector display.
 
 print("[demo_dual_output] Opening output window...")

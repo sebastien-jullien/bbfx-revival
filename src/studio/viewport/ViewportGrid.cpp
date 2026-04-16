@@ -1,5 +1,6 @@
 #include "ViewportGrid.h"
 #include <OgreMaterialManager.h>
+#include <OgreHighLevelGpuProgramManager.h>
 #include <OgreTechnique.h>
 #include <OgrePass.h>
 
@@ -32,10 +33,43 @@ void ViewportGrid::createMaterial()
     auto& mgr = Ogre::MaterialManager::getSingleton();
     if (mgr.resourceExists("bbfx/grid", Ogre::RGN_DEFAULT)) return;
 
+    // Create explicit GLSL shaders (RTSS cannot reliably auto-generate
+    // shaders for vertex-colour-only materials with no lighting)
+    auto& gpuMgr = Ogre::HighLevelGpuProgramManager::getSingleton();
+    if (!gpuMgr.resourceExists("bbfx/grid_vs", Ogre::RGN_DEFAULT)) {
+        auto vp = gpuMgr.createProgram("bbfx/grid_vs", Ogre::RGN_DEFAULT,
+            "glsl", Ogre::GPT_VERTEX_PROGRAM);
+        vp->setSource(
+            "#version 330 core\n"
+            "in vec4 vertex;\n"
+            "in vec4 colour;\n"
+            "uniform mat4 worldViewProj;\n"
+            "out vec4 vColour;\n"
+            "void main() {\n"
+            "    gl_Position = worldViewProj * vertex;\n"
+            "    vColour = colour;\n"
+            "}\n");
+        vp->load();
+    }
+    if (!gpuMgr.resourceExists("bbfx/grid_fs", Ogre::RGN_DEFAULT)) {
+        auto fp = gpuMgr.createProgram("bbfx/grid_fs", Ogre::RGN_DEFAULT,
+            "glsl", Ogre::GPT_FRAGMENT_PROGRAM);
+        fp->setSource(
+            "#version 330 core\n"
+            "in vec4 vColour;\n"
+            "out vec4 fragColour;\n"
+            "void main() {\n"
+            "    fragColour = vColour;\n"
+            "}\n");
+        fp->load();
+    }
+
     auto mat = mgr.create("bbfx/grid", Ogre::RGN_DEFAULT);
     auto* pass = mat->getTechnique(0)->getPass(0);
-    pass->setLightingEnabled(false);
-    pass->setVertexColourTracking(Ogre::TVC_AMBIENT | Ogre::TVC_DIFFUSE);
+    pass->setVertexProgram("bbfx/grid_vs");
+    pass->getVertexProgramParameters()->setNamedAutoConstant(
+        "worldViewProj", Ogre::GpuProgramParameters::ACT_WORLDVIEWPROJ_MATRIX);
+    pass->setFragmentProgram("bbfx/grid_fs");
     pass->setSceneBlending(Ogre::SBT_TRANSPARENT_ALPHA);
     pass->setDepthWriteEnabled(false);
     pass->setDepthCheckEnabled(true);
@@ -66,9 +100,7 @@ void ViewportGrid::buildGrid()
         if (std::fabs(std::fmod(i, kCoarseStep)) < 0.01f) continue; // skip coarse lines
 
         float alpha = 0.15f;
-        // X-parallel lines (vary Z)
         addLine(-kGridExtent, 0, i, kGridExtent, 0, i, 0.35f, 0.35f, 0.35f, alpha);
-        // Z-parallel lines (vary X)
         addLine(i, 0, -kGridExtent, i, 0, kGridExtent, 0.35f, 0.35f, 0.35f, alpha);
     }
 

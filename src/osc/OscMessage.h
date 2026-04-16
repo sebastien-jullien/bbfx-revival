@@ -14,6 +14,7 @@ using OscArg = std::variant<float, int32_t, std::string>;
 struct OscMessage {
     std::string address;       // e.g., "/bbfx/fader/1"
     std::vector<OscArg> args;  // typed arguments
+    std::string senderIp;      // populated by UdpServer (empty if unknown)
 
     float getFloat(size_t i) const {
         if (i < args.size() && std::holds_alternative<float>(args[i]))

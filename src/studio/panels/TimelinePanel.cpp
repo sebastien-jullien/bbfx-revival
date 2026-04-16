@@ -1,4 +1,5 @@
 #include "TimelinePanel.h"
+#include "PerformanceModePanel.h"
 #include "../StudioEngine.h"
 #include "../../core/PrimitiveNodes.h"
 #include "../../core/Animator.h"
@@ -435,9 +436,15 @@ void TimelinePanel::renderChordBlocks(float pixelsPerBeat) {
         draw->AddRectFilled({x0, y0}, {x1, y1}, col, 3.0f);
         draw->AddRect({x0, y0}, {x1, y1}, IM_COL32(255,255,255,80), 3.0f);
         draw->AddText({x0 + 4, y0 + 4}, IM_COL32(255,255,255,220), cb.name.c_str());
-        // Snapshot indicator
+        // Snapshot indicator (DAG)
         if (!cb.snapshot.empty()) {
             draw->AddText({x1 - 14, y0 + 4}, IM_COL32(255, 220, 50, 220), "S");
+        }
+        // Scene indicator (zone snapshot, v3.4 Lot O)
+        if (mPerfPanel && mPerfPanel->hasChordZoneSnapshot(cb.name)) {
+            float sceneX = cb.snapshot.empty() ? (x1 - 14) : (x1 - 26);
+            draw->AddText({sceneX, y0 + 4}, IM_COL32(0, 204, 255, 220), "Z");
+            // Tooltip handled below
         }
 
         // ── Left edge resize handle ──────────────────────────────────────────

@@ -627,3 +627,43 @@ Deux nouvelles dependances ajoutees en v3.3 :
 | **rtmidi** | latest | vcpkg |
 | **oscpack** | latest | vcpkg |
 | NDI SDK | optional | externe (ifdef BBFX_HAS_NDI) |
+
+## Etat des dependances v3.4 (Avril 2026)
+
+Aucune nouvelle dependance vcpkg ajoutee en v3.4. Les nouvelles fonctionnalites (Spout, NDI, Artnet, DMA-BUF) sont toutes **optionnelles** avec compilation conditionnelle :
+
+| Dependance | Type | CMake option | Usage |
+|-----------|------|-------------|-------|
+| **Spout SDK** | Optionnel, OFF par defaut | `BBFX_HAS_SPOUT` | Texture sharing Windows (SpoutTextureSender) |
+| **NDI SDK** | Optionnel, OFF par defaut | `BBFX_HAS_NDI` | Video over IP (NdiTextureSender, NdiOutputNode) |
+| **EGL/GBM** | Optionnel, Linux only | `BBFX_HAS_DMABUF` | DMA-BUF texture sharing Linux (DmaBufTextureSender) |
+| **stb_image.h** | Header-only, deja present | — | Chargement images background SurfaceEditorPanel |
+
+### Architecture texture sharing
+
+v3.4 introduit `TextureShareSender` (interface abstraite + factory) avec 3 backends :
+- `SpoutTextureSender` (Windows, Spout SDK)
+- `DmaBufTextureSender` (Linux, EGL/GBM)
+- `NullTextureSender` (fallback quand aucun backend disponible)
+
+Le protocole Art-Net/DMX utilise des sockets UDP bruts (winsock2.h / POSIX) sans dependance externe.
+
+### Stack complete v3.4
+
+| Dependance | Version | Source |
+|-----------|---------|--------|
+| OGRE 14 | 14.5.2 | vcpkg |
+| Dear ImGui | v1.92.7-docking | FetchContent |
+| imgui-node-editor | develop | FetchContent (thedmd, patche) |
+| imgui_test_engine | main | FetchContent (ocornut) |
+| SDL3 | latest | vcpkg |
+| sol2 | 3.3.0+ | vcpkg |
+| Lua | 5.5.0 | vcpkg |
+| Boost.Graph | latest | vcpkg |
+| nlohmann-json | 3.12+ | vcpkg |
+| libtheora/libogg | latest | vcpkg |
+| rtmidi | latest | vcpkg |
+| oscpack | latest | vcpkg |
+| NDI SDK | optional | externe (ifdef BBFX_HAS_NDI) |
+| Spout SDK | optional | externe (ifdef BBFX_HAS_SPOUT) |
+| EGL/GBM | optional | systeme Linux (ifdef BBFX_HAS_DMABUF) |
