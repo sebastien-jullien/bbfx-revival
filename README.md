@@ -1,4 +1,4 @@
-# BBFx Revival — v3.4
+# BBFx Revival — v3.5
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -23,6 +23,8 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 **v3.3 "BBFx Connect"** transforms the isolated Studio into a connected live performance hub: MIDI controller integration (rtmidi — MidiDeviceManager with auto-detect, hot-plug, multi-device with proper deviceId via CallbackData, MidiInputNode with 8 CC outputs + 4 note triggers + MIDI clock sync + relative CC encoder mode + aftertouch, MidiOutputNode with note/CC send + LED feedback), MIDI Learn system (MidiLearnManager singleton with conflict detection, learn from faders/triggers/Inspector/NodeEditor, MidiMappingPanel with real-time binding display), OSC control (UdpServer thread-safe, OscInputNode with glob pattern matching + command dispatch /bbfx/set|node|preset|bpm, OscOutputNode rate-limited with delta detection, OscBrowserPanel hierarchical tree), Dual Output window (second SDL3 window for projector, resolution presets 720p/1080p/4K, fullscreen F11, multi-monitor selection, OutputPanel with preview), NDI output skeleton (#ifdef BBFX_HAS_NDI), MappingProfile class (MIDI+OSC bindings, save/load .bbfx-mapping, 3 controller presets), Performance Mode overhaul (trigger activate/deactivate with proper node cleanup, rest snapshot + PANIC restore, ChordSystem connected to DagSnapshot, trigger menus Load Preset/Toggle Compositor/Set Param, auto-descriptive labels, Quick Assign faders, crossfader lerp fix + repositioned in right column), autosave recovery dialog (crash detection via lock file, popup Recover/Ignore/Delete), serialization hardened (macroActions, chord snapshots, MIDI mappings, autosave complete, link deduplication), Menu Connect with Load/Save Mapping Preset, status bar MIDI/Output indicators, Help shortcuts. FX node naming fix (ColorShiftNode/PerlinFxNode/WaveVertexShader/TextureBlitterNode use instance names), FX cleanup fix (PerlinFxNode/WaveVertexShader destroy OGRE clones on delete), ColorShiftNode factory fix (uses existing SceneObjectNode entity). 224 iterations (I-714→I-937), 14 lots (A-N) + fixes, 101+ automated tests.
 
 **v3.4 "BBFx Stage"** transforms the Studio into a professional multi-projector mapping and synchronization platform: OutputManager multi-slot architecture (up to 8 independent outputs, uber-shader GL3.3, Win32 native windows bypassing AMD driver RenderTexture bug, blit-based pipeline), QuadWarp per-output (4-corner perspective with bilinear interpolation, GLSL distortion shader, keyboard precision mode, drag handles), EdgeBlend per-output (soft-edge overlap zones, linear/gamma curves, RGB per-channel control, independent left/right/top/bottom), GridWarp (subdivided mesh distortion with NxM control points, mesh-based GLSL shader), WarpWizard (step-by-step calibration: output selection → warp type → preview → apply, with live feedback), SurfaceMap multi-zone manager (add/remove/rename/select zones, zone-to-output assignment, WarpProfile+BlendProfile+GridWarpProfile per zone), SyncManager (UDP clock protocol, master/slave auto-detect, beat/bar/phase sync, network latency compensation, BPM broadcast, transport lock), NetworkPanel (master/slave status, connected peers, latency display, manual BPM override, Start/Stop sync), Spout output integration (TextureShareSender cross-platform abstraction — Spout2 on Windows, DmaBuf stub on Linux, Null fallback, per-output enable/config), NDI output (full NdiOutputNode implementation with libndi, resolution/fps config), Art-Net DMX output (ArtnetOutputNode with universe/channel addressing, 8 DAG-driven channels), MIDI Clock output (MidiClockNode — 24ppq tick generation, Start/Stop/Continue, tempo-synced to BeatDetector), MasterViewPanel (mosaic of all active outputs with live thumbnails, per-output status overlay, click-to-select, fullscreen preview), SceneSwitcher (ZoneSnapshot capture/apply warp+blend per zone, chord integration for scene presets, crossfade transitions, PANIC restore), and full integration across OutputPanel/MasterView/SceneSwitcher. Architecture: blit-based rendering pipeline (uber-shader GL3.3 fullscreen quad, Win32 native windows via CreateWindowEx/wglCreateContext, contournement bug AMD driver glBlitFramebuffer sur RenderTexture). Dear ImGui v1.92.7-docking. 352 iterations (I-938→I-1280 + I-FIX-1→I-FIX-11), 17 lots (A-Q) + 62 fix iterations, 34+ automated tests.
+
+**v3.5 "BBFx Community"** transforms the Studio into an open ecosystem with a sandboxed plugin system, community marketplace, and comprehensive Lua API: Plugin system (PluginManager/Manifest/Validator/Sandbox with sol::environment isolation, Lua stdlib whitelist, canonical path enforcement, 17 penetration tests PASS), Community Browser VS Code Marketplace-style (CommunityBrowserPanel with sidebar filters categories/tags/author/license/rating/sort, grid cards with animated thumbnails, detail panel with markdown renderer for README/screenshots/changelog/reviews, CommandPalette Ctrl+Shift+P), PluginManagerPanel (Installed/Community tabs, search+sort+regex, badge states, context menu, bulk enable/disable, drag&drop ZIP install, permission prompt Chrome-style, status bar badge), GitHub publish flow (OAuth device flow, token storage, fork+branch+commit+PR automation, community repo bootstrap with CI), GamepadManager next-gen (SDL3 gamepad API — haptic rumble low/high+triggers, gyroscope+accelerometer with Kalman filter, calibration offset, touchpad 2 fingers, LED RGB, battery level+state, GamepadNode with 33 DAG outputs, GamepadMappingProfile save/load with 3 shipped profiles PS5/Xbox/SwitchPro, GamepadPanel with sticks/triggers/buttons visualization, 3D gyro cube, touchpad pad, LED picker, rumble/trigger-rumble/LED test buttons, calibration flow, learn mode), Plugin API Lua 27+ namespaces (plugin, midi, osc, artnet, textureShare, gamepad, gamepadMapping, joystick, noise, easing, tempo, timeline, http, websocket, fs, json, ui, media, images, sequences, models, geometry, sdf, fractals, lsystem, renderTexture, frameBuffer, compositor, authoring, hotreload, github, community, deeplink, ratings), HttpClient (libcurl async with thread worker, progress callbacks, SHA256 verification, proxy support), WebSocketClient (stub — websocketpp not in vcpkg baseline), ZipExtractor (minizip-ng with path traversal and zip bomb protection), install pipeline (installFromZip/installFromUrl with permission prompt and toast), deep links (bbfx://install/enable/disable/run, Windows HKCU registry, DeepLinkHandler, argv IPC), ratings (GitHub Reactions API live overlay), AuthorProfilePanel, PluginAuthoringDialog (Create wizard with 6 templates + Export mode for scene presets and output templates), FFmpegBridge (subprocess with frame pipe, play/pause/seek/speed/loop controls), ImageLoader + SequencePlayer (GIF decode + PNG sequences), MeshImporter (Assimp wrapper), NoiseGenerator (FastNoiseLite wrapper + GPU fragment shader generation), GeometryGenerator (createMesh/updateVertices/primitives), SDFPrimitives + Marching Cubes, fractal shaders (Mandelbrot/Julia), L-system (parser + turtle interpreter + mesh generation), easing library (30 functions: linear/quad/cubic/sine/expo/circ/back/elastic/bounce + lerp/lerpColor/lerpVec3/bezier helpers), TempoManager (unified BPM with callbacks), LuaTimeline (scripted timeline with interpolation + event firing), bbfx.renderTexture/compositor/frameBuffer Lua APIs, HotReloader plugin directory watching, CLI flags (--install/--uninstall/--validate-plugin/--list-plugins/--export-plugin), 3 example plugins (example-plasma-wave, example-sdf-raymarch, example-lsystem-tree), documentation (plugin-api.md with 27 namespaces, sandbox-security.md, gamepad-mapping-guide.md, plugin-authoring-guide.md). 250 iterations (I-1290→I-1539), 23 lots (A-W), 673 automated tests, 0 FAIL.
 
 ---
 
@@ -224,6 +226,30 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **SceneSwitcher** — ZoneSnapshot capture/apply (warp + blend per zone), chord integration for scene presets, crossfade transitions between scenes, PANIC restore
 - **Blit-based architecture** — uber-shader GL3.3 fullscreen quad replaces glBlitFramebuffer, Win32 native windows via CreateWindowEx/wglCreateContext, contournement bug AMD driver on RenderTexture
 
+### BBFx Community (v3.5)
+- **Plugin system** — PluginManager (scan user/bundled dirs, lifecycle load/enable/disable/unload), PluginManifest (JSON parsing, semver constraints), PluginValidator (schema + resources + entry file), PluginSandbox (sol::environment with stdlib whitelist, canonical path enforcement, 17 penetration tests PASS), PluginRegistry (track node types, presets, widgets, panels per plugin)
+- **Community Browser** — VS Code Marketplace-style (CommunityBrowserPanel with sidebar filters, grid cards 256x256, animated thumbnails on hover, markdown detail panel with README/screenshots/changelog/reviews), CommunityIndex (GitHub JSON fetcher + local cache), CommandPalette (Ctrl+Shift+P with dynamic commands)
+- **Plugin Manager Panel** — PluginManagerPanel (Installed/Community tabs, search+sort+regex, badge states, context menu actions, bulk enable/disable), PluginErrorsPanel (severity filter, ring-buffer log), drag&drop ZIP install, permission prompt Chrome-style, status bar badge
+- **Install pipeline** — HttpClient (libcurl, async thread worker, progress, SHA256), ZipExtractor (minizip-ng, anti-traversal, anti-zipbomb), installFromZip/installFromUrl with toast
+- **Deep links** — bbfx://install/enable/disable/run (Windows HKCU registry, DeepLinkHandler, argv IPC)
+- **Ratings** — GitHub Reactions API live overlay in grid + details
+- **Author profiles** — AuthorProfilePanel with plugins-by-author list
+- **GamepadManager** — SDL3 gamepad API (rename JoystickManager), haptic rumble (low/high + triggers), gyroscope + accelerometer with Kalman filter, calibration offset, touchpad 2 fingers, LED RGB, battery level+state
+- **GamepadNode** — DAG node with 33 outputs (sticks, triggers, buttons, gyro, accel, touchpad, battery)
+- **GamepadMappingProfile** — JSON save/load, 3 shipped profiles (PS5 VJ, Xbox DJ, SwitchPro Performance)
+- **GamepadPanel** — sticks/triggers/buttons visualization, 3D gyro cube, touchpad pad, LED picker, rumble/trigger-rumble/LED tests, calibration flow, learn mode
+- **Plugin API Lua** — 27+ namespaces: bbfx.plugin, midi, osc, artnet, textureShare, gamepad, gamepadMapping, joystick, noise, easing, tempo, timeline, http, websocket, fs, json, ui, media, images, sequences, models, geometry, sdf, fractals, lsystem, renderTexture, frameBuffer, compositor
+- **Noise & Easing** — NoiseGenerator (FastNoiseLite + GPU fragment shaders), easing.lua (30 functions: linear/quad/cubic/sine/expo/circ/back/elastic/bounce, in/out/inOut variants + helpers lerp/lerpColor/lerpVec3/bezier)
+- **Tempo & Timeline** — TempoManager (unified BPM + callbacks), LuaTimeline (scripted timeline with interpolation + event firing)
+- **Media pipeline** — FFmpegBridge (subprocess frame pipe, play/pause/seek/speed/loop), ImageLoader (TextureManager wrapper), SequencePlayer (GIF decode + PNG sequences), MeshImporter (Assimp wrapper)
+- **Procedural generation** — GeometryGenerator (createMesh/updateVertices/primitives), SDFPrimitives + Marching Cubes, fractal shaders (Mandelbrot/Julia), L-system (parser + turtle + mesh)
+- **RTT + Compositor + FrameBuffer** — bbfx.renderTexture.create/setCamera/readPixels, bbfx.compositor, bbfx.frameBuffer Lua APIs
+- **Preset authoring** — PluginAuthoringDialog (Create wizard with 6 templates + Export mode), right-click Export as Plugin, scene preset + output template export
+- **GitHub publish** — OAuth device flow, token storage, fork + branch + commit + PR automation
+- **Hot reload + CLI** — HotReloader plugin directory watching, CLI flags (--install/--uninstall/--validate-plugin/--list-plugins/--export-plugin)
+- **Example plugins** — example-plasma-wave, example-sdf-raymarch, example-lsystem-tree
+- **Documentation** — plugin-api.md (27 namespaces), sandbox-security.md, gamepad-mapping-guide.md, plugin-authoring-guide.md
+
 ---
 
 ## Architecture
@@ -239,7 +265,7 @@ C++ core
   ├── PrimitiveNodes  -- RootTimeNode (resume/seekTo), LuaAnimationNode, AnimationStateNode
   ├── Automation      -- AutomationData, AutomationEngine (per-frame DAG injection)
   ├── FX              -- Perlin (CPU+GPU), TextureBlitter, WaveVertex, Shader, ColorShift
-  ├── Input           -- KeyboardManager, MouseManager, JoystickManager (SDL3)
+  ├── Input           -- KeyboardManager, MouseManager, GamepadManager (SDL3, v3.5)
   ├── Audio           -- AudioCapture, AudioAnalyzer, BeatDetector
   ├── Video           -- OggReader, TheoraReader, TheoraBlitter, TheoraClip, Crossfader
   ├── MIDI            -- MidiDeviceManager, MidiLearnManager, MappingProfile, MidiMessage (v3.3)
@@ -248,14 +274,16 @@ C++ core
   ├── Output          -- OutputManager, WarpProfile, BlendProfile, GridWarpProfile, WarpWizard (v3.4)
   ├── Surface         -- SurfaceMap, ZoneSnapshot (v3.4)
   ├── Share           -- TextureShareSender (Spout/DmaBuf/Null) (v3.4)
+  ├── Plugin          -- PluginManager, PluginManifest, PluginValidator, PluginSandbox, PluginRegistry, InspectorWidgetRegistry, PluginSandboxApi (v3.5)
   ├── Record          -- InputRecorder, InputPlayer, VideoExporter
   └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
-       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, MidiInput, MidiOutput, OscInput, OscOutput, NdiOutput, ArtnetOutput, MidiClock, ...
-       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack, MidiActivity, MidiMapping, OscBrowser, Output, MasterView, Network, SurfaceEditor (v3.4)
+       ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, MidiInput, MidiOutput, OscInput, OscOutput, NdiOutput, ArtnetOutput, MidiClock, Gamepad, ...
+       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack, MidiActivity, MidiMapping, OscBrowser, Output, MasterView, Network, SurfaceEditor, PluginManager, PluginErrors, CommunityBrowser, AuthorProfile, Gamepad, ShaderGallery, MaterialEditor, UndoHistory (v3.5)
        ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
        ├── Hierarchy  -- SceneHierarchyPanel (v3.2.2)
        ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform/Scene/Reparent commands)
        ├── Generators -- MeshGenerator (procedural meshes)
+       ├── Dialogs    -- PluginAuthoringDialog, PermissionPromptDialog (v3.5)
        └── Project    -- ProjectSerializer, ExportDialog
     |
 OGRE 14.5 + SDL3  (via vcpkg)
@@ -276,7 +304,7 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/fx/ShaderFxNode` | GLSL shader loader with auto-parsed float uniforms as ports |
 | `src/fx/TextureBlitter` | Manual RGBA texture, pixel-level write |
 | `src/fx/WaveVertexShader` | Sinusoidal vertex displacement |
-| `src/input/` | KeyboardManager, MouseManager, JoystickManager, InputManager |
+| `src/studio/dialogs/` | PermissionPromptDialog, PluginAuthoringDialog, DeepLinkHandler |
 | `src/audio/` | AudioCapture, AudioAnalyzer, BeatDetector |
 | `src/video/` | TheoraClip, ReversableClip, TheoraBlitter, TextureCrossfader |
 | `src/midi/` | MidiDeviceManager, MidiLearnManager, MappingProfile, MidiMessage |
@@ -293,8 +321,13 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `src/share/TextureShareSender` | Cross-platform texture sharing (Spout2/DmaBuf/Null), factory pattern |
 | `src/record/` | InputRecorder, InputPlayer, VideoExporter |
 | `src/studio/` | StudioApp, StudioEngine, NodeTypeRegistry, Debugger, SettingsManager, ResourceEnumerator |
-| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode, TextureNode, MaterialNode, MidiInputNode, MidiOutputNode, OscInputNode, OscOutputNode, NdiOutputNode, ArtnetOutputNode, MidiClockNode |
-| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel, CompositorStackPanel, MidiActivityPanel, MidiMappingPanel, OscBrowserPanel, OutputPanel, MasterViewPanel, NetworkPanel, SurfaceEditorPanel |
+| `src/studio/nodes/` | SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode, TextureNode, MaterialNode, MidiInputNode, MidiOutputNode, OscInputNode, OscOutputNode, NdiOutputNode, ArtnetOutputNode, ArtnetInputNode, MidiClockNode, GamepadNode |
+| `src/studio/panels/` | ViewportPanel, NodeEditorPanel, InspectorPanel, TimelinePanel, PresetBrowserPanel, ConsolePanel, PerformanceModePanel, SetEditorPanel, SceneHierarchyPanel, CompositorStackPanel, MidiActivityPanel, MidiMappingPanel, OscBrowserPanel, OutputPanel, MasterViewPanel, NetworkPanel, SurfaceEditorPanel, PluginManagerPanel, PluginErrorsPanel, CommunityBrowserPanel, AuthorProfilePanel, GamepadPanel, SceneSwitcherPanel |
+| `src/plugin/` | PluginManager, PluginManifest, PluginValidator, PluginSandbox, PluginSandboxApi, PluginRegistry, PluginCommands, InspectorWidgetRegistry, PluginErrorLog, PluginAuthoringBackend |
+| `src/plugin/network/` | HttpClient (libcurl async), WebSocketClient (stub), ZipExtractor (minizip-ng), GitHubPublisher (OAuth + REST API) |
+| `src/plugin/media/` | FFmpegBridge (subprocess pipe), ImageLoader (OGRE TextureManager), SequencePlayer (GIF/PNG), MeshImporter (Assimp) |
+| `src/plugin/procedural/` | NoiseGenerator (FastNoiseLite + GPU), GeometryGenerator, SDFPrimitives, MarchingCubes, FractalShaders, LSystemParser |
+| `src/input/` | KeyboardManager, MouseManager, GamepadManager (ex-JoystickManager), InputManager |
 | `src/studio/TextureThumbnailCache` | Lazy-load OGRE textures as ImGui GL texture IDs (64x64), single-thread only |
 | `src/studio/viewport/` | ViewportCameraController, ViewportPicker, ViewportGizmo, ViewportGrid, ViewportToolbar |
 | `src/studio/commands/` | CommandManager, NodeCommands, LinkCommands, EditCommands, ChordCommands, TransformCommands, SceneCommands, AutomationCommands |
@@ -329,6 +362,8 @@ ogre-lua  (standalone: SceneManager, Particles, Compositors, MeshManager…)
 | `threads.lua` | Coroutine scheduler integrated with frame loop |
 | `paramspec.lua` | ParamSpec builder: float/int/bool/enum/color/vec3/mesh/texture/material/shader/particle/compositor typed parameters |
 | `video.lua` | createClip, overlay, crossfade |
+| `easing.lua` | 30 easing functions (linear/quad/cubic/sine/expo/circ/back/elastic/bounce) + lerp/lerpColor/lerpVec3/bezier helpers |
+| `plugin_templates/` | 6 plugin templates: node_generator, node_fx, preset, shader, panel, output_template |
 
 ---
 
@@ -466,6 +501,11 @@ animator:addNode(modulate)
 | rtmidi | latest | MIDI device I/O |
 | Spout2 | latest | Texture sharing on Windows (via spout2dx) |
 | libndi | latest | NDI video output |
+| libcurl | latest | HTTP client for community browser + plugin install |
+| minizip-ng | latest | ZIP extraction for plugin install pipeline |
+| asio | latest | Async I/O for WebSocket/HTTP |
+| assimp | latest | 3D model import (MeshImporter) |
+| stb | latest | stb_image for GIF/PNG sequence decoding |
 
 ---
 
@@ -480,19 +520,27 @@ ctest --preset windows-release
 | `tests/lua/test_regression.lua` | Headless ogre-lua binding regression tests |
 | `tests/test_longrun.lua` | 60-second stability test |
 | `tests/benchmark.lua` | Frame time and Lua node overhead benchmarks |
+| `tests/test_plugin_lot_*.lua` | Plugin system tests per lot (A-W), 673 assertions total |
+| `tests/test_v35_non_regression.lua` | v3.5 non-regression: v3.4 suite + v3.5 bindings |
 
 ---
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.4), all modules, Lua API, design decisions
+- [`docs/architecture.md`](docs/architecture.md) — Full architecture reference (v2.0–v3.5), all modules, Lua API, design decisions
+- [`docs/user_manual.md`](docs/user_manual.md) — Complete Studio user manual (panels, nodes, shortcuts, workflows)
+- [`docs/dependencies.md`](docs/dependencies.md) — Dependency inventory and version tracking
+- [`docs/plugin-api.md`](docs/plugin-api.md) — Plugin API reference (27 Lua namespaces)
+- [`docs/plugin-authoring-guide.md`](docs/plugin-authoring-guide.md) — Plugin creation and publishing guide
+- [`docs/sandbox-security.md`](docs/sandbox-security.md) — Sandbox security model and penetration tests
+- [`docs/gamepad-mapping-guide.md`](docs/gamepad-mapping-guide.md) — Gamepad mapping and profile guide
 - [`lua/demos/USAGE.md`](lua/demos/USAGE.md) — Demo and Studio usage reference
 
 ---
 
 ## History
 
-BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG, v3.2.4 delivers the asset pipeline with unified browser, visual pickers, TextureNode/MaterialNode DAG entity-link, compositor stack with Performance Mode rendering, triggers/faders pro with 7 action types and learn mode, auto-detect drop, and runtime renderer selection, v3.2.5 completes the Studio Perfect branch with multi-selection, Shader Gallery, Material Editor, Crossfader A/B, macro triggers, FX Stack, quick-add, smart wire, collapsed nodes, groups, minimap, 95 tests, v3.3 "Connect" transforms the Studio into a live performance hub with MIDI controller integration (rtmidi, MidiLearnManager, conflict detection, LED feedback), OSC control (UdpServer, command dispatch), dual output window (projector, F11 fullscreen, multi-monitor), NDI skeleton, MappingProfile save/load, Performance Mode overhaul (trigger activate/deactivate, rest snapshot PANIC, ChordSystem→DagSnapshot), autosave recovery dialog, and 224 iterations, and v3.4 "Stage" transforms the Studio into a professional multi-projector mapping platform with OutputManager multi-slot (up to 8 outputs, uber-shader GL3.3, blit-based pipeline, Win32 native windows), QuadWarp/EdgeBlend/GridWarp per-output calibration, WarpWizard step-by-step, SurfaceMap multi-zone manager, SyncManager UDP clock (master/slave beat/bar sync), TextureShareSender cross-platform (Spout2/DmaBuf/Null), full NDI/Art-Net/MIDI Clock output nodes, MasterViewPanel mosaic, SceneSwitcher with ZoneSnapshot, and 352 iterations across 17 lots.
+BBFx was written in 2006 by Sébastien JULLIEN and Thomas LEFORT as a real-time 3D animation engine for demoscene productions: OGRE 1.2, OIS, SWIG, Lua 5.1, SCons on Linux. The v2.x revival (2025–2026) rewrites it from scratch in modern C++20 — same animation DAG architecture, entirely updated stack — and extends it with audio reactivity, GPU shaders, Theora video, live scripting, and a production recording/export pipeline. v3.0 introduces the visual Studio (ImGui + OGRE 14), v3.1 stabilizes it with undo/redo and project serialization, v3.2 delivers 41 presets and 13 new node types, v3.2.1 adds interactive viewport manipulation (picking, gizmos, grid), v3.2.2 completes the multi-object workflow with scene hierarchy, drag-drop, and cascade FX, v3.2.3 transforms the timeline into a full automation sequencer with keyframes, cue markers, loop region, real-time recording, bezier curves, LFO generation, chord snapshots, and native multi-target DAG, v3.2.4 delivers the asset pipeline with unified browser, visual pickers, TextureNode/MaterialNode DAG entity-link, compositor stack with Performance Mode rendering, triggers/faders pro with 7 action types and learn mode, auto-detect drop, and runtime renderer selection, v3.2.5 completes the Studio Perfect branch with multi-selection, Shader Gallery, Material Editor, Crossfader A/B, macro triggers, FX Stack, quick-add, smart wire, collapsed nodes, groups, minimap, 95 tests, v3.3 "Connect" transforms the Studio into a live performance hub with MIDI controller integration (rtmidi, MidiLearnManager, conflict detection, LED feedback), OSC control (UdpServer, command dispatch), dual output window (projector, F11 fullscreen, multi-monitor), NDI skeleton, MappingProfile save/load, Performance Mode overhaul (trigger activate/deactivate, rest snapshot PANIC, ChordSystem→DagSnapshot), autosave recovery dialog, and 224 iterations, v3.4 "Stage" transforms the Studio into a professional multi-projector mapping platform with OutputManager multi-slot (up to 8 outputs, uber-shader GL3.3, blit-based pipeline, Win32 native windows), QuadWarp/EdgeBlend/GridWarp per-output calibration, WarpWizard step-by-step, SurfaceMap multi-zone manager, SyncManager UDP clock (master/slave beat/bar sync), TextureShareSender cross-platform (Spout2/DmaBuf/Null), full NDI/Art-Net/MIDI Clock output nodes, MasterViewPanel mosaic, SceneSwitcher with ZoneSnapshot, and 352 iterations across 17 lots, and v3.5 "Community" transforms the Studio into an open ecosystem with a sandboxed plugin system (PluginManager/Manifest/Validator/Sandbox with sol::environment isolation, 17 pen-tests PASS), Community Browser VS Code-style marketplace (CommunityBrowserPanel with filters/cards/detail tabs/markdown renderer/CommandPalette), GitHub publish flow (OAuth device flow, fork+PR automation), GamepadManager next-gen (haptic rumble, gyroscope/accelerometer with Kalman filter, touchpad, LED RGB, battery, GamepadNode 33 outputs, 3 shipped profiles), 27+ Lua API namespaces (plugin/midi/osc/artnet/textureShare/gamepad/noise/easing/tempo/timeline/http/fs/json/ui/media/images/sequences/models/geometry/sdf/fractals/lsystem/renderTexture/frameBuffer/compositor/authoring), procedural content generation (NoiseGenerator, GeometryGenerator, SDFPrimitives+MarchingCubes, fractal shaders, L-system), media pipeline (FFmpegBridge, ImageLoader, SequencePlayer, MeshImporter), plugin authoring tools (wizard, templates, hot reload, CLI), deep links (bbfx://), 3 example plugins, and 250 iterations across 23 lots with 673 automated tests.
 
 ---
 

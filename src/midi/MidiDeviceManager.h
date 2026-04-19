@@ -51,6 +51,24 @@ public:
     /// Call each frame to detect device additions/removals.
     void checkHotPlug();
 
+    // ── State cache (v3.5 Lot M) ────────────────────────────────────────
+    // Populated from the rtmidi callback thread (same mutex as queue) so
+    // every CC/note change is visible from the main thread without
+    // consuming the queue. `bbfx.midi.getCC` / `isNoteOn` read from this.
+    // Channel is 1-16; any out-of-range value returns the default.
+
+    /// Last CC value seen on (channel, cc), normalized 0..1. Returns 0 if
+    /// the CC has never been observed on that channel.
+    float getLastCCValue(int channel, int cc) const;
+
+    /// True iff the last Note-On for (channel, note) has not yet been
+    /// followed by a Note-Off (or Note-On with velocity 0).
+    bool isNoteDown(int channel, int note) const;
+
+    /// Velocity (0..1) of the most recent Note-On for (channel, note),
+    /// or 0 if it was released.
+    float getNoteVelocity(int channel, int note) const;
+
 private:
     static void midiCallback(double timestamp, std::vector<unsigned char>* message, void* userData);
 
@@ -80,6 +98,13 @@ private:
     // Thread-safe message queue (rtmidi callback → main thread poll)
     std::queue<MidiMessage> mMessageQueue;
     mutable std::mutex mQueueMutex;
+
+    // v3.5 Lot M state cache — keyed by (channel-1)*128+ccOrNote.
+    // Written under mQueueMutex from midiCallback / injectMessage,
+    // read under the same mutex from accessors above.
+    std::vector<float> mCCCache;           // size 16*128, values in 0..1
+    std::vector<float> mNoteVelocity;      // size 16*128, 0 if note off
+    std::vector<uint8_t> mNoteDown;        // size 16*128, 1 if held
 
     // Hot-plug detection
     int mLastInputCount = 0;

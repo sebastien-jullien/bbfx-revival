@@ -3,6 +3,31 @@
 #include "ZoneSnapshot.h"
 #include "commands/NodeCommands.h"
 #include "commands/SceneCommands.h"
+#include "commands/PluginCommands.h"
+#include "../plugin/PluginManager.h"
+#include "../plugin/PluginManifest.h"
+#include "../network/HttpClient.h"
+#include "../network/ArtnetInput.h"
+#include "../osc/OscBus.h"
+#include "../timing/TempoManager.h"
+#include "../plugin/PluginHotReloader.h"
+#include "../network/ZipExtractor.h"
+#include "dialogs/PermissionPromptDialog.h"
+#include "panels/PluginManagerPanel.h"
+#include "panels/PluginErrorsPanel.h"
+#include "panels/GamepadPanel.h"
+#include "panels/PluginAuthoringDialog.h"
+#include "bbfx_imgui_bindings.h"
+#include "ScriptPanelRegistry.h"
+#include "panels/CommunityBrowserPanel.h"
+#include "panels/CommandPalette.h"
+#include "panels/AuthorProfilePanel.h"
+#include "../plugin/PluginErrorLog.h"
+#include "../plugin/DeepLinkHandler.h"
+#include "../plugin/DeepLinkRegistry.h"
+#include "../input/GamepadNode.h"
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
 #include "../fx/PerlinFxNode.h"
@@ -29,6 +54,7 @@
 #include "TextureShareSender.h"
 #include "nodes/TextureShareOutputNode.h"
 #include "nodes/ArtnetOutputNode.h"
+#include "nodes/ArtnetInputNode.h"
 #include "nodes/WarpNode.h"
 #include "nodes/BlendNode.h"
 #include "../midi/MidiDeviceManager.h"
@@ -195,6 +221,81 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mOscBrowserPanel = std::make_unique<OscBrowserPanel>();
     mNetworkPanel    = std::make_unique<NetworkPanel>();
     mMasterViewPanel = std::make_unique<MasterViewPanel>();
+    mPluginManagerPanel    = std::make_unique<PluginManagerPanel>();
+    mPluginErrorsPanel     = std::make_unique<PluginErrorsPanel>();
+    mCommunityBrowserPanel = std::make_unique<CommunityBrowserPanel>();
+    mAuthorProfilePanel    = std::make_unique<AuthorProfilePanel>();
+    mGamepadPanel          = std::make_unique<GamepadPanel>();
+    mPluginAuthoringDialog = std::make_unique<PluginAuthoringDialog>();
+    mGamepadPanel->setLearnCallback([this](const std::string& source) {
+        ToastSystem::instance().toast(
+            "Learn: detected " + source + " — pick a port in Node Editor to bind.",
+            ToastSeverity::Info, 5.0f);
+    });
+
+    // v3.5 Lot I — wire Community Browser's author click -> AuthorProfilePanel.
+    mCommunityBrowserPanel->setOnOpenAuthor([this](const std::string& author) {
+        mAuthorProfilePanel->setAuthor(author);
+        mShowAuthorProfile = true;
+    });
+    // When the user picks a plugin from the Author panel, raise the
+    // Community Browser on that plugin.
+    static StudioApp* sSelf = this;
+    mAuthorProfilePanel->setOnSelectPlugin([](const std::string& id) {
+        if (!sSelf) return;
+        sSelf->mShowCommunityBrowser = true;
+        if (sSelf->mCommunityBrowserPanel) sSelf->mCommunityBrowserPanel->focusOnEntry(id);
+    });
+
+    // v3.5 Lot I — deep link dispatcher.
+    DeepLinkHandler::instance().onInstall = [this](const std::string& id) {
+        mShowCommunityBrowser = true;
+        if (mCommunityBrowserPanel) mCommunityBrowserPanel->focusOnEntry(id);
+    };
+    DeepLinkHandler::instance().onEnable = [](const std::string& id) {
+        if (!PluginManager::instance().enable(id)) {
+            ToastSystem::instance().toast(
+                "Enable failed for " + id, ToastSeverity::Error, 5.0f);
+        } else {
+            ToastSystem::instance().toast(
+                "Enabled " + id, ToastSeverity::Info, 3.0f);
+        }
+    };
+    DeepLinkHandler::instance().onDisable = [](const std::string& id) {
+        PluginManager::instance().disable(id);
+    };
+    DeepLinkHandler::instance().onRun = [](const std::string& id, const std::string& type) {
+        PluginManager::instance().enable(id);
+        ToastSystem::instance().toast(
+            "Run deep-link received: " + id + " / " + type +
+            " — auto node-instantiation arrives in Lot W.",
+            ToastSeverity::Info, 5.0f);
+    };
+
+    // v3.5 Lot H: wire the static command palette entries into actual
+    // StudioApp flag toggles so they actually do something at click.
+    CommandPalette::instance().registerCommand({
+        "Toggle Plugin Manager", "Ctrl+Shift+X",
+        [this]() { mShowPluginManager = !mShowPluginManager; }
+    });
+    CommandPalette::instance().registerCommand({
+        "Toggle Community Browser", "Community plugins from GitHub",
+        [this]() {
+            mShowCommunityBrowser = !mShowCommunityBrowser;
+            if (mShowCommunityBrowser && mCommunityBrowserPanel) {
+                mCommunityBrowserPanel->requestRefresh();
+            }
+        }
+    });
+    CommandPalette::instance().registerCommand({
+        "Toggle Plugin Errors", "Ctrl+Shift+E",
+        [this]() { mShowPluginErrors = !mShowPluginErrors; }
+    });
+    // v3.5 Lot L — Gamepad panel in the command palette.
+    CommandPalette::instance().registerCommand({
+        "Toggle Gamepad Panel", "Ctrl+Shift+G",
+        [this]() { mShowGamepadPanel = !mShowGamepadPanel; }
+    });
 
     // Surface Mapping (v3.4 Lot E)
     mSurfaceMap = std::make_unique<SurfaceMap>();
@@ -845,6 +946,19 @@ void StudioApp::run() {
         // ── Network sync poll (v3.4 Lot F) ────────────────────────────────────
         if (mSyncManager) mSyncManager->poll();
 
+        // ── HTTP client main-thread callback drain (v3.5 Lot E) ───────────────
+        HttpClient::instance().pumpMainThread();
+
+        // ── OSC bus + Art-Net input pump (v3.5 Lot M) ─────────────────────────
+        OscBus::instance().tick();
+        ArtnetInput::instance().tick();
+
+        // ── Tempo callback dispatch (v3.5 Lot N) ──────────────────────────────
+        TempoManager::instance().update();
+
+        // ── Plugin hot-reloader (v3.5 Lot U) — rate-limited 500ms scan ─────────
+        PluginHotReloader::instance().tick();
+
         // ── Auto-save ─────────────────────────────────────────────────────────
         tickAutoSave();
 
@@ -995,7 +1109,33 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         if (ctrl && shift && evt.key.key == SDLK_S) { mShowSurfaceEditor = !mShowSurfaceEditor; return; }
         if (ctrl && shift && evt.key.key == SDLK_N) { mShowNetworkPanel  = !mShowNetworkPanel;  return; }
         if (ctrl && shift && evt.key.key == SDLK_M) { mShowMasterView    = !mShowMasterView;    return; }
-        if (ctrl && shift && evt.key.key == SDLK_P) { panicAll(); return; }
+        // v3.5 Lot H: Ctrl+Shift+P is the Command Palette (VS Code convention).
+        // PANIC ALL moves to Ctrl+Shift+! (exclamation) to free the shortcut.
+        if (ctrl && shift && evt.key.key == SDLK_P) {
+            CommandPalette::instance().open();
+            return;
+        }
+        if (ctrl && shift && evt.key.key == SDLK_1) { panicAll(); return; }
+        // v3.5 Lot H: Ctrl+Shift+C opens the Community Browser.
+        if (ctrl && shift && evt.key.key == SDLK_C) {
+            mShowCommunityBrowser = !mShowCommunityBrowser;
+            if (mShowCommunityBrowser && mCommunityBrowserPanel)
+                mCommunityBrowserPanel->requestRefresh();
+            return;
+        }
+        // v3.5 Lot D: Ctrl+Shift+X toggles Plugin Manager window.
+        if (ctrl && shift && evt.key.key == SDLK_X) { mShowPluginManager = !mShowPluginManager; return; }
+        // v3.5 Lot G: Ctrl+Shift+E toggles Plugin Errors window.
+        if (ctrl && shift && evt.key.key == SDLK_E) {
+            mShowPluginErrors = !mShowPluginErrors;
+            if (mShowPluginErrors) PluginErrorLog::instance().acknowledgeAll();
+            return;
+        }
+        // v3.5 Lot L: Ctrl+Shift+G toggles the Gamepad panel.
+        if (ctrl && shift && evt.key.key == SDLK_G) {
+            mShowGamepadPanel = !mShowGamepadPanel;
+            return;
+        }
 
         if (ctrl && evt.key.key == SDLK_S) {
             if (mProjectPath.empty()) {
@@ -1152,6 +1292,11 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
                     sol::error err = result;
                     std::cerr << "[Studio] Lua error: " << err.what() << '\n';
                 }
+            } else if (ext == ".zip") {
+                // v3.5 Lot F: install a plugin ZIP dropped onto the Studio.
+                // We extract a read-only view of the manifest, prompt for
+                // permissions, and only then commit the install.
+                promptInstallZip(path);
             }
         }
     }
@@ -1360,6 +1505,22 @@ void StudioApp::renderMenuBar() {
         if (ImGui::MenuItem("Export...")) {
             mExportDialog.open();
         }
+        // v3.5 Lot S — plugin authoring exports.
+        if (ImGui::BeginMenu("Export Plugin")) {
+            if (ImGui::MenuItem("Subgraph as Plugin...")) {
+                mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::Subgraph);
+                mShowPluginAuthoringDialog = true;
+            }
+            if (ImGui::MenuItem("Scene Preset Plugin...")) {
+                mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::Scene);
+                mShowPluginAuthoringDialog = true;
+            }
+            if (ImGui::MenuItem("Output Template Plugin...")) {
+                mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::OutputTemplate);
+                mShowPluginAuthoringDialog = true;
+            }
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Settings...")) {
             mShowSettings = true;
@@ -1481,6 +1642,9 @@ void StudioApp::renderMenuBar() {
             MidiLearnManager::instance().getBindings().clear();
             std::cout << "[Connect] All MIDI bindings cleared" << std::endl;
         }
+        ImGui::Separator();
+        // v3.5 Lot L — Gamepad visualisation / calibration / learn.
+        ImGui::MenuItem("Gamepad...", "Ctrl+Shift+G", &mShowGamepadPanel);
         ImGui::EndMenu();
     }
 
@@ -1490,9 +1654,32 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Network Sync",   "Ctrl+Shift+N", &mShowNetworkPanel);
         ImGui::MenuItem("Master View",    "Ctrl+Shift+M", &mShowMasterView);
         ImGui::Separator();
-        if (ImGui::MenuItem("PANIC ALL", "Ctrl+Shift+P")) {
+        if (ImGui::MenuItem("PANIC ALL", "Ctrl+Shift+1")) {
             panicAll();
         }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Plugins")) {
+        ImGui::MenuItem("Manage...", "Ctrl+Shift+X", &mShowPluginManager);
+        if (ImGui::MenuItem("Community Browser...", "Ctrl+Shift+C", &mShowCommunityBrowser)) {
+            if (mShowCommunityBrowser && mCommunityBrowserPanel)
+                mCommunityBrowserPanel->requestRefresh();
+        }
+        if (ImGui::MenuItem("Command Palette...", "Ctrl+Shift+P")) {
+            CommandPalette::instance().open();
+        }
+        {
+            size_t total = PluginErrorLog::instance().totalCount();
+            size_t unseen = PluginErrorLog::instance().unacknowledgedCount();
+            char label[64];
+            if (unseen > 0)      std::snprintf(label, sizeof(label), "Errors (%zu new)", unseen);
+            else if (total > 0)  std::snprintf(label, sizeof(label), "Errors (%zu)", total);
+            else                 std::snprintf(label, sizeof(label), "Errors");
+            ImGui::MenuItem(label, "Ctrl+Shift+E", &mShowPluginErrors);
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled(" Drop .zip to install");
         ImGui::EndMenu();
     }
 
@@ -1564,6 +1751,23 @@ void StudioApp::renderPanels() {
         }
         mMasterViewPanel->render(mEngine.get(), mSyncManager.get());
     }
+
+    // v3.5 Lot G: real Plugin Manager + Plugin Errors panels.
+    if (mPluginManagerPanel) mPluginManagerPanel->render(&mShowPluginManager);
+    if (mPluginErrorsPanel)  mPluginErrorsPanel->render(&mShowPluginErrors);
+    // v3.5 Lot H: Community Browser + Command Palette.
+    if (mCommunityBrowserPanel) mCommunityBrowserPanel->render(&mShowCommunityBrowser);
+    if (mAuthorProfilePanel)    mAuthorProfilePanel->render(&mShowAuthorProfile);
+    if (mGamepadPanel)          mGamepadPanel->render(&mShowGamepadPanel);
+    if (mPluginAuthoringDialog) mPluginAuthoringDialog->render(&mShowPluginAuthoringDialog);
+
+    // v3.5 Lot P — plugin-contributed ImGui panels (registerPanel).
+    ScriptPanelRegistry::instance().drawAll();
+
+    CommandPalette::instance().draw();
+
+    // v3.5 Lot F: permission prompt modal (draws only when pending).
+    PermissionPromptDialog::instance().draw();
 
     // Update shader/material preview renderer
     if (mPreviewRenderer) mPreviewRenderer->update(ImGui::GetIO().DeltaTime);
@@ -1911,6 +2115,80 @@ void StudioApp::saveProject(const std::string& path) {
     } else {
         std::cerr << "[Studio] Save failed: " << mSerializer.getLastError() << std::endl;
     }
+}
+
+void StudioApp::promptInstallZip(const std::string& zipPath) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // Extract into a temp dir. If anything fails, toast and bail.
+    fs::path tempBase = fs::temp_directory_path(ec);
+    if (ec) tempBase = fs::current_path();
+    fs::path tempDir = tempBase / ("bbfx_prompt_install_" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
+    ZipExtractor::Options zopts;
+    std::string zErr;
+    if (!ZipExtractor::extract(zipPath, tempDir, zopts, zErr)) {
+        fs::remove_all(tempDir, ec);
+        ToastSystem::instance().toast("Install failed: " + zErr, ToastSeverity::Error, 5.0f);
+        return;
+    }
+
+    // Find the plugin root inside the temp dir (root or single-subdir layout).
+    fs::path pluginRoot = tempDir;
+    if (!fs::exists(pluginRoot / "manifest.json", ec)) {
+        std::vector<fs::path> children;
+        for (auto& e : fs::directory_iterator(pluginRoot, ec)) children.push_back(e.path());
+        if (children.size() == 1 && fs::is_directory(children[0], ec) &&
+            fs::exists(children[0] / "manifest.json", ec)) {
+            pluginRoot = children[0];
+        } else {
+            fs::remove_all(tempDir, ec);
+            ToastSystem::instance().toast("Install failed: manifest.json not found in zip",
+                                           ToastSeverity::Error, 5.0f);
+            return;
+        }
+    }
+
+    // Read and parse the manifest so the prompt can show name/author/permissions.
+    std::ifstream mf(pluginRoot / "manifest.json");
+    nlohmann::json mj;
+    try { mf >> mj; } catch (const std::exception& e) {
+        fs::remove_all(tempDir, ec);
+        ToastSystem::instance().toast(std::string("Install failed: manifest.json parse: ") + e.what(),
+                                       ToastSeverity::Error, 6.0f);
+        return;
+    }
+    std::string parseErr;
+    auto manifestOpt = PluginManifest::fromJson(mj, parseErr);
+    if (!manifestOpt) {
+        fs::remove_all(tempDir, ec);
+        ToastSystem::instance().toast("Install failed: " + parseErr, ToastSeverity::Error, 6.0f);
+        return;
+    }
+
+    // Capture tempDir + pluginRoot by value so the closures stay valid.
+    auto cleanup = [tempDir]() {
+        std::error_code ec;
+        std::filesystem::remove_all(tempDir, ec);
+    };
+
+    PermissionPromptDialog::instance().open(*manifestOpt,
+        [pluginRoot, cleanup]() {
+            std::string err;
+            std::string id = PluginManager::instance().installFromPath(pluginRoot, &err);
+            cleanup();
+            if (id.empty()) {
+                ToastSystem::instance().toast("Install failed: " + err, ToastSeverity::Error, 6.0f);
+            } else {
+                ToastSystem::instance().toast("Installed '" + id + "'", ToastSeverity::Info, 4.0f);
+            }
+        },
+        [cleanup]() {
+            cleanup();
+            ToastSystem::instance().toast("Install cancelled", ToastSeverity::Info, 2.5f);
+        });
 }
 
 void StudioApp::loadProject(const std::string& path) {
@@ -2581,6 +2859,15 @@ void StudioApp::initNodeTypeRegistry() {
             return node;
         }});
 
+    // v3.5 Lot K: GamepadNode exposes the full state of a connected gamepad
+    // as DAG output ports (sticks/triggers/buttons/gyro/accel/touchpad/battery).
+    reg.registerType({"GamepadNode", "Input", {0.35f, 0.65f, 0.95f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new GamepadNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
     reg.registerType({"MixerNode", "Math", {0.6f, 0.6f, 0.6f, 1.0f},
         [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             auto* node = new MixerNode(name);
@@ -2707,6 +2994,14 @@ void StudioApp::initNodeTypeRegistry() {
             registerInAnimator(node);
             return node;
         }});
+
+    // v3.5 Lot M — ArtnetInputNode : symmetric counterpart on UDP 6454.
+    reg.registerType({"ArtnetInputNode", "Input", {0.5f, 0.9f, 0.9f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new ArtnetInputNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
 }
 
 // ── Status bar ──────────────────────────────────────────────────────────────
@@ -2770,6 +3065,36 @@ void StudioApp::renderStatusBar() {
             ImGui::TextColored({0.0f, 1.0f, 0.5f, 1.0f}, "Audio: On");
         } else {
             ImGui::TextDisabled("Audio: Off");
+        }
+
+        // v3.5 Lot G: plugin count badge in status bar. Click opens manager.
+        {
+            auto ids = PluginManager::instance().listPlugins();
+            int enabled = 0, failed = 0;
+            for (const auto& id : ids) {
+                const auto* p = PluginManager::instance().getPlugin(id);
+                if (!p) continue;
+                if (p->state == PluginState::ENABLED) ++enabled;
+                if (p->state == PluginState::FAILED)  ++failed;
+            }
+            ImGui::SameLine();
+            ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+            ImGui::SameLine();
+            ImVec4 col = failed ? ImVec4{1.0f, 0.5f, 0.5f, 1.0f}
+                                 : (enabled ? ImVec4{0.5f, 0.9f, 0.5f, 1.0f}
+                                            : ImVec4{0.6f, 0.6f, 0.6f, 1.0f});
+            char buf[64];
+            if (failed)
+                std::snprintf(buf, sizeof(buf), "Plugins: %d/%zu (%d failed)",
+                               enabled, ids.size(), failed);
+            else
+                std::snprintf(buf, sizeof(buf), "Plugins: %d/%zu",
+                               enabled, ids.size());
+            ImGui::TextColored(col, "%s", buf);
+            if (ImGui::IsItemClicked()) mShowPluginManager = true;
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Click to open Plugin Manager (Ctrl+Shift+X)");
+            }
         }
 
         // MIDI indicator

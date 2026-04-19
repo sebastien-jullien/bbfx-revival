@@ -1458,16 +1458,44 @@ void NodeEditorPanel::showNodeContextMenu() {
 
         static int counter = 0;
         auto byCategory = NodeTypeRegistry::instance().getByCategory();
+
+        // v3.5 Lot C: split categories into builtins and community groups so
+        // plugin-contributed node types appear under a single "Community"
+        // top-level menu, with a sub-menu per plugin.
+        std::map<std::string, std::vector<const NodeTypeInfo*>> builtinCats;
+        std::map<std::string, std::vector<const NodeTypeInfo*>> communitySubs;
         for (auto& [category, types] : byCategory) {
+            const std::string prefix = "Community/";
+            if (category.rfind(prefix, 0) == 0) {
+                communitySubs[category.substr(prefix.size())] = types;
+            } else {
+                builtinCats[category] = types;
+            }
+        }
+
+        auto emitNode = [&](const NodeTypeInfo* info) {
+            if (ImGui::MenuItem(info->typeName.c_str())) {
+                std::string name = info->typeName + "_" + std::to_string(++counter);
+                CommandManager::instance().execute(
+                    std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
+                auto canvasPos = ned::ScreenToCanvas(mCreateMenuPos);
+                mPendingPositions.push_back({name, canvasPos.x, canvasPos.y});
+            }
+        };
+
+        for (auto& [category, types] : builtinCats) {
             if (ImGui::BeginMenu(category.c_str())) {
-                for (auto* info : types) {
-                    if (ImGui::MenuItem(info->typeName.c_str())) {
-                        std::string name = info->typeName + "_" + std::to_string(++counter);
-                        CommandManager::instance().execute(
-                            std::make_unique<CreateNodeCommand>(info->typeName, name, mLua));
-                        // Position the new node at the right-click location
-                        auto canvasPos = ned::ScreenToCanvas(mCreateMenuPos);
-                        mPendingPositions.push_back({name, canvasPos.x, canvasPos.y});
+                for (auto* info : types) emitNode(info);
+                ImGui::EndMenu();
+            }
+        }
+
+        if (!communitySubs.empty()) {
+            if (ImGui::BeginMenu("Community")) {
+                for (auto& [sub, types] : communitySubs) {
+                    if (ImGui::BeginMenu(sub.c_str())) {
+                        for (auto* info : types) emitNode(info);
+                        ImGui::EndMenu();
                     }
                 }
                 ImGui::EndMenu();

@@ -73,6 +73,12 @@ public:
     /// PANIC ALL — reset all warps/blends, disconnect network, restore rest snapshot (v3.4 Lot M).
     void panicAll();
 
+    /// v3.5 Lot F — drop-target / menu entry-point for installing a ZIP plugin.
+    /// Reads the manifest out of the ZIP without extracting, opens the
+    /// permission prompt, and on accept performs the real install +
+    /// shows a toast for success or failure.
+    void promptInstallZip(const std::string& zipPath);
+
 private:
     // ── Init ─────────────────────────────────────────────────────────────────
     void initImGui();
@@ -171,6 +177,18 @@ private:
     bool mShowSurfaceEditor  = false;
     bool mShowNetworkPanel   = false;
     bool mShowMasterView     = false;
+    bool mShowPluginManager    = false;  // v3.5 Lot D (placeholder) / Lot G (full)
+    bool mShowPluginErrors     = false;  // v3.5 Lot G
+    bool mShowCommunityBrowser = false;  // v3.5 Lot H
+    bool mShowAuthorProfile    = false;  // v3.5 Lot I
+    bool mShowGamepadPanel     = false;  // v3.5 Lot L
+    bool mShowPluginAuthoringDialog = false;  // v3.5 Lot S
+    std::unique_ptr<class PluginManagerPanel>    mPluginManagerPanel;
+    std::unique_ptr<class PluginErrorsPanel>     mPluginErrorsPanel;
+    std::unique_ptr<class CommunityBrowserPanel> mCommunityBrowserPanel;
+    std::unique_ptr<class AuthorProfilePanel>    mAuthorProfilePanel;
+    std::unique_ptr<class GamepadPanel>          mGamepadPanel;
+    std::unique_ptr<class PluginAuthoringDialog> mPluginAuthoringDialog;
     bool mShowAbout         = false;
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;

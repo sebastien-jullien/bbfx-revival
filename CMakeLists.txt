@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.4.0 LANGUAGES CXX)
+project(BBFx VERSION 3.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -153,6 +153,21 @@ find_package(Boost REQUIRED COMPONENTS graph)
 find_package(Ogg REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(rtmidi CONFIG REQUIRED)
+
+# v3.5 Lot E/F/R dependencies
+find_package(CURL       REQUIRED)                  # HTTP client (Lot E)
+find_package(minizip-ng CONFIG REQUIRED)           # ZIP extraction (Lot F)
+find_package(asio       CONFIG QUIET)              # async I/O — optional
+# v3.5 Lot Q — assimp for 3D model import (OBJ/FBX/glTF/...), stb for
+# multi-frame GIF decoding. Both optional: the factories in
+# src/media/*.cpp fall back to a Null path when the SDK is absent.
+find_package(assimp     CONFIG QUIET)
+find_path(STB_INCLUDE_DIR stb_image.h)
+# websocketpp and fastnoiselite are not in the current vcpkg baseline.
+# - WebSocket: WebSocketClient.cpp ships a clean Unsupported stub; flipping
+#   it on requires a baseline bump or vendoring websocketpp headers.
+# - Noise: Lot N vendors FastNoiseLite.h under extern/ when it lands.
+find_path(FASTNOISELITE_INCLUDE_DIR FastNoiseLite.h)
 find_package(PkgConfig QUIET)
 # libtheora doesn't have a CMake config — use manual find
 find_path(THEORA_INCLUDE_DIR theora/theoradec.h)
@@ -181,10 +196,56 @@ add_library(bbfx-core
     src/core/AutomationEngine.cpp
     src/input/KeyboardManager.cpp
     src/input/MouseManager.cpp
-    src/input/JoystickManager.cpp
+    src/input/GamepadManager.cpp
+    src/input/GamepadNode.cpp
+    src/input/GamepadMappingProfile.cpp
     src/input/InputManager.cpp
     src/input/StdinReader.cpp
     src/network/TcpServer.cpp
+    src/network/HttpClient.cpp
+    src/network/WebSocketClient.cpp
+    src/network/ZipExtractor.cpp
+    # v3.5 Lot M — Art-Net listener singleton (UDP 6454). Core because the
+    # Lua bindings in bbfx-core access it directly.
+    src/network/ArtnetInput.cpp
+    # v3.5 Lot M — UdpServer + OscMessage + OscBus are dependencies of the
+    # bbfx.osc.* bindings in bbfx-core. They are pure network code (no
+    # Studio dependency) so it's safe to ship them here — bbfx-studio
+    # continues to link them transitively via bbfx-core.
+    src/network/UdpServer.cpp
+    src/osc/OscMessage.cpp
+    src/osc/OscBus.cpp
+    # v3.5 Lot M — MIDI stack moved to bbfx-core so bbfx_bindings.cpp can
+    # reference it from the headless executable as well. rtmidi is linked
+    # into bbfx-core a few lines below.
+    src/midi/MidiDeviceManager.cpp
+    src/midi/MidiLearnManager.cpp
+    src/midi/MidiClockGenerator.cpp
+    src/midi/MappingProfile.cpp
+    # v3.5 Lot M — Texture sharing receiver. OGRE-only dependency, fits in
+    # core without pulling ImGui or any Studio infra.
+    src/studio/TextureShareReceiver.cpp
+    # v3.5 Lot N — noise + tempo + timeline (all pure C++ + OGRE texture)
+    src/procedural/NoiseGenerator.cpp
+    src/timing/TempoManager.cpp
+    src/timing/LuaTimeline.cpp
+    # v3.5 Lot R — procedural geometry + SDF + L-system
+    src/procedural/GeometryGenerator.cpp
+    src/procedural/SDFPrimitives.cpp
+    src/procedural/LSystem.cpp
+    # MeshGenerator moved to bbfx-core so GeometryGenerator can delegate
+    # to its primitive builders without a reverse dependency on
+    # bbfx-studio. Pure OGRE + std, no ImGui or Studio infra.
+    src/studio/generators/MeshGenerator.cpp
+    # v3.5 Lot Q — media pipeline (ffmpeg subprocess + image loader +
+    # sequence player + assimp-backed mesh import). All optional — the
+    # factories fall back to an inert handle when the backend is absent.
+    src/media/FFmpegBridge.cpp
+    src/media/ImageLoader.cpp
+    src/media/SequencePlayer.cpp
+    src/media/MeshImporter.cpp
+    # Dedicated TU for the stb_image implementation (see comments inside).
+    src/media/stb_image_impl.cpp
     src/audio/AudioCapture.cpp
     src/audio/AudioAnalyzer.cpp
     src/audio/BeatDetector.cpp
@@ -199,11 +260,49 @@ add_library(bbfx-core
     src/record/InputRecorder.cpp
     src/record/InputPlayer.cpp
     src/record/VideoExporter.cpp
+    src/plugin/PluginManifest.cpp
+    src/plugin/PluginValidator.cpp
+    src/plugin/PluginManager.cpp
+    src/plugin/PluginRegistry.cpp
+    src/plugin/PluginSandbox.cpp
+    src/plugin/PluginSandboxApi.cpp
+    src/plugin/InspectorWidgetRegistry.cpp
+    src/plugin/PluginErrorLog.cpp
+    src/plugin/CommunityIndex.cpp
+    src/plugin/DeepLinkHandler.cpp
+    src/plugin/DeepLinkRegistry.cpp
+    src/plugin/GithubReactionsFetcher.cpp
+    src/plugin/PluginAuthoringBackend.cpp
+    src/plugin/PluginHotReloader.cpp
+    src/plugin/GitHubPublisher.cpp
+    # ResourceEnumerator is used by PluginManager::load/unload to invalidate
+    # the AssetBrowser cache when plugins come or go. Pure OGRE dependency,
+    # fits naturally in core alongside NodeTypeRegistry.
+    src/studio/ResourceEnumerator.cpp
+    # SettingsManager is used by PluginManager to persist enabled plugins
+    # across sessions (auto-enable at startup). Pure nlohmann/json dep,
+    # already available in core.
+    src/studio/SettingsManager.cpp
+    # SceneObjectNode is referenced by PerlinFxNode + WaveVertexShader (both
+    # in bbfx-core) via SceneObjectNode::isNodeVisible(). It has no Studio-
+    # specific dependencies (only AnimationNode/Ogre headers), so it lives
+    # in core even though the file sits under src/studio/nodes/ for
+    # historical reasons.
+    src/studio/nodes/SceneObjectNode.cpp
+    # NodeTypeRegistry is needed in core because the plugin sandbox API
+    # (src/plugin/PluginSandboxApi.cpp) has to register custom node types
+    # even when the headless engine is used. It only depends on ImGui for
+    # the ImVec4 colour field — imgui is header-only so core just needs the
+    # include path (target_include_directories below).
+    src/studio/NodeTypeRegistry.cpp
 )
 
 target_include_directories(bbfx-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${LUA_INCLUDE_DIR}
+    # NodeTypeRegistry.h uses ImVec4 from imgui.h (header-only); expose the
+    # include path so bbfx-core compiles without linking imgui_studio.
+    ${imgui_SOURCE_DIR}
 )
 
 target_link_libraries(bbfx-core PUBLIC
@@ -216,7 +315,33 @@ target_link_libraries(bbfx-core PUBLIC
     Boost::graph
     ogre-lua
     Ogg::ogg
+    nlohmann_json::nlohmann_json
+    CURL::libcurl
+    MINIZIP::minizip-ng
+    # v3.5 Lot M — MIDI now lives in bbfx-core (bindings reference it).
+    RtMidi::rtmidi
 )
+if(TARGET asio::asio)
+    target_link_libraries(bbfx-core PUBLIC asio::asio)
+endif()
+if(FASTNOISELITE_INCLUDE_DIR)
+    target_include_directories(bbfx-core PUBLIC ${FASTNOISELITE_INCLUDE_DIR})
+endif()
+# v3.5 Lot Q — optional assimp + stb
+if(TARGET assimp::assimp)
+    target_link_libraries(bbfx-core PUBLIC assimp::assimp)
+    target_compile_definitions(bbfx-core PUBLIC BBFX_HAS_ASSIMP)
+    message(STATUS "BBFx: assimp enabled (3D model import)")
+else()
+    message(STATUS "BBFx: assimp disabled (3D model import = Null fallback)")
+endif()
+if(STB_INCLUDE_DIR)
+    target_include_directories(bbfx-core PUBLIC ${STB_INCLUDE_DIR})
+    target_compile_definitions(bbfx-core PUBLIC BBFX_HAS_STB)
+    message(STATUS "BBFx: stb enabled (GIF decode)")
+else()
+    message(STATUS "BBFx: stb disabled (GIF decode = Null fallback)")
+endif()
 if(THEORA_LIBRARY AND THEORADEC_LIBRARY)
     target_link_libraries(bbfx-core PUBLIC ${THEORA_LIBRARY} ${THEORADEC_LIBRARY})
     target_include_directories(bbfx-core PRIVATE ${THEORA_INCLUDE_DIR})
@@ -228,7 +353,7 @@ target_link_libraries(bbfx PRIVATE bbfx-core)
 
 # ── Windows-specific link libraries ──────────────────────────────────────────
 if(WIN32)
-    target_link_libraries(bbfx-core PUBLIC xinput winmm imm32 ws2_32)
+    target_link_libraries(bbfx-core PUBLIC xinput winmm imm32 ws2_32 shell32 ole32)
 endif()
 
 # ── BBFx Studio (ImGui GUI application) ───────────────────────────────────────
@@ -236,27 +361,33 @@ add_executable(bbfx-studio
     src/studio/main_studio.cpp
     src/studio/StudioApp.cpp
     src/studio/StudioEngine.cpp
-    src/studio/NodeTypeRegistry.cpp
-    src/studio/SettingsManager.cpp
-    src/studio/ResourceEnumerator.cpp
+    # v3.5 Lot P — ImGui Lua bindings + script-panel registry
+    src/studio/bbfx_imgui_bindings.cpp
+    src/studio/ScriptPanelRegistry.cpp
+    # NodeTypeRegistry.cpp + ResourceEnumerator.cpp + SettingsManager.cpp moved to bbfx-core above
     src/studio/TextureThumbnailCache.cpp
     src/studio/ShaderPreviewRenderer.cpp
     src/studio/DagSnapshot.cpp
     src/studio/ToastSystem.cpp
-    src/midi/MidiDeviceManager.cpp
-    src/midi/MidiLearnManager.cpp
-    src/midi/MidiClockGenerator.cpp
-    src/midi/MappingProfile.cpp
-    src/osc/OscMessage.cpp
-    src/network/UdpServer.cpp
+    src/studio/dialogs/PermissionPromptDialog.cpp
+    src/studio/panels/PluginManagerPanel.cpp
+    src/studio/panels/PluginErrorsPanel.cpp
+    src/studio/panels/CommunityBrowserPanel.cpp
+    src/studio/panels/CommandPalette.cpp
+    src/studio/panels/AuthorProfilePanel.cpp
+    src/studio/panels/GamepadPanel.cpp
+    src/studio/panels/PluginAuthoringDialog.cpp
+    src/studio/MarkdownRenderer.cpp
+    # MIDI stack + OscMessage.cpp + UdpServer.cpp moved to bbfx-core
+    # (v3.5 Lot M).
     src/studio/nodes/MidiInputNode.cpp
     src/studio/nodes/MidiOutputNode.cpp
     src/studio/nodes/OscInputNode.cpp
     src/studio/nodes/OscOutputNode.cpp
     src/studio/nodes/NdiOutputNode.cpp
     src/studio/Debugger.cpp
-    src/studio/generators/MeshGenerator.cpp
-    src/studio/nodes/SceneObjectNode.cpp
+    # MeshGenerator.cpp moved to bbfx-core (v3.5 Lot R).
+    # SceneObjectNode.cpp moved to bbfx-core above
     src/studio/nodes/LightNode.cpp
     src/studio/nodes/ParticleNode.cpp
     src/studio/nodes/CompositorNode.cpp
@@ -276,6 +407,7 @@ add_executable(bbfx-studio
     src/studio/commands/LinkCommands.cpp
     src/studio/commands/EditCommands.cpp
     src/studio/commands/ChordCommands.cpp
+    src/studio/commands/PluginCommands.cpp
     src/studio/panels/ViewportPanel.cpp
     src/studio/panels/NodeEditorPanel.cpp
     src/studio/panels/InspectorPanel.cpp
@@ -300,8 +432,10 @@ add_executable(bbfx-studio
     src/studio/TextureShareSender.cpp
     src/studio/SpoutTextureSender.cpp
     src/studio/DmaBufTextureSender.cpp
+    # TextureShareReceiver.cpp moved to bbfx-core (v3.5 Lot M).
     src/studio/nodes/TextureShareOutputNode.cpp
     src/studio/nodes/ArtnetOutputNode.cpp
+    src/studio/nodes/ArtnetInputNode.cpp
     src/network/SyncManager.cpp
     src/studio/nodes/WarpNode.cpp
     src/studio/nodes/BlendNode.cpp

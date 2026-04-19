@@ -1,0 +1,17 @@
+{
+  "name": "Xbox - DJ setup",
+  "deviceType": "Xbox",
+  "description": "Sticks on pitch + mixer, triggers on audio band sends, buttons trigger chords.",
+  "mappings": [
+    { "source": "leftStickX",  "target": "deckA.pitch",    "scale": 0.5,  "offset": 0.0, "invert": false },
+    { "source": "leftStickY",  "target": "deckA.volume",   "scale": 1.0,  "offset": 0.0, "invert": true  },
+    { "source": "rightStickX", "target": "deckB.pitch",    "scale": 0.5,  "offset": 0.0, "invert": false },
+    { "source": "rightStickY", "target": "deckB.volume",   "scale": 1.0,  "offset": 0.0, "invert": true  },
+    { "source": "leftTrigger", "target": "mixer.lowSend",  "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "rightTrigger","target": "mixer.highSend", "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "buttonA",     "target": "chord.cue1",     "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "buttonB",     "target": "chord.cue2",     "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "buttonX",     "target": "chord.cue3",     "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "buttonY",     "target": "chord.cue4",     "scale": 1.0,  "offset": 0.0, "invert": false }
+  ]
+}

@@ -12,6 +12,7 @@
 #include "../TextureThumbnailCache.h"
 #include "../nodes/SceneObjectNode.h"
 #include "../../midi/MidiLearnManager.h"
+#include "../../plugin/InspectorWidgetRegistry.h"
 
 #include <imgui.h>
 #include <sol/sol.hpp>
@@ -291,9 +292,21 @@ void InspectorPanel::renderParamSpec() {
     auto* spec = node->getParamSpec();
     ImGui::TextDisabled("Parameters");
 
+    const std::string nodeType = node->getTypeName();
+
     for (auto& param : spec->getParams()) {
         const std::string& label = param.displayLabel();
         std::string id = "##ps_" + param.name;
+
+        // v3.5 Lot C: plugin-contributed custom widget hook. If a plugin (via
+        // bbfx.ui.registerInspectorWidget, landing in Lot P) registered a
+        // widget for this node-type/port, let it draw and skip the built-in
+        // widget below. The registry is empty by default, so builtins are
+        // unaffected.
+        if (InspectorWidgetRegistry::instance().tryDraw(
+                nodeType, mSelectedNode, param.name, param)) {
+            continue;
+        }
 
         switch (param.type) {
             case ParamType::FLOAT: {

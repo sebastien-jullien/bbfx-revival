@@ -667,3 +667,58 @@ Le protocole Art-Net/DMX utilise des sockets UDP bruts (winsock2.h / POSIX) sans
 | NDI SDK | optional | externe (ifdef BBFX_HAS_NDI) |
 | Spout SDK | optional | externe (ifdef BBFX_HAS_SPOUT) |
 | EGL/GBM | optional | systeme Linux (ifdef BBFX_HAS_DMABUF) |
+
+## Etat des dependances v3.5 (Avril 2026)
+
+Six nouvelles dependances vcpkg ajoutees en v3.5 pour le systeme de plugins, le community browser, le media pipeline et la generation procedurale :
+
+| Dependance | Version | Source | Raison |
+|-----------|---------|--------|--------|
+| **libcurl** | latest | vcpkg | HTTP client async : community browser fetch, plugin download, GitHub API |
+| **minizip-ng** | latest | vcpkg | Extraction ZIP securisee pour pipeline install plugins (path traversal + zip bomb protection) |
+| **asio** | latest | vcpkg | I/O async pour HttpClient thread worker et WebSocketClient (stub) |
+| **assimp** | latest | vcpkg | Import modeles 3D multi-format (OBJ, FBX, glTF) via MeshImporter |
+| **stb** | latest | vcpkg | stb_image pour decodage GIF + PNG sequences (SequencePlayer) |
+| **FastNoiseLite** | header-only | embarque | Generation bruit procedural (Simplex/Worley/Curl/FBM) pour NoiseGenerator |
+
+### Architecture plugin — isolation et securite
+
+v3.5 utilise **sol::environment** (sol2) pour isoler chaque plugin dans un sandbox Lua separe. Chaque plugin recoit une copie shadow de la table `bbfx` avec uniquement ses propres bindings `bbfx.plugin.*`. Les permissions (11 types) sont declarees dans manifest.json et verifiees a runtime. Aucune dependance externe pour le sandbox — repose entierement sur sol2 + std::filesystem canonical path checking.
+
+### Architecture community — publish flow
+
+Le publish flow utilise l'API GitHub REST v3 via HttpClient (libcurl). L'authentification passe par le **device flow OAuth** (pas de client-secret, affiche code+URL a l'utilisateur). Le token est stocke via XOR + base64 scramble dans SettingsManager JSON. Le pipeline : fork repo communautaire → create branch → commit fichiers plugin → create PR. Un GitHub Action CI dans le repo communautaire valide automatiquement chaque PR (schema manifest, tests).
+
+### Architecture media
+
+Le media pipeline v3.5 est modulaire :
+- **FFmpegBridge** : lance `ffmpeg` en subprocess avec pipe stdin/stdout pour lecture frames. Pas de linkage direct a ffmpeg — invocation CLI. Requis : ffmpeg.exe dans le PATH.
+- **ImageLoader** : wrapper OGRE TextureManager avec resource groups dynamiques
+- **SequencePlayer** : decodage via stb_image (GIF) ou lecture fichiers sequentiels (PNG)
+- **MeshImporter** : linkage statique assimp, conversion Assimp → Ogre::MeshPtr
+
+### Stack complete v3.5
+
+| Dependance | Version | Source |
+|-----------|---------|--------|
+| OGRE 14 | 14.5.2 | vcpkg |
+| Dear ImGui | v1.92.7-docking | FetchContent |
+| imgui-node-editor | develop | FetchContent (thedmd, patche) |
+| imgui_test_engine | main | FetchContent (ocornut) |
+| SDL3 | latest | vcpkg |
+| sol2 | 3.3.0+ | vcpkg |
+| Lua | 5.5.0 | vcpkg |
+| Boost.Graph | latest | vcpkg |
+| nlohmann-json | 3.12+ | vcpkg |
+| libtheora/libogg | latest | vcpkg |
+| rtmidi | latest | vcpkg |
+| oscpack | latest | vcpkg |
+| **libcurl** | latest | vcpkg |
+| **minizip-ng** | latest | vcpkg |
+| **asio** | latest | vcpkg |
+| **assimp** | latest | vcpkg |
+| **stb** | latest | vcpkg |
+| NDI SDK | optional | externe (ifdef BBFX_HAS_NDI) |
+| Spout SDK | optional | externe (ifdef BBFX_HAS_SPOUT) |
+| EGL/GBM | optional | systeme Linux (ifdef BBFX_HAS_DMABUF) |
+| FastNoiseLite | header-only | embarque (src/plugin/procedural/) |

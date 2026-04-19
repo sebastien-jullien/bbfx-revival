@@ -12,6 +12,17 @@ struct Settings {
     int fontSize = 14;
     std::string lastProjectPath;
     std::vector<std::string> recentProjects;
+
+    // v3.5 Lot D: plugin persistence
+    std::vector<std::string> enabledPlugins;   // ids auto-enabled at startup
+    int64_t pluginsLastScanAt = 0;             // unix epoch seconds
+    int communityCacheTTL = 3600;              // seconds (Lot H uses this)
+
+    // v3.5 Lot V — GitHub publishing. `githubToken` is stored XOR-scrambled
+    // with a per-machine key; the raw OAuth token never lives on disk in
+    // clear-text. `githubLogin` caches the authenticated username.
+    std::string githubToken;
+    std::string githubLogin;
 };
 
 class SettingsManager {

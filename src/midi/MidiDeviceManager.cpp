@@ -13,6 +13,11 @@ MidiDeviceManager* MidiDeviceManager::instance() {
 MidiDeviceManager::MidiDeviceManager() {
     sInstance = this;
 
+    // v3.5 Lot M — pre-size caches: 16 channels × 128 CCs/notes = 2048 entries.
+    mCCCache.assign(16 * 128, 0.0f);
+    mNoteVelocity.assign(16 * 128, 0.0f);
+    mNoteDown.assign(16 * 128, 0);
+
     // Enumerate input devices
     try {
         RtMidiIn probe;
@@ -163,6 +168,48 @@ std::vector<MidiMessage> MidiDeviceManager::poll() {
 void MidiDeviceManager::injectMessage(const MidiMessage& msg) {
     std::lock_guard<std::mutex> lock(mQueueMutex);
     mMessageQueue.push(msg);
+    // v3.5 Lot M — mirror into the state cache so getCC / isNoteOn are
+    // consistent even if no consumer ever calls poll().
+    uint8_t t = msg.type();
+    int ch = msg.channel;
+    if (ch >= 1 && ch <= 16) {
+        int base = (ch - 1) * 128;
+        if (t == MidiMessage::ControlChange && msg.data1 < 128) {
+            mCCCache[base + msg.data1] = msg.data2 / 127.0f;
+        } else if (t == MidiMessage::NoteOn && msg.data1 < 128) {
+            if (msg.data2 == 0) {
+                // Running-status note-off convention
+                mNoteDown[base + msg.data1] = 0;
+                mNoteVelocity[base + msg.data1] = 0.0f;
+            } else {
+                mNoteDown[base + msg.data1] = 1;
+                mNoteVelocity[base + msg.data1] = msg.data2 / 127.0f;
+            }
+        } else if (t == MidiMessage::NoteOff && msg.data1 < 128) {
+            mNoteDown[base + msg.data1] = 0;
+            mNoteVelocity[base + msg.data1] = 0.0f;
+        }
+    }
+}
+
+// ── v3.5 Lot M — state cache accessors ─────────────────────────────────────
+
+float MidiDeviceManager::getLastCCValue(int channel, int cc) const {
+    if (channel < 1 || channel > 16 || cc < 0 || cc > 127) return 0.0f;
+    std::lock_guard<std::mutex> lock(mQueueMutex);
+    return mCCCache[(channel - 1) * 128 + cc];
+}
+
+bool MidiDeviceManager::isNoteDown(int channel, int note) const {
+    if (channel < 1 || channel > 16 || note < 0 || note > 127) return false;
+    std::lock_guard<std::mutex> lock(mQueueMutex);
+    return mNoteDown[(channel - 1) * 128 + note] != 0;
+}
+
+float MidiDeviceManager::getNoteVelocity(int channel, int note) const {
+    if (channel < 1 || channel > 16 || note < 0 || note > 127) return 0.0f;
+    std::lock_guard<std::mutex> lock(mQueueMutex);
+    return mNoteVelocity[(channel - 1) * 128 + note];
 }
 
 // ── Send ────────────────────────────────────────────────────────────────────
@@ -220,6 +267,27 @@ void MidiDeviceManager::midiCallback(double timestamp, std::vector<unsigned char
 
     std::lock_guard<std::mutex> lock(cbData->manager->mQueueMutex);
     cbData->manager->mMessageQueue.push(msg);
+    // v3.5 Lot M — mirror into state cache (same lock as queue).
+    uint8_t t = msg.type();
+    int ch = msg.channel;
+    if (ch >= 1 && ch <= 16) {
+        int base = (ch - 1) * 128;
+        auto& mgr = *cbData->manager;
+        if (t == MidiMessage::ControlChange && msg.data1 < 128) {
+            mgr.mCCCache[base + msg.data1] = msg.data2 / 127.0f;
+        } else if (t == MidiMessage::NoteOn && msg.data1 < 128) {
+            if (msg.data2 == 0) {
+                mgr.mNoteDown[base + msg.data1] = 0;
+                mgr.mNoteVelocity[base + msg.data1] = 0.0f;
+            } else {
+                mgr.mNoteDown[base + msg.data1] = 1;
+                mgr.mNoteVelocity[base + msg.data1] = msg.data2 / 127.0f;
+            }
+        } else if (t == MidiMessage::NoteOff && msg.data1 < 128) {
+            mgr.mNoteDown[base + msg.data1] = 0;
+            mgr.mNoteVelocity[base + msg.data1] = 0.0f;
+        }
+    }
 }
 
 } // namespace bbfx

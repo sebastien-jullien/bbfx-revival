@@ -26,7 +26,18 @@ static std::vector<std::string> scanResourceGroup(const std::string& pattern) {
     auto& rgm = Ogre::ResourceGroupManager::getSingleton();
     auto files = rgm.findResourceNames("General", pattern);
     for (auto& f : *files) result.push_back(f);
+
+    // v3.5 Lot C: also scan every per-plugin resource group ("Plugin_<id>")
+    // so AssetBrowser shows shaders/textures/materials contributed by
+    // enabled plugins.
+    for (const auto& g : rgm.getResourceGroups()) {
+        if (g.rfind("Plugin_", 0) != 0) continue;
+        if (!rgm.isResourceGroupInitialised(g)) continue;
+        auto pluginFiles = rgm.findResourceNames(g, pattern);
+        for (auto& f : *pluginFiles) result.push_back(f);
+    }
     std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
     return result;
 }
 

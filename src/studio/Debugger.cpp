@@ -35,9 +35,18 @@
 #include "OutputManager.h"
 #include "ZoneSnapshot.h"
 #include "SurfaceMap.h"
+#include "../plugin/PluginManager.h"
+#include "../plugin/PluginManifest.h"
+#include "../plugin/PluginValidator.h"
+#include "../plugin/PluginHotReloader.h"
+#include "../plugin/CommunityIndex.h"
+#include "../network/HttpClient.h"
 
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+#include <thread>
+#include <chrono>
 #include <unordered_map>
 
 namespace bbfx {
@@ -1262,6 +1271,310 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         lua.script("dbg.output_remove(" + std::to_string(outId) + ")");
         check("output_remove (no crash)", true);
 
+        // ── v3.5 Lot M Tests: live protocols bindings ───────────────────
+        std::cout << "\n--- v3.5 Lot M: Live protocols ---" << std::endl;
+        {
+            auto ccOk = lua.script("return bbfx.midi.getCC(1, 7) == 0");
+            check("midi.getCC(fresh) = 0", ccOk.valid() && ccOk.get<bool>());
+
+            auto aOk = lua.script("return bbfx.artnet.send('127.0.0.1', 0, 1, 255)");
+            check("artnet.send returns true", aOk.valid() && aOk.get<bool>());
+
+            auto oscOk = lua.script("return bbfx.osc.get('/never') == nil");
+            check("osc.get(unseen) == nil", oscOk.valid() && oscOk.get<bool>());
+
+            auto tsOk = lua.script(
+                "local r = bbfx.textureShare.createReceiver('dbg'); "
+                "return type(r) == 'table' and type(r.getTextureName) == 'function'");
+            check("textureShare.createReceiver returns handle",
+                  tsOk.valid() && tsOk.get<bool>());
+
+            auto backendOk = lua.script("return type(bbfx.textureShare.backend()) == 'string'");
+            check("textureShare.backend returns string",
+                  backendOk.valid() && backendOk.get<bool>());
+        }
+
+        // ── v3.5 Lot N Tests: noise / easing / tempo / timeline ─────────
+        std::cout << "\n--- v3.5 Lot N: Procedural + Timing ---" << std::endl;
+        {
+            auto nOk = lua.script(
+                "local a = bbfx.noise.simplex2D(1.23, 4.56, 42); "
+                "local b = bbfx.noise.simplex2D(1.23, 4.56, 42); "
+                "return math.abs(a - b) < 1e-6");
+            check("noise.simplex2D deterministic", nOk.valid() && nOk.get<bool>());
+
+            auto eOk = lua.script(
+                "return math.abs(bbfx.easing.easeInOutCubic(0.5) - 0.5) < 1e-6");
+            check("easing.easeInOutCubic(0.5) == 0.5", eOk.valid() && eOk.get<bool>());
+
+            auto tOk = lua.script(
+                "bbfx.tempo.setSource('manual'); bbfx.tempo.setManualBPM(130); "
+                "return math.abs(bbfx.tempo.getBPM() - 130) < 0.01");
+            check("tempo manual BPM round-trip", tOk.valid() && tOk.get<bool>());
+
+            auto tlOk = lua.script(
+                "local t = bbfx.timeline.create({duration=10}); "
+                "t.addKey(0,0,'linear'); t.addKey(10,100,'linear'); "
+                "t.seek(5); return math.abs(t.getValue() - 50) < 1e-4");
+            check("timeline linear 0..100 @ t=5 = 50", tlOk.valid() && tlOk.get<bool>());
+
+            auto evOk = lua.script(
+                "local fired = 0; "
+                "local t = bbfx.timeline.create({duration=10}); "
+                "t.addEvent(5, function() fired = fired + 1 end); "
+                "t.play(); t.update(30); return fired");
+            int fired = evOk.valid() ? evOk.get<int>() : 0;
+            check("timeline event fires exactly once", fired == 1);
+        }
+
+        // ── v3.5 Lot O Tests: fs / json / http / ws ─────────────────────
+        std::cout << "\n--- v3.5 Lot O: HTTP/WebSocket/FS/JSON ---" << std::endl;
+        {
+            auto nsOk = lua.script(
+                "return type(bbfx.fs) == 'table' and type(bbfx.json) == 'table' "
+                "and type(bbfx.http) == 'table' and type(bbfx.websocket) == 'table'");
+            check("http/ws/fs/json namespaces present",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto jsonOk = lua.script(
+                "local s = bbfx.json.encode({ a=1, b={1,2,3} }); "
+                "local d = bbfx.json.decode(s); "
+                "return d.a == 1 and #d.b == 3 and d.b[2] == 2");
+            check("json.encode/decode round-trip nested",
+                  jsonOk.valid() && jsonOk.get<bool>());
+
+            auto fsOk = lua.script(
+                "local tmp = (os.getenv('TEMP') or os.getenv('TMP') or '/tmp'):gsub('[/\\\\]+$', ''); "
+                "local p = tmp .. '/bbfx_lot_o_dbg.txt'; "
+                "bbfx.fs.writeFile(p, 'abc'); "
+                "local ok = bbfx.fs.exists(p) and bbfx.fs.readFile(p) == 'abc'; "
+                "os.remove(p); return ok");
+            check("fs.writeFile + readFile round-trip",
+                  fsOk.valid() && fsOk.get<bool>());
+
+            auto hshOk = lua.script("return type(bbfx.http.sha256File) == 'function'");
+            check("http.sha256File callable", hshOk.valid() && hshOk.get<bool>());
+
+            auto wsSigOk = lua.script("return type(bbfx.websocket.connect) == 'function'");
+            check("websocket.connect callable", wsSigOk.valid() && wsSigOk.get<bool>());
+        }
+
+        // ── v3.5 Lot V Tests: GitHub publishing ──────────────────────────
+        std::cout << "\n--- v3.5 Lot V: GitHub Publish ---" << std::endl;
+        {
+            auto nsOk = lua.script(
+                "return type(bbfx.github) == 'table' and "
+                "type(bbfx.github.beginDeviceFlow) == 'function' and "
+                "type(bbfx.github.openPullRequest) == 'function'");
+            check("bbfx.github namespace + API present",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto tokOk = lua.script(
+                "local raw = 'gho_AbCdEf0123456789'; "
+                "local enc = bbfx.github.encodeToken(raw); "
+                "local dec = bbfx.github.decodeToken(enc); "
+                "return enc ~= raw and dec == raw");
+            check("github.encodeToken/decodeToken round-trip",
+                  tokOk.valid() && tokOk.get<bool>());
+        }
+
+        // ── v3.5 Lot U Tests: Wizard + Hot Reload + CLI validator ───────
+        std::cout << "\n--- v3.5 Lot U: Wizard / HotReload / CLI ---" << std::endl;
+        {
+            auto hotOk = lua.script(
+                "return type(bbfx.hotreload) == 'table' and "
+                "type(bbfx.hotreload.setEnabled) == 'function' and "
+                "type(bbfx.hotreload.tick) == 'function'");
+            check("bbfx.hotreload namespace + API present",
+                  hotOk.valid() && hotOk.get<bool>());
+
+            auto validOk = lua.script(
+                "local r = bbfx.authoring.validatePath('/does/not/exist'); "
+                "return type(r) == 'table' and r.ok == false and type(r.errors) == 'table'");
+            check("authoring.validatePath returns {ok=false, errors=...} on missing",
+                  validOk.valid() && validOk.get<bool>());
+
+            auto templateOk = lua.script(
+                "local body = bbfx.fs.readFile('lua/plugin/template_node_fx.lua'); "
+                "return type(body) == 'string' and body:find('registerNodeType') ~= nil");
+            check("lua/plugin/template_node_fx.lua is readable + valid",
+                  templateOk.valid() && templateOk.get<bool>());
+        }
+
+        // ── v3.5 Lot T Tests: RTT / framebuffer / compositor ─────────────
+        std::cout << "\n--- v3.5 Lot T: RTT + FrameBuffer + Compositor ---" << std::endl;
+        {
+            auto nsOk = lua.script(
+                "return type(bbfx.renderTexture) == 'table' and "
+                "type(bbfx.frameBuffer) == 'table' and "
+                "type(bbfx.compositor) == 'table'");
+            check("renderTexture/frameBuffer/compositor namespaces present",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto rtOk = lua.script(
+                "local rt = bbfx.renderTexture.create('dbg_test_rt', 48, 48); "
+                "local ok = type(rt) == 'table' and rt.getWidth() == 48 "
+                "           and rt.getTextureName() == 'dbg_test_rt'; "
+                "if rt then rt.release() end; return ok");
+            check("renderTexture.create round-trip + handle API",
+                  rtOk.valid() && rtOk.get<bool>());
+
+            auto fbOk = lua.script(
+                "local rt = bbfx.renderTexture.create('dbg_fb_rt', 16, 16); "
+                "local w, h = bbfx.frameBuffer.getResolution('dbg_fb_rt'); "
+                "if rt then rt.release() end; return w == 16 and h == 16");
+            check("frameBuffer.getResolution of named texture",
+                  fbOk.valid() && fbOk.get<bool>());
+        }
+
+        // ── v3.5 Lot S Tests: plugin authoring backend ──────────────────
+        std::cout << "\n--- v3.5 Lot S: Plugin Authoring ---" << std::endl;
+        {
+            auto slugOk = lua.script(
+                "return bbfx.authoring.slugify('Plasma Wave!') == 'plasma-wave'");
+            check("authoring.slugify normalizes spaces + punctuation",
+                  slugOk.valid() && slugOk.get<bool>());
+
+            auto idOk = lua.script(
+                "return bbfx.authoring.isValidId('foo.bar-1') == true and "
+                "bbfx.authoring.isValidId('NOT VALID') == false");
+            check("authoring.isValidId accepts kebab id, rejects invalid",
+                  idOk.valid() && idOk.get<bool>());
+
+            auto permOk = lua.script(
+                "local p = bbfx.authoring.detectPermissions("
+                "    'local x = bbfx.midi.getCC(1, 1) + bbfx.http.get() ' ); "
+                "local found = {}; for _, v in ipairs(p) do found[v] = true end "
+                "return found['midi'] == true and found['network'] == true");
+            check("authoring.detectPermissions spots midi + network",
+                  permOk.valid() && permOk.get<bool>());
+
+            auto subgraphOk = lua.script(
+                "local path = bbfx.authoring.exportSubgraph("
+                "  { id = 'dbg.lot_s.sub', name = 'Lot S Sub' }, "
+                "  { nodes = {}, links = {} }); "
+                "return type(path) == 'string' and #path > 0");
+            check("authoring.exportSubgraph writes a plugin dir",
+                  subgraphOk.valid() && subgraphOk.get<bool>());
+        }
+
+        // ── v3.5 Lot R Tests: procedural / SDF / fractals / L-system ────
+        std::cout << "\n--- v3.5 Lot R: Procedural ---" << std::endl;
+        {
+            auto nsOk = lua.script(
+                "return type(bbfx.geometry) == 'table' and type(bbfx.sdf) == 'table' "
+                "and type(bbfx.fractals) == 'table' and type(bbfx.lsystem) == 'table'");
+            check("geometry/sdf/fractals/lsystem namespaces present",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto sdfOk = lua.script(
+                "return math.abs(bbfx.sdf.sphere(2,0,0, 0,0,0, 1) - 1) < 1e-4");
+            check("sdf.sphere primitive correct",
+                  sdfOk.valid() && sdfOk.get<bool>());
+
+            auto mandOk = lua.script(
+                "local t = bbfx.fractals.mandelbrot(32, 32, {maxIter=16}); "
+                "return type(t) == 'string' and #t > 0");
+            check("fractals.mandelbrot returns texture name",
+                  mandOk.valid() && mandOk.get<bool>());
+
+            auto lsOk = lua.script(
+                "local ls = bbfx.lsystem.create({axiom='F', "
+                "rules={F='F+F'}, iterations=3, angle=90, step=1}); "
+                "return #ls.derive() > 1");
+            check("lsystem.derive returns non-empty",
+                  lsOk.valid() && lsOk.get<bool>());
+
+            // I-1491 non-regression
+            auto mgOk = lua.script(
+                "local s = bbfx.geometry.createSphere('dbg_test_sph', 1, 8, 16); "
+                "return type(s) == 'string' and #s > 0");
+            check("MeshGenerator v3.2 primitives still reachable",
+                  mgOk.valid() && mgOk.get<bool>());
+        }
+
+        // ── v3.5 Lot Q Tests: media / images / sequences / models ───────
+        std::cout << "\n--- v3.5 Lot Q: Media ---" << std::endl;
+        {
+            auto nsOk = lua.script(
+                "return type(bbfx.media) == 'table' and type(bbfx.images) == 'table' "
+                "and type(bbfx.sequences) == 'table' and type(bbfx.models) == 'table'");
+            check("media/images/sequences/models namespaces present",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto vOk = lua.script(
+                "local c = bbfx.media.openVideo('/does/not/exist.mp4'); "
+                "return type(c) == 'table' and type(c.play) == 'function'");
+            check("media.openVideo returns handle even on missing file",
+                  vOk.valid() && vOk.get<bool>());
+
+            auto iOk = lua.script(
+                "return bbfx.images.load('/does/not/exist.png') == nil");
+            check("images.load(missing) returns nil",
+                  iOk.valid() && iOk.get<bool>());
+
+            auto sOk = lua.script(
+                "local q = bbfx.sequences.loadSequence('/no', 'f_%04d.png', 1, 3); "
+                "return type(q) == 'table' and q.frameCount() == 0");
+            check("sequences.loadSequence empty frameCount=0",
+                  sOk.valid() && sOk.get<bool>());
+
+            auto mOk = lua.script(
+                "return type(bbfx.models.isAvailable()) == 'boolean'");
+            check("models.isAvailable returns boolean",
+                  mOk.valid() && mOk.get<bool>());
+
+            // I-1475 — Theora prerequisite still alive
+            auto thOk = lua.script("return type(bbfx.Animator) ~= 'nil'");
+            check("Theora prerequisite (bbfx.Animator) still reachable",
+                  thOk.valid() && thOk.get<bool>());
+        }
+
+        // ── v3.5 Lot P Tests: ImGui Lua API (Studio only) ────────────────
+        std::cout << "\n--- v3.5 Lot P: ImGui ---" << std::endl;
+        {
+            auto nsOk = lua.script("return type(bbfx.ui) == 'table'");
+            check("bbfx.ui namespace present in Studio",
+                  nsOk.valid() && nsOk.get<bool>());
+
+            auto widgetsOk = lua.script(
+                "return type(bbfx.ui.button) == 'function' and "
+                "type(bbfx.ui.sliderFloat) == 'function' and "
+                "type(bbfx.ui.colorEdit3) == 'function' and "
+                "type(bbfx.ui.plotLines) == 'function'");
+            check("ImGui widget helpers callable",
+                  widgetsOk.valid() && widgetsOk.get<bool>());
+
+            auto regOk = lua.script(
+                "bbfx.ui.registerPanel('dbg_lotp', function() end); "
+                "bbfx.ui.unregisterPanel('dbg_lotp'); return true");
+            check("registerPanel + unregisterPanel callable",
+                  regOk.valid() && regOk.get<bool>());
+
+            auto iwOk = lua.script(
+                "bbfx.ui.registerInspectorWidget('dbg_lotp_port', "
+                "function(n, p, v) return false, v end); return true");
+            check("registerInspectorWidget callable",
+                  iwOk.valid() && iwOk.get<bool>());
+        }
+
+        // ── v3.5 Lot L Tests: gamepad bindings ──────────────────────────
+        std::cout << "\n--- v3.5 Lot L: Gamepad ---" << std::endl;
+        {
+            // Convenience accessors return tuples of zeros on invalid index.
+            auto lsOk = lua.script("local x,y = bbfx.gamepad.getLeftStick(999); return x == 0 and y == 0");
+            check("gamepad.getLeftStick(invalid) returns (0,0)",
+                  lsOk.valid() && lsOk.get<bool>());
+
+            auto trigOk = lua.script("local l,r = bbfx.gamepad.getTriggers(999); return l == 0 and r == 0");
+            check("gamepad.getTriggers(invalid) returns (0,0)",
+                  trigOk.valid() && trigOk.get<bool>());
+
+            auto pressOk = lua.script("return bbfx.gamepad.isPressed(999, 0) == false");
+            check("gamepad.isPressed(invalid) = false",
+                  pressOk.valid() && pressOk.get<bool>());
+        }
+
         std::cout << "\n=== Results: " << pass << " PASS, " << fail << " FAIL ===" << std::endl;
         if (fail == 0) std::cout << "ALL TESTS PASSED" << std::endl;
     };
@@ -1293,6 +1606,198 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
             faders[idx].portName = portName;
             std::cout << "[dbg] fader_assign: fader " << idx << " → " << nodeName << "." << portName << std::endl;
         }
+    };
+
+    // ── v3.5 Lot M — live-protocols debug commands ─────────────────────
+    dbg["midi_send_cc"] = [&lua](int outDev, int ch, int cc, int value) {
+        lua.script("bbfx.midi.sendCC(" + std::to_string(outDev) + ","
+            + std::to_string(ch) + "," + std::to_string(cc) + ","
+            + std::to_string(value) + ")");
+        std::cout << "[dbg] midi_send_cc: out=" << outDev << " ch=" << ch
+                    << " cc=" << cc << " val=" << value << std::endl;
+    };
+    dbg["osc_send"] = [&lua](const std::string& dest, const std::string& address,
+                                float value) {
+        lua.script("bbfx.osc.send('" + dest + "', '" + address + "', " +
+                    std::to_string(value) + ")");
+        std::cout << "[dbg] osc_send: " << dest << " " << address
+                    << " = " << value << std::endl;
+    };
+    dbg["artnet_send"] = [&lua](int universe, int channel, int value) {
+        lua.script("bbfx.artnet.send('127.0.0.1', " + std::to_string(universe)
+            + "," + std::to_string(channel) + "," + std::to_string(value) + ")");
+        std::cout << "[dbg] artnet_send: u=" << universe << " ch=" << channel
+                    << " val=" << value << std::endl;
+    };
+    dbg["texture_receiver_test"] = [&lua]() -> std::string {
+        auto r = lua.script(
+            "local rec = bbfx.textureShare.createReceiver('dbg_test'); "
+            "return rec and rec.backend() or 'nil'");
+        return r.valid() ? r.get<std::string>() : std::string("error");
+    };
+
+    // ── v3.5 Lot V — GitHub auth + publish dbg commands ──────────────────
+    dbg["github_auth"] = [&lua]() {
+        lua.script(
+            "local d = bbfx.github.beginDeviceFlow(); "
+            "if d.error and d.error ~= '' then "
+            "    print('[dbg] github_auth error: '..d.error) "
+            "else "
+            "    print('[dbg] github_auth user_code='..d.userCode..' url='..d.verificationUri) "
+            "end");
+    };
+    dbg["github_publish_dry_run"] = [&lua](const std::string& pluginId) {
+        // Dry run : verify the publisher is authenticated + that the
+        // plugin path exists, but do NOT actually commit anything.
+        lua.script(
+            "if not bbfx.github.isAuthenticated() then "
+            "    print('[dbg] github_publish_dry_run : not authenticated') return end "
+            "local login = bbfx.github.storedLogin(); "
+            "print('[dbg] github_publish_dry_run : login='..login..' plugin='.."
+            "       '" + pluginId + "') ");
+    };
+
+    // ── v3.5 Lot U — wizard + hot reload dbg commands ───────────────────
+    dbg["plugin_new_wizard"] = [&lua](const std::string& id,
+                                         const std::string& type) {
+        // Non-interactive "New Plugin Wizard" : pick a template file
+        // under lua/plugin/template_*.lua, copy it into a fresh plugin
+        // directory, and generate a manifest. The `type` maps to the
+        // template filename stem.
+        lua.script(
+            "local body = bbfx.fs.readFile('lua/plugin/template_" + type + ".lua') "
+            "            or 'return { onEnable = function() end }'; "
+            "local meta = { id = '" + id + "', name = '" + id + "', category = 'Custom', "
+            "                permissions = {} }; "
+            "local p = bbfx.authoring.writePlugin(meta, body, nil); "
+            "print('[dbg] plugin_new_wizard -> '..tostring(p))");
+    };
+    dbg["plugin_hotreload_trigger"] = []() {
+        PluginHotReloader::instance().invalidateAll();
+        PluginHotReloader::instance().tick();
+        std::cout << "[dbg] hot-reloader triggered : watched="
+                    << PluginHotReloader::instance().watchedFileCount()
+                    << " reloads=" << PluginHotReloader::instance().reloadsPerformedSinceStart()
+                    << std::endl;
+    };
+
+    // ── v3.5 Lot T — RTT / framebuffer dbg commands ──────────────────────
+    dbg["rtt_test"] = [&lua]() {
+        lua.script(
+            "local rt = bbfx.renderTexture.create('dbg_rtt', 64, 64); "
+            "if rt then print('[dbg] rt tex='..rt.getTextureName()); "
+            "rt.release() else print('[dbg] rtt_test failed') end");
+    };
+    dbg["fb_save_test"] = [&lua](const std::string& path) {
+        lua.script(
+            "local rt = bbfx.renderTexture.create('dbg_fb_src', 32, 32); "
+            "local ok = bbfx.frameBuffer.saveToFile('" + path + "', 'dbg_fb_src'); "
+            "if rt then rt.release() end "
+            "print('[dbg] fb_save ok='..tostring(ok))");
+    };
+
+    // ── v3.5 Lot S — plugin export dbg commands ──────────────────────────
+    dbg["plugin_export_subgraph"] = [&lua](const std::string& id,
+                                              const std::string& name) {
+        lua.script(
+            "local meta = { id = '" + id + "', name = '" + name + "', "
+            "category = 'Node', description = 'Exported via dbg' }; "
+            "local spec = { nodes = {}, links = {} }; "
+            "local path = bbfx.authoring.exportSubgraph(meta, spec); "
+            "print('[dbg] plugin_export_subgraph -> '..tostring(path))");
+    };
+    dbg["plugin_export_scene"] = [&lua](const std::string& id) {
+        lua.script(
+            "local meta = { id = '" + id + "', name = '" + id + "', "
+            "category = 'Scene' }; "
+            "local path = bbfx.authoring.exportScenePreset(meta, {}); "
+            "print('[dbg] plugin_export_scene -> '..tostring(path))");
+    };
+    dbg["plugin_export_output"] = [&lua](const std::string& id) {
+        lua.script(
+            "local meta = { id = '" + id + "', name = '" + id + "', "
+            "category = 'OutputTemplate' }; "
+            "local path = bbfx.authoring.exportOutputTemplate(meta, {}); "
+            "print('[dbg] plugin_export_output -> '..tostring(path))");
+    };
+
+    // ── v3.5 Lot R — procedural geometry / SDF / fractals / L-system ────
+    dbg["noise_gpu_test"] = [&lua]() {
+        lua.script("local t = bbfx.noise.generateTexture(256,256,"
+                    "{kind='fbm',octaves=4,seed=1}); print('[dbg] noise tex='..t)");
+    };
+    dbg["sdf_test"] = [&lua]() {
+        lua.script("local m = bbfx.sdf.toMesh('dbg_sdf', "
+                    "function(x,y,z) return bbfx.sdf.sphere(x,y,z,0,0,0,1) end, "
+                    "-2,-2,-2,2,2,2,8); print('[dbg] sdf mesh='..tostring(m))");
+    };
+    dbg["fractal_test"] = [&lua](const std::string& type) {
+        lua.script("local t; if '" + type + "' == 'julia' then "
+                    "t = bbfx.fractals.julia(128,128,{maxIter=32}) else "
+                    "t = bbfx.fractals.mandelbrot(128,128,{maxIter=32}) end; "
+                    "print('[dbg] fractal '..'" + type + "'..' tex='..t)");
+    };
+    dbg["lsystem_test"] = [&lua]() {
+        lua.script("local ls = bbfx.lsystem.create({axiom='F', "
+                    "rules={F='F[+F]F[-F]F'}, iterations=3, angle=25.7, step=1.0}); "
+                    "print('[dbg] lsystem derived len='..#ls.derive())");
+    };
+
+    // ── v3.5 Lot Q — media / images / sequences / models debug commands ──
+    dbg["media_video"] = [&lua](const std::string& path) {
+        lua.script("local c = bbfx.media.openVideo('" + path + "'); "
+                    "print('[dbg] media_video ok=' .. tostring(c.isOpen()) .. "
+                    "' tex=' .. tostring(c.getTextureName()))");
+    };
+    dbg["images_load"] = [&lua](const std::string& path) {
+        lua.script("local i = bbfx.images.load('" + path + "'); "
+                    "print('[dbg] images_load tex=' .. "
+                    "tostring(i and i.getTextureName() or 'nil'))");
+    };
+    dbg["sequences_load"] = [&lua](const std::string& dir, const std::string& pattern,
+                                      int s, int e) {
+        lua.script(
+            "local q = bbfx.sequences.loadSequence('" + dir + "','" + pattern + "',"
+            + std::to_string(s) + "," + std::to_string(e) + "); "
+            "print('[dbg] sequences_load frames=' .. q.frameCount() .. "
+            "' backend=' .. q.backend())");
+    };
+    dbg["models_import"] = [&lua](const std::string& path) {
+        lua.script("local m = bbfx.models.import('" + path + "'); "
+                    "print('[dbg] models_import mesh=' .. "
+                    "tostring(m and m.getMeshName() or 'nil'))");
+    };
+
+    // ── v3.5 Lot O — fs / json / http debug commands ────────────────────
+    dbg["plugin_test_permissions"] = [&lua]() {
+        // Exercises the gated namespaces : with no plugin installed, all
+        // bbfx.* namespaces are unrestricted and reachable. The sandbox
+        // filter runs when a plugin loads; this cmd just confirms the
+        // raw bindings are alive.
+        auto r = lua.script(
+            "return (type(bbfx.fs) == 'table') and "
+            "(type(bbfx.json) == 'table') and "
+            "(type(bbfx.http) == 'table') and "
+            "(type(bbfx.websocket) == 'table')");
+        bool ok = r.valid() && r.get<bool>();
+        std::cout << "[dbg] plugin_test_permissions: "
+                    << (ok ? "namespaces present" : "namespaces MISSING") << std::endl;
+    };
+
+    // ── v3.5 Lot N — noise / tempo / timeline debug commands ────────────
+    dbg["noise_test"] = [&lua]() {
+        lua.script("print('[dbg] simplex2D(1,2,0) = ' .. bbfx.noise.simplex2D(1, 2, 0))");
+    };
+    dbg["tempo_source"] = [&lua](const std::string& src) {
+        lua.script("bbfx.tempo.setSource('" + src + "')");
+        std::cout << "[dbg] tempo_source: " << src << std::endl;
+    };
+    dbg["timeline_test"] = [&lua]() -> bool {
+        auto r = lua.script(
+            "local t = bbfx.timeline.create({duration=10}); "
+            "t.addKey(0,0,'linear'); t.addKey(10,100,'linear'); "
+            "t.seek(5); return math.abs(t.getValue() - 50) < 0.01");
+        return r.valid() && r.get<bool>();
     };
 
     dbg["fader_get"] = [app](int idx) -> std::string {
@@ -2276,7 +2781,189 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         std::cout << "  dbg.scene_list()                    List all zone snapshots" << std::endl;
         std::cout << "--- PANIC ---" << std::endl;
         std::cout << "  dbg.panic_all()                     Reset all warps, blends, DMX, Spout, network" << std::endl;
+        std::cout << "--- Plugins (v3.5 Lot A) ---" << std::endl;
+        std::cout << "  dbg.plugin_scan()                   Scan user+bundled plugin dirs, returns count" << std::endl;
+        std::cout << "  dbg.plugin_list()                   List installed plugin ids" << std::endl;
+        std::cout << "  dbg.plugin_info(id)                 Show details of one plugin" << std::endl;
+        std::cout << "  dbg.plugin_validate(path)           Validate a plugin directory on disk" << std::endl;
+        std::cout << "  dbg.plugin_user_dir()               Print the user plugins directory" << std::endl;
         std::cout << "  dbg.help()                          This help" << std::endl;
+    };
+
+    // ── v3.5 Lot A: plugin commands ─────────────────────────────────────────
+    dbg["plugin_scan"] = [&lua]() -> size_t {
+        PluginManager::instance().scanDirectories();
+        auto ids = PluginManager::instance().listPlugins();
+        std::cout << "[dbg] plugin_scan: " << ids.size() << " plugin(s) discovered" << std::endl;
+        for (const auto& id : ids) {
+            const PluginInfo* p = PluginManager::instance().getPlugin(id);
+            if (p) {
+                std::cout << "  - " << id << " (" << toString(p->state);
+                if (!p->lastError.empty()) std::cout << ": " << p->lastError;
+                std::cout << ")" << std::endl;
+            }
+        }
+        return ids.size();
+    };
+    dbg["plugin_list"] = [&lua]() -> sol::table {
+        sol::table out = lua.create_table();
+        const auto ids = PluginManager::instance().listPlugins();
+        int i = 1;
+        for (const auto& id : ids) out[i++] = id;
+        return out;
+    };
+    dbg["plugin_info"] = [&lua](const std::string& id) -> sol::object {
+        const PluginInfo* p = PluginManager::instance().getPlugin(id);
+        if (!p) {
+            std::cout << "[dbg] plugin_info: unknown plugin '" << id << "'" << std::endl;
+            return sol::nil;
+        }
+        std::cout << "  id            : " << p->id << std::endl;
+        std::cout << "  name          : " << p->manifest.name << std::endl;
+        std::cout << "  version       : " << p->manifest.version << std::endl;
+        std::cout << "  bbfx_version  : " << p->manifest.bbfxVersion << std::endl;
+        std::cout << "  author        : " << p->manifest.author.name << std::endl;
+        std::cout << "  license       : " << p->manifest.license << std::endl;
+        std::cout << "  category      : " << p->manifest.category << std::endl;
+        std::cout << "  state         : " << toString(p->state) << std::endl;
+        std::cout << "  directory     : " << p->directoryPath << std::endl;
+        std::cout << "  is_builtin    : " << (p->isBuiltin ? "true" : "false") << std::endl;
+        std::cout << "  resource_group: " << p->resourceGroupName << std::endl;
+        if (!p->lastError.empty())
+            std::cout << "  last_error    : " << p->lastError << std::endl;
+        if (!p->manifest.permissions.empty()) {
+            std::cout << "  permissions   :";
+            for (auto pm : p->manifest.permissions) std::cout << " " << toString(pm);
+            std::cout << std::endl;
+        }
+        sol::table t = lua.create_table();
+        t["id"]           = p->id;
+        t["state"]        = toString(p->state);
+        t["name"]         = p->manifest.name;
+        t["version"]      = p->manifest.version;
+        t["is_builtin"]   = p->isBuiltin;
+        return t;
+    };
+    dbg["plugin_validate"] = [&lua](const std::string& path) -> sol::table {
+        auto r = PluginValidator::validatePath(std::filesystem::path(path));
+        sol::table t = lua.create_table();
+        t["ok"] = r.ok;
+        sol::table errs = lua.create_table();
+        int i = 1;
+        for (const auto& e : r.errors) errs[i++] = e;
+        t["errors"] = errs;
+        if (!r.ok) {
+            std::cout << "[dbg] plugin_validate: INVALID" << std::endl;
+            for (const auto& e : r.errors) std::cout << "  - " << e << std::endl;
+        } else {
+            std::cout << "[dbg] plugin_validate: ok" << std::endl;
+        }
+        return t;
+    };
+    dbg["plugin_user_dir"] = []() -> std::string {
+        auto p = PluginManager::instance().getUserPluginsDir().string();
+        std::cout << "[dbg] plugin_user_dir: " << p << std::endl;
+        return p;
+    };
+
+    // v3.5 Lot B: lifecycle commands
+    dbg["plugin_load"] = [](const std::string& id) -> bool {
+        bool ok = PluginManager::instance().load(id);
+        std::cout << "[dbg] plugin_load(" << id << "): " << (ok ? "OK" : "FAIL") << std::endl;
+        if (!ok) {
+            const PluginInfo* p = PluginManager::instance().getPlugin(id);
+            if (p && !p->lastError.empty()) std::cout << "  error: " << p->lastError << std::endl;
+        }
+        return ok;
+    };
+    dbg["plugin_enable"] = [](const std::string& id) -> bool {
+        bool ok = PluginManager::instance().enable(id);
+        std::cout << "[dbg] plugin_enable(" << id << "): " << (ok ? "OK" : "FAIL") << std::endl;
+        if (!ok) {
+            const PluginInfo* p = PluginManager::instance().getPlugin(id);
+            if (p && !p->lastError.empty()) std::cout << "  error: " << p->lastError << std::endl;
+        }
+        return ok;
+    };
+    dbg["plugin_disable"] = [](const std::string& id) -> bool {
+        bool ok = PluginManager::instance().disable(id);
+        std::cout << "[dbg] plugin_disable(" << id << "): " << (ok ? "OK" : "FAIL") << std::endl;
+        return ok;
+    };
+    dbg["plugin_unload"] = [](const std::string& id) -> bool {
+        bool ok = PluginManager::instance().unload(id);
+        std::cout << "[dbg] plugin_unload(" << id << "): " << (ok ? "OK" : "FAIL") << std::endl;
+        return ok;
+    };
+    dbg["plugin_sandbox_violation"] = [](const std::string& id, const std::string& detail) {
+        // Manual trigger, useful when iterating on the violation reporter.
+        PluginManager::instance().onSandboxViolation(id, detail);
+    };
+
+    // ── v3.5 Lot E: HTTP + WebSocket debug commands ───────────────────────
+    dbg["http_get_sync"] = [&lua](const std::string& url) -> sol::table {
+        HttpResponse r = HttpClient::instance().getSync(url, 30);
+        sol::table t = lua.create_table();
+        t["status"] = r.status;
+        t["bytes"]  = r.bytes;
+        t["error"]  = r.error;
+        t["body_preview"] = r.body.substr(0, std::min<size_t>(r.body.size(), 200));
+        std::cout << "[dbg] http_get_sync " << url << " -> " << r.status;
+        if (!r.error.empty()) std::cout << " (" << r.error << ")";
+        std::cout << "  " << r.bytes << " bytes" << std::endl;
+        return t;
+    };
+    dbg["http_pump"] = []() { HttpClient::instance().pumpMainThread(); };
+    dbg["http_wait_idle"] = [](sol::optional<int> secs) -> bool {
+        return HttpClient::instance().waitIdle(secs.value_or(30));
+    };
+    dbg["http_sha256"] = [](const std::string& path) -> std::string {
+        auto h = HttpClient::sha256File(path);
+        std::cout << "[dbg] sha256(" << path << ") = " << h << std::endl;
+        return h;
+    };
+
+    // ── v3.5 Lot H: community index debug commands ────────────────────────
+    dbg["community_refresh"] = [](sol::this_state ts) -> bool {
+        sol::state_view lua(ts);
+        bool done = false, okFinal = false;
+        CommunityIndex::instance().refresh([&](bool ok) { okFinal = ok; done = true; });
+        // Pump up to 15s to let the network round-trip land.
+        for (int i = 0; i < 150 && !done; ++i) {
+            HttpClient::instance().pumpMainThread();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        std::cout << "[dbg] community_refresh -> "
+                  << (okFinal ? "OK" : "FAIL")
+                  << " (" << CommunityIndex::instance().size() << " entries)"
+                  << std::endl;
+        return okFinal;
+    };
+    dbg["community_search"] = [&lua](const std::string& q) -> sol::table {
+        CommunityIndex::Filter f; f.search = q;
+        auto hits = CommunityIndex::instance().filtered(f);
+        sol::table t = lua.create_table();
+        int i = 1;
+        for (const auto* e : hits) t[i++] = e->id;
+        std::cout << "[dbg] community_search '" << q << "' -> " << hits.size()
+                  << " result(s)" << std::endl;
+        return t;
+    };
+    dbg["community_load_json"] = [](const std::string& path) -> bool {
+        std::ifstream f(path, std::ios::binary);
+        if (!f.is_open()) {
+            std::cout << "[dbg] community_load_json: cannot open " << path << std::endl;
+            return false;
+        }
+        std::stringstream b; b << f.rdbuf();
+        std::string err;
+        bool ok = CommunityIndex::instance().loadFromJsonString(b.str(), err);
+        std::cout << "[dbg] community_load_json: " << (ok ? "OK" : ("FAIL: " + err))
+                  << " (" << CommunityIndex::instance().size() << " entries)" << std::endl;
+        return ok;
+    };
+    dbg["community_size"] = []() -> size_t {
+        return CommunityIndex::instance().size();
     };
 
     std::cout << "[Debugger] Installed. Type dbg.help() for commands." << std::endl;

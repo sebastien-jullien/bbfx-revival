@@ -44,6 +44,17 @@ void SettingsManager::load(const std::string& path) {
             mSettings.recentProjects.clear();
             for (auto& p : j["recentProjects"]) mSettings.recentProjects.push_back(p);
         }
+        if (j.contains("enabledPlugins")) {
+            mSettings.enabledPlugins.clear();
+            for (auto& p : j["enabledPlugins"]) mSettings.enabledPlugins.push_back(p);
+        }
+        if (j.contains("pluginsLastScanAt")) mSettings.pluginsLastScanAt = j["pluginsLastScanAt"];
+        if (j.contains("communityCacheTTL")) mSettings.communityCacheTTL = j["communityCacheTTL"];
+        // v3.5 Lot V — GitHub publishing token (scrambled). `githubToken`
+        // here is already post-XOR ; callers should go through
+        // GitHubPublisher::decodeStoredToken to get the raw OAuth token.
+        if (j.contains("githubToken")) mSettings.githubToken = j["githubToken"];
+        if (j.contains("githubLogin")) mSettings.githubLogin = j["githubLogin"];
     } catch (const std::exception& e) {
         std::cerr << "[Settings] Failed to load: " << e.what() << std::endl;
     }
@@ -59,6 +70,11 @@ void SettingsManager::save() const {
         j["fontSize"] = mSettings.fontSize;
         j["lastProjectPath"] = mSettings.lastProjectPath;
         j["recentProjects"] = mSettings.recentProjects;
+        j["enabledPlugins"] = mSettings.enabledPlugins;
+        j["pluginsLastScanAt"] = mSettings.pluginsLastScanAt;
+        j["communityCacheTTL"] = mSettings.communityCacheTTL;
+        j["githubToken"]       = mSettings.githubToken;
+        j["githubLogin"]       = mSettings.githubLogin;
         std::ofstream f(p);
         f << j.dump(2);
     } catch (const std::exception& e) {

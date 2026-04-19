@@ -17,6 +17,9 @@ InputManager* InputManager::instance() {
 void InputManager::capture() {
     mKeyboard.update();
     mMouse.update();
+    // v3.5 Lot J — advance rumble timers + poll gyro/accel sensors
+    // exactly once per frame.
+    mJoystick.update();
 }
 
 void InputManager::handleSDLEvent(const SDL_Event& evt) {

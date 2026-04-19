@@ -1,6 +1,6 @@
 # BBFx Studio — User Manual
 
-> **Manual version:** v3.4 "Stage"
+> **Manual version:** v3.5 "Community"
 > **Product:** `bbfx-studio.exe`
 > **Audience:** end users (VJs, stage designers, creatives) — not developers
 > **Language:** English
@@ -28,6 +28,8 @@ This manual describes **every visible and interactive feature** of BBFx Studio: 
 15. [Console & Debugger](#15-console--debugger)
 16. [Project management](#16-project-management)
 17. [Workflow tutorials](#17-workflow-tutorials)
+18. [Plugins & Community (v3.5)](#18-plugins--community-v35)
+19. [Gamepad (v3.5)](#19-gamepad-v35)
 
 **Appendices:**
 
@@ -46,8 +48,8 @@ This manual describes **every visible and interactive feature** of BBFx Studio: 
 
 When launched (on Windows: `build/windows-debug/Debug/bbfx-studio.exe`), a centered **splash window** titled **"BBFx Studio"** appears. It contains:
 
-- Coloured title: `BBFx Studio v3.4.0 Stage`
-- Subtitle: *Multi-Projector, Network Sync & Pro Outputs*
+- Coloured title: `BBFx Studio v3.5.0 Community`
+- Subtitle: *Plugin Ecosystem, Community Browser & Gamepad*
 - Welcome message
 - Two buttons:
   - **"New Empty Project"** — closes the splash, opens an empty project
@@ -217,14 +219,25 @@ Dedicated to multi-output / live / projection mapping:
 
 > ⚠ **PANIC ALL** is an emergency live command. Use it if a calibration goes wrong during a show; it resets *all* warp/blend/network profiles in one click.
 
-### 3.6 Help
+### 3.6 Plugins (v3.5)
+
+Plugin ecosystem management:
+
+| Entry | Shortcut | Action |
+|---|---|---|
+| **Plugin Manager** | Ctrl+Shift+X | Opens the Plugin Manager panel (installed plugins, enable/disable, install) |
+| **Plugin Errors** | Ctrl+Shift+E | Opens the Plugin Errors panel (sandbox violations, load failures) |
+| **Community Browser** | — | Opens the Community Browser (VS Code Marketplace-style, browse/install/rate plugins) |
+| **Command Palette** | Ctrl+Shift+P | Quick command search (type to filter all available commands) |
+
+### 3.7 Help
 
 | Entry | Shortcut | Action |
 |---|---|---|
 | **About BBFx Studio** | F1 | Shows the *About* dialog: version, subtitle, authors |
 | **Keyboard Shortcuts** | — | Opens the full shortcut table (mirror of [Appendix B](#appendix-b--all-keyboard-shortcuts)) |
 
-### 3.7 Settings dialog
+### 3.8 Settings dialog
 
 Opened via **File → Settings...** or **Ctrl+,**. Global parameters:
 
@@ -1461,6 +1474,139 @@ Five step-by-step tutorials covering the most common use cases. Each starts from
 
 ---
 
+## 18. Plugins & Community (v3.5)
+
+### 18.1 Plugin Manager (Ctrl+Shift+X)
+
+The Plugin Manager is the central hub for all installed plugins.
+
+**Installed tab:**
+- Lists all discovered plugins with **state badges**: Enabled (green), Disabled (grey), Failed (red), Validated (blue)
+- **Search bar** with sort options (name, author, state, date)
+- **Context menu** (right-click a plugin): Enable, Disable, Uninstall, Show in folder, View errors
+- **Bulk actions**: "Enable All" / "Disable All" buttons
+- **Status bar** badge shows the count of active plugins (click opens the panel)
+
+**Installing plugins:**
+- **Drag & drop** a `.zip` file onto the Studio window
+- **Community Browser** → click "Install" on any plugin
+- **CLI**: `bbfx-studio.exe --install path/to/plugin.zip`
+- **Deep link**: navigate to `bbfx://install/author.plugin-name` in a browser
+
+A **Permission Prompt** (Chrome-style dialog) appears before installation, listing the permissions the plugin requests (network, filesystem, UI, MIDI, etc.). You must explicitly accept.
+
+### 18.2 Community Browser
+
+A VS Code Marketplace-style panel for discovering and installing community plugins.
+
+**Layout (3 columns):**
+1. **Sidebar** — Filter by: category, tags, author, license, rating, sort order
+2. **Grid** — Plugin cards (256x256) with animated thumbnail on hover, name, author, rating stars, Install button
+3. **Detail panel** — Full plugin information with tabs: README (rendered markdown), Screenshots, Changelog, Reviews
+
+**Features:**
+- **Featured section** at the top highlights curated plugins
+- **Search** with real-time filtering
+- **Install** button downloads, extracts, validates, and enables the plugin in one click
+- **Rating** from GitHub Reactions API (live overlay on cards)
+- **Author profiles** — click an author name to see all their published plugins
+
+### 18.3 Plugin Authoring
+
+**Export mode** (right-click a preset or output template → "Export as Plugin"):
+- Auto-detects resources (shaders, textures, materials, particles)
+- Auto-detects required permissions
+- Generates manifest.json and plugin structure
+- Creates a ready-to-publish ZIP
+
+**New Plugin Wizard** (Plugins menu → "Create Plugin"):
+1. Choose template (node generator, node FX, preset, shader, panel, output template)
+2. Fill metadata (name, author, description, category, tags, license)
+3. Select permissions
+4. Studio generates the plugin skeleton and auto-enables it for development
+
+**Hot reload**: changes to plugin Lua files are detected every 500ms and auto-reloaded (no restart needed during development).
+
+### 18.4 Publishing to Community
+
+1. **Plugins → Publish** (or `dbg.plugin_publish("my-plugin")`)
+2. Studio authenticates with GitHub via **device flow** (displays a code + URL to enter)
+3. Forks the community repository, creates a branch, commits plugin files, opens a PR
+4. A GitHub Action CI validates the plugin automatically
+5. Once merged, the plugin appears in the Community Browser for all users
+
+### 18.5 Command Palette (Ctrl+Shift+P)
+
+Type-ahead search for all available commands (like VS Code). Includes:
+- All menu actions
+- Plugin-registered commands
+- Debugger commands
+- Node creation shortcuts
+
+### 18.6 Deep Links
+
+BBFx supports `bbfx://` URL scheme (registered in Windows):
+- `bbfx://install/author.plugin-name` — download and install
+- `bbfx://enable/author.plugin-name` — enable an installed plugin
+- `bbfx://disable/author.plugin-name` — disable a plugin
+- `bbfx://run/author.plugin-name` — enable and run a plugin
+
+If BBFx Studio is already running, deep links are forwarded via IPC.
+
+### 18.7 Plugin Errors (Ctrl+Shift+E)
+
+Shows a ring-buffer log of plugin errors:
+- Sandbox violations (attempted access to restricted APIs)
+- Load failures (missing resources, syntax errors)
+- Runtime errors (Lua exceptions in plugin code)
+
+Each error entry has actions: "Show Plugin", "Retry Load", "Disable Plugin".
+
+---
+
+## 19. Gamepad (v3.5)
+
+### 19.1 Gamepad Panel
+
+Real-time visualization of the connected gamepad. Accessible from **View** or **Plugins** menu.
+
+**Display elements:**
+- **Sticks** — 2D pads showing left/right stick position
+- **Triggers** — vertical bars for L2/R2
+- **Buttons** — lit indicators for all face buttons, bumpers, D-pad
+- **Gyroscope** — 3D rotating cube showing real-time orientation (PS5/Switch)
+- **Touchpad** — 2D pad showing up to 2 finger positions (PS5)
+- **LED** — color picker to set the controller LED color (PS5)
+- **Battery** — level bar with charging state indicator
+
+**Test buttons:**
+- "Rumble" — test low/high frequency haptic feedback
+- "Trigger Rumble" — test adaptive trigger haptic (PS5)
+- "LED Test" — cycle through LED colors
+- "Calibrate" — start gyroscope calibration (hold controller still)
+
+### 19.2 GamepadNode
+
+A DAG node with 33 output ports covering all gamepad data:
+- Sticks (4), triggers (2), buttons (16), gyroscope (3), accelerometer (3), touchpad (4), battery (1)
+
+Wire outputs to any parameter: gyro → camera rotation, triggers → effect intensity, touchpad → XY position, etc.
+
+### 19.3 Gamepad Profiles
+
+Three shipped mapping profiles:
+- **PS5 VJ Mode** — sticks control camera, triggers control FX intensity, touchpad controls pan/zoom
+- **Xbox DJ Mode** — bumpers for beat skip, triggers for crossfader, sticks for parameter sweep
+- **SwitchPro Performance** — optimized for live performance with gyro camera control
+
+Custom profiles can be saved/loaded via `bbfx.gamepadMapping.save/load`.
+
+### 19.4 Learn Mode
+
+Press "Learn" in the Gamepad Panel, then move any gamepad control, then click a parameter in the Inspector or a fader in Performance Mode — the binding is created automatically.
+
+---
+
 # Appendix A — Complete node reference
 
 This appendix lists every node type available in the Node Editor (**Right-click → Create Node → \<category\> → \<type\>**), grouped by **category** (menu tabs). For each node: role, input (I) and output (O) ports, typical parameters.
@@ -1583,6 +1729,14 @@ Objects visible in the 3D scene.
 | **WarpNode** | Quad or grid warp, animatable | I: `tl_x`, `tl_y`, ..., `br_x`, `br_y` (warp points) — param: **output_id** |
 | **BlendNode** | Edge blending for multi-projector setups | I: `left`, `right`, `top`, `bottom`, `gamma` — param: **output_id** |
 
+## Community (v3.5)
+
+| Node | Role | Ports / Key parameters |
+|---|---|---|
+| **GamepadNode** | Gamepad input as DAG source (33 outputs) | O: `left_x`, `left_y`, `right_x`, `right_y`, `left_trigger`, `right_trigger`, `button_a`..`button_y`, `gyro_x`/`y`/`z`, `accel_x`/`y`/`z`, `touch1_x`/`y`, `touch2_x`/`y`, `battery` — param: **gamepad_index** |
+| **ArtnetInputNode** | Receives Art-Net DMX data | O: `channel_1`..`channel_8` — param: **universe**, **start_channel** |
+| *Plugin-contributed nodes* | Custom nodes from installed plugins | Appear in the **Community** category of the node creation menu |
+
 ## Port conventions
 
 - **Input ports** (left) accept a single connection. A new link replaces any previous one.
@@ -1638,6 +1792,14 @@ Exhaustive list of keyboard shortcuts, grouped by context. A live copy is availa
 | **Ctrl+Shift+N** | Network Sync |
 | **Ctrl+Shift+M** | Master View |
 | **Ctrl+Shift+P** | **PANIC ALL** — reset warp, blend, network, DMX, Spout |
+
+## Plugins (v3.5)
+
+| Shortcut | Action |
+|---|---|
+| **Ctrl+Shift+X** | Plugin Manager |
+| **Ctrl+Shift+E** | Plugin Errors |
+| **Ctrl+Shift+P** | Command Palette (context-dependent: in Node Editor = PANIC, elsewhere = Command Palette) |
 
 ## 3D Viewport
 
@@ -2171,9 +2333,27 @@ The theme is not user-configurable. If some elements are miscoloured, it is like
 
 ### The manual mentions a feature I cannot find
 
-- Check you are in version **3.4 "Stage"** (Splash at launch or **Help → About**)
+- Check you are in version **3.5 "Community"** (Splash at launch or **Help → About**)
 - Some features are only available in specific modes (e.g. **Performance Mode** → triggers / faders)
 - Report through the project's channels
+
+## Plugins (v3.5)
+
+### A plugin fails to load with "sandbox violation"
+
+The plugin attempted to use a restricted API (io, debug, os.execute, require("ffi"), etc.). Check the **Plugin Errors** panel (Ctrl+Shift+E) for details. The plugin is automatically disabled — contact the plugin author.
+
+### Installed plugin nodes do not appear in the menu
+
+- Ensure the plugin state is **Enabled** (green badge in Plugin Manager)
+- Plugin nodes appear under the **Community** category in the node creation menu
+- Try **Plugins → Plugin Manager → right-click → Reload**
+
+### Community Browser shows "Failed to fetch index"
+
+- Check your internet connection
+- The Community Browser fetches from GitHub — verify access to `api.github.com`
+- A local cache is used when offline (from `~/Documents/BBFx/.community-cache/`)
 
 ---
 
@@ -2190,4 +2370,9 @@ The theme is not user-configurable. If some elements are miscoloured, it is like
 | `dbg.sync_role()` | Network Sync state |
 | `dbg.midi_devices()` | MIDI devices |
 | `dbg.midi_bindings()` | MIDI binding count |
-| `dbg.test()` | Internal test suite (34 assertions) |
+| `dbg.plugin_list()` | Installed plugins |
+| `dbg.plugin_info("id")` | Plugin details |
+| `dbg.plugin_scan()` | Re-scan plugin directories |
+| `dbg.gamepad_list()` | Connected gamepads |
+| `dbg.community_search("query")` | Search community index |
+| `dbg.test()` | Internal test suite (673 assertions) |

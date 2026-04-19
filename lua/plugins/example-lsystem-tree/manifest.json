@@ -1,0 +1,14 @@
+{
+  "id": "example.lsystem-tree",
+  "name": "L-System Tree",
+  "version": "1.0.0",
+  "type": "Node",
+  "bbfx_version": ">=3.5",
+  "author": { "name": "BBFx Team", "url": "https://github.com/bonneballefx" },
+  "description": "Procedural L-system tree generator (axiom F, rule F->F[+F]F[-F]F) rendered as OGRE line mesh.",
+  "category": "Scene",
+  "license": "MIT",
+  "entry": "init.lua",
+  "tags": ["procedural", "lsystem", "tree", "example"],
+  "permissions": ["scene"]
+}

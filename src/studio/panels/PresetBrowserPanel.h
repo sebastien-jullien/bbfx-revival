@@ -39,6 +39,9 @@ private:
     int mAssetTypeFilter = 0; // 0=All, 1=Meshes, 2=Textures, 3=Particles, 4=Compositors, 5=Shaders, 6=Materials
     bool mTextureGridView = true;
 
+    // Preset source filter (v3.5 Lot C): 0=All / 1=Builtin / 2=Plugin
+    int mPresetSourceFilter = 0;
+
     class TextureThumbnailCache* mThumbCache = nullptr; // owned by StudioApp
     class ShaderPreviewRenderer* mPreviewRenderer = nullptr; // owned by StudioApp (v3.2.5)
 

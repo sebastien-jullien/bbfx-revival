@@ -37,13 +37,14 @@
 24. [BBFx Studio Content (v3.2)](#24-bbfx-studio-content-v32)
 25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
 
-**Sections compactes (v3.2.2 → v3.4)**
+**Sections compactes (v3.2.2 → v3.5)**
 - [v3.2.2 — Multi-Object Scene](#v322--multi-object-scene)
 - [v3.2.3 — Timeline Automation](#v323--timeline-automation)
 - [v3.2.4 — Asset Pipeline & Visual Application](#v324--asset-pipeline--visual-application)
 - [v3.2.5 — Performance Pro & Final Polish](#v325--performance-pro--final-polish)
 - [v3.3 — Connect](#v33--connect)
 - [v3.4 — Stage](#v34--stage)
+- [v3.5 — Community](#v35--community)
 
 ---
 
@@ -1644,7 +1645,7 @@ Le callback n'est PAS fire dans `selectByDAGName()` pour eviter les boucles infi
 
 ---
 
-## BBFx Studio — Architecture v3.0 → v3.4
+## BBFx Studio — Architecture v3.0 → v3.5
 
 Le BBFx Revival v3.x ajoute une couche Studio GUI complete au-dessus du moteur headless v2.x :
 
@@ -1787,4 +1788,237 @@ SceneHierarchyPanel (F8, visibility/lock par objet). SceneObjectNamer (nommage B
 **Lot Q — Integration O+P (6 iter, I-1275→I-1280) :** Integration MasterViewPanel ↔ OutputPanel (selection synchronisee, actions contextuelles). Integration SceneSwitcher ↔ ChordSystem (scenes comme chord snapshots). Integration SyncManager ↔ SceneSwitcher (scene changes synchronises entre master/slave). Tests consolides (34 tests, 0 FAIL). Serialisation complete v3.4 (outputs, surfaces, scenes, sync config, texture share). Documentation interne.
 
 **Fix iterations finales (11 iter, I-FIX-1→I-FIX-11) :** Fix architecture blit (I-1241 : refactoring pipeline complet, uber-shader GL3.3). Fix MasterView refresh (throttle 30fps thumbnails). Fix SceneSwitcher crossfade (interpolation lineaire WarpProfile corners). Fix SyncManager reconnect (auto-retry sur deconnexion). Fix serialisation backward compat v3.3→v3.4. Fix OutputPanel UI (scroll zones longues). Fix ArtnetOutputNode channel mapping. Fix MidiClockNode tempo jitter. Fix TextureShareSender shutdown cleanup. I-FIX-10 : reconciliation suivi (iterations/worklog alignes sur 352/17lots/A-Q). I-FIX-11 : isolation tests (saveProject/loadProject skip settings persist pour fichiers "output/test_*", empeche pollution lastProjectPath par les tests automatises).
+
+### v3.5 — Community
+**250 iterations (I-1290 → I-1539), 23 lots (A-W), 8 epics (EPIC-162 → EPIC-169), 673 tests PASS**
+
+v3.5 transforme le Studio en ecosysteme ouvert avec systeme de plugins sandboxe, marketplace communautaire, gamepad next-gen et API Lua exhaustive (27+ namespaces).
+
+#### Diagramme d'architecture v3.5
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  COUCHE APPLICATIVE (Lua)                                                   │
+│  Scripts scene + 27 namespaces API (plugin/midi/osc/gamepad/noise/ui/...)   │
+│  Plugins communautaires (sol::environment sandbox par plugin)                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE BINDING (sol2 C++ ↔ Lua)                                           │
+│  bbfx_bindings.cpp · bbfx_plugin_bindings.cpp · bbfx_imgui_bindings.cpp    │
+│  PluginSandboxApi (shadow bbfx table per-plugin)                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE PLUGIN (C++)                              src/plugin/               │
+│  ┌──────────────┐ ┌──────────────┐ ┌────────────┐ ┌───────────────────┐   │
+│  │PluginManager │ │PluginSandbox │ │PluginValid │ │  PluginRegistry   │   │
+│  │ (lifecycle)  │ │(sol::env iso)│ │ (manifest) │ │ (type tracking)   │   │
+│  └──────────────┘ └──────────────┘ └────────────┘ └───────────────────┘   │
+│  ┌──────────────┐ ┌──────────────┐ ┌────────────┐ ┌───────────────────┐   │
+│  │  HttpClient  │ │ ZipExtractor │ │GitHubPubl  │ │InspectorWidgetReg │   │
+│  │  (libcurl)   │ │ (minizip-ng) │ │(OAuth+REST)│ │ (custom widgets)  │   │
+│  └──────────────┘ └──────────────┘ └────────────┘ └───────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE MOTEUR (C++)                              bbfx namespace            │
+│  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌──────────────┐  │
+│  │  Engine  │ │ Animator │ │GamepadMgr  │ │  FX mods │ │  Plugin/     │  │
+│  │  (OGRE)  │ │  (DAG)   │ │(SDL3 haptic│ │(Perlin,  │ │  Procedural  │  │
+│  │          │ │          │ │gyro,touch) │ │ Wave,..) │ │(Noise,SDF,..)│  │
+│  └──────────┘ └──────────┘ └────────────┘ └──────────┘ └──────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE STUDIO (ImGui v1.92.7 + OGRE 14)                                   │
+│  StudioApp · StudioEngine · 23+ panels · NodeTypeRegistry · Debugger       │
+│  PluginManagerPanel · CommunityBrowserPanel · GamepadPanel · AuthorProfile  │
+│  PluginAuthoringDialog · PermissionPromptDialog · DeepLinkHandler          │
+│  CommandPalette · MarkdownRenderer · ToastSystem                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Module `src/plugin/` — Architecture plugin
+
+**PluginManager** (singleton) : scan directories (user `~/Documents/BBFx/plugins/` + bundled `<exe>/plugins/`), lifecycle state machine (DISCOVERED → VALIDATED → LOADED → ENABLED / DISABLED / FAILED → UNLOADED), `load/enable/disable/unload` avec hooks Lua (onLoad/onEnable/onDisable/onUnload), `installFromZip/installFromUrl`, teardown propre (unregister types + destroy resource group OGRE). `setLuaState` appele depuis main.cpp et main_studio.cpp.
+
+**PluginManifest** : struct typee avec parsing JSON strict (fromJson/toJson), semver parser + resolveur de contraintes (>=, ==, ^, ~), 11 PluginPermission enums. JSON Schema `docs/plugin-manifest-schema.json` (draft-07).
+
+**PluginValidator** : validation dir + manifest + resources existence + entry file + bbfx_version constraint. Pipeline : validatePath → fromJson → semverSatisfies → resources check.
+
+**PluginSandbox** : `create(lua, info) → sol::environment`. Whitelist strict : core globals + math/table/coroutine/string(sans dump)/os(clock,time,date). require whitelist, loadfile canonical path check (canAccess), load text-mode only (rejet bytecode). Violations → auto-disable + FAILED state.
+
+**PluginSandboxApi** : shadow copy de la table `bbfx` dans chaque sandbox. API sandboxee : registerNodeType, registerPreset, loadShader/Texture/Material/ParticleTemplate, getId/getVersion/getDir/getResourceGroup. Les plugins ne voient que leur propre dir OGRE (inGlobalPool=false).
+
+**PluginRegistry** : tracking global des contributions par plugin (node types, presets, inspector widgets, panels). `ownerOfNodeType/ownerOfPreset` pour attribution.
+
+**PluginCommands** : Install/Uninstall/Enable/Disable commands undo/redo via CommandManager.
+
+**InspectorWidgetRegistry** : callbacks `bool(nodeName, portName, ParamDef&)`, registration exact ou wildcard, `tryDraw` pour custom rendering.
+
+#### Module `src/plugin/network/` — Reseau et install
+
+**HttpClient** : libcurl async avec thread worker, `get/getSync/post/download`, progress callbacks, SHA256 verification, proxy support, timeout configurable. `pumpMainThread` appele depuis StudioApp render loop pour dispatching callbacks thread-safe.
+
+**WebSocketClient** : stub propre (websocketpp pas dans vcpkg baseline). Structure prete pour implementation future.
+
+**ZipExtractor** : minizip-ng wrapper, protection path traversal (rejet `..` et paths absolus) + zip bomb detection (ratio compression > 100x). `extractTo(zipPath, destDir, &error)`.
+
+**GitHubPublisher** : GitHub REST API v3 wrapper. Device flow OAuth (no client-secret), token XOR+base64 scramble dans SettingsManager. Fork + branch + commit files + create PR. Pipeline : authenticate → fork → createBranch → commitFiles → createPR.
+
+#### Module `src/plugin/media/` — Pipeline media
+
+**FFmpegBridge** : subprocess avec pipe frames (stdin/stdout), play/pause/seek/speed/loop controls, format detection, async frame reading.
+
+**ImageLoader** : OGRE TextureManager wrapper avec dynamic resource groups.
+
+**SequencePlayer** : decodage GIF (stb_image) et PNG sequences, frame-by-frame playback avec timing.
+
+**MeshImporter** : Assimp wrapper pour import modeles 3D (OBJ, FBX, glTF, etc.), conversion vers Ogre::MeshPtr.
+
+#### Module `src/plugin/procedural/` — Generation procedurale
+
+**NoiseGenerator** : FastNoiseLite wrapper (Simplex/Worley/Curl/FBM) + generation texture GPU via fragment shader. `generateTexture(width, height, type, params)`.
+
+**GeometryGenerator** : `createMesh/updateVertices/primitives` (plane, sphere, cube, cylinder, torus, cone). Meshes OGRE dynamiques.
+
+**SDFPrimitives + MarchingCubes** : champ de distance signe avec 6 primitives (sphere, box, torus, cylinder, cone, plane), operations booleennes (union, intersection, difference, smooth), isosurface via Marching Cubes avec triTable canonique.
+
+**FractalShaders** : Mandelbrot + Julia GLSL, 4 palettes couleur, zoom/pan/iterations parametrables.
+
+**LSystemParser** : L-system grammaire (axiom, rules, angle, iterations), turtle 3D interpreter, `generateMesh` OT_LINE_LIST.
+
+#### GamepadManager (src/input/)
+
+Remplacement de JoystickManager (alias retrocompat conserve). SDL3 gamepad API complete :
+- **Haptic** : rumble low-frequency/high-frequency + trigger rumble gauche/droite
+- **Sensors** : gyroscope 3 axes + accelerometre 3 axes, filtre Kalman par axe, calibration offset
+- **Touchpad** : 2 doigts (x, y, pressure par finger)
+- **LED** : RGB set via SDL_SetGamepadLED
+- **Battery** : niveau + etat charge (WIRED/CHARGING/CHARGED/UNKNOWN)
+- **GamepadType** : enum detection (PS5/Xbox/SwitchPro/Generic)
+- **GamepadState** : struct etendu avec tous les champs above
+
+**GamepadNode** (src/studio/nodes/) : 33 output ports DAG (sticks 4, triggers 2, buttons 16, gyro 3, accel 3, touchpad 4, battery 1).
+
+**GamepadMappingProfile** : JSON save/load, 3 profils livres (PS5 VJ Mode, Xbox DJ Mode, SwitchPro Performance).
+
+**GamepadPanel** (src/studio/panels/) : visualisation sticks/triggers/boutons en temps reel, sphere 3D gyroscope, pad 2D touchpad, LED color picker, battery bar, boutons test (rumble/trigger-rumble/LED), calibration flow, learn mode global.
+
+#### Panels Studio v3.5
+
+| Panel | Shortcut | Description |
+|-------|----------|-------------|
+| PluginManagerPanel | Ctrl+Shift+X | Installed tab (list+search+sort+actions), badge etats, bulk enable/disable, drag&drop ZIP |
+| PluginErrorsPanel | Ctrl+Shift+E | Ring-buffer erreurs plugins, actions par erreur |
+| CommunityBrowserPanel | — | 3-column layout : sidebar filtres + grille cards + details tabs |
+| AuthorProfilePanel | — | Profil auteur (plugins publies, stats) |
+| GamepadPanel | — | Visu gamepad temps reel + calibration + learn |
+| CommandPalette | Ctrl+Shift+P | Recherche dynamique de commandes (a la VS Code) |
+
+#### Dialogs v3.5
+
+| Dialog | Description |
+|--------|-------------|
+| PermissionPromptDialog | Permission prompt Chrome-style avant install plugin |
+| PluginAuthoringDialog | Mode Export (right-click preset/output) + mode New (wizard 4 etapes + 6 templates) |
+
+#### API Lua v3.5 — 27+ namespaces
+
+| Namespace | Description |
+|-----------|-------------|
+| `bbfx.plugin` | scan/list/info/load/enable/disable/unload/validatePath |
+| `bbfx.midi` | listPorts/getCC/getNotes/send/learn |
+| `bbfx.osc` | send/on/get |
+| `bbfx.artnet` | send/sendBulk/onReceive/getChannels |
+| `bbfx.textureShare` | create/send/release/listReceivers |
+| `bbfx.gamepad` | list/rumble/setLED/getGyro/getAccel/getTouchpad/getBattery |
+| `bbfx.gamepadMapping` | load/save/listProfiles/apply |
+| `bbfx.joystick` | alias retrocompat → bbfx.gamepad |
+| `bbfx.noise` | simplex/worley/curl/fbm/generateTexture |
+| `bbfx.easing` | 30 fonctions (linear→bounce) + lerp/bezier helpers |
+| `bbfx.tempo` | getBPM/setBPM/getPhase/onBeat/setSource |
+| `bbfx.timeline` | create/addKeyframe/addEvent/play/pause/seek |
+| `bbfx.http` | get/post/download (async, sandboxed) |
+| `bbfx.websocket` | connect/send/onMessage (stub) |
+| `bbfx.fs` | readFile/writeFile/readLines/exists/listDir (sandboxed plugin dir) |
+| `bbfx.json` | encode/decode |
+| `bbfx.ui` | 40+ ImGui widgets + registerPanel/registerInspectorWidget |
+| `bbfx.media` | openVideo (FFmpegBridge) |
+| `bbfx.images` | load/create/getPixel/setPixel/toTexture |
+| `bbfx.sequences` | loadGif/loadPngSequence/play/stop |
+| `bbfx.models` | import/listFormats |
+| `bbfx.geometry` | createMesh/updateVertices/primitives |
+| `bbfx.sdf` | sphere/box/torus + union/intersection/difference + marchingCubes |
+| `bbfx.fractals` | mandelbrot/julia (GLSL shaders) |
+| `bbfx.lsystem` | create/generate/generateMesh |
+| `bbfx.renderTexture` | create/setCamera/update/readPixels |
+| `bbfx.frameBuffer` | saveToFile/getPixel/getResolution |
+| `bbfx.compositor` | enable/disable/registerCustom |
+| `bbfx.authoring` | slugify/isValidId/detectPermissions/writePlugin |
+
+#### Securite sandbox
+
+Modele de securite a 11 permissions : `network`, `filesystem`, `ui`, `midi`, `osc`, `artnet`, `texture_share`, `audio`, `video`, `system`, `gamepad`. Chaque permission est declaree dans manifest.json et verifiee a runtime (tentative d'acces sans permission → sandbox violation → FAILED state → auto-disable).
+
+17 tests de penetration couvrent : io absent, os.execute/remove/getenv absent, debug+package absent, load("return io") → nil, require("ffi") → violation, loadfile cross-dir → violation, permission gating network/fs/ui.
+
+#### Deep links
+
+Schema URL `bbfx://` (Windows HKCU registry) : `bbfx://install/<pluginId>`, `bbfx://enable/<pluginId>`, `bbfx://disable/<pluginId>`, `bbfx://run/<pluginId>`. DeepLinkHandler parse + dispatch. StudioApp argv parsing + IPC mutex (si instance deja lancee, forward via named pipe).
+
+#### CLI
+
+5 flags : `--install <path.zip>`, `--uninstall <pluginId>`, `--validate-plugin <path>`, `--list-plugins`, `--export-plugin <pluginId> <dest>`.
+
+#### Plugins exemples livres
+
+| Plugin | Description |
+|--------|-------------|
+| example-plasma-wave | ShaderFxNode avec GLSL plasma oscillant |
+| example-sdf-raymarch | Ray marching SDF temps reel avec operations booleennes |
+| example-lsystem-tree | L-system arbre 3D procedural |
+
+#### Lots detailles
+
+**Lot A — PluginManager + Manifest + Validator (12 iter, I-1290→I-1301) :** Module src/plugin/, PluginState enum (7 etats), PluginInfo struct, PluginManifest parsing JSON strict + semverSatisfies, PluginValidator (check dir + manifest + resources + entry + version), PluginManager singleton scan user+bundled dirs, PluginRegistry tracking global, init main.cpp + main_studio.cpp, dbg commands (plugin_scan/list/info/validate/user_dir), 17 tests (A-001→A-017), docs plugin-manifest-schema.json + plugin-authoring-guide.md draft.
+
+**Lot B — PluginSandbox + Plugin API Core (10 iter, I-1302→I-1311) :** PluginSandbox sol::environment (whitelist globals, safe string/os stubs, require/loadfile/load restrictions, canonical path enforcement), PluginSandboxApi (shadow bbfx table, registerNodeType/Preset/loadShader/Texture/Material/ParticleTemplate, introspection), PluginManager lifecycle (load/enable/disable/unload + hooks), sandbox violation auto-disable, 13 penetration tests (B-001→B-013). NodeTypeRegistry relocation bbfx-core.
+
+**Lot C — OGRE ResourceGroup + Integrations (8 iter, I-1312→I-1319) :** ResourceGroup OGRE per-plugin (createResourceGroup inGlobalPool=false), NodeTypeRegistry integration (registerTypeFromPlugin/unregisterByPlugin), NodeEditorPanel menu "Community" category, PresetBrowserPanel tag [from plugin], InspectorPanel widget custom hook (InspectorWidgetRegistry), AssetBrowser section Community, ResourceEnumerator cache invalidation on load/unload.
+
+**Lot D — Settings + CommandManager + Bindings (5 iter, I-1320→I-1324) :** SettingsManager enabledPlugins persistence JSON, PluginCommands (Install/Uninstall/Enable/Disable) avec undo/redo, bindings bbfx.plugin user-facing, menu Plugins > Manage (Ctrl+Shift+X).
+
+**Lot E — HttpClient + WebSocketClient (12 iter, I-1325→I-1336) :** vcpkg +curl +asio, HttpClient (libcurl thread worker, get/getSync/post/download, progress SHA256, proxy, timeout, pumpMainThread), WebSocketClient stub propre, bindings bbfx.http + bbfx.websocket, dbg commands.
+
+**Lot F — ZipExtractor + Install Pipeline (8 iter, I-1337→I-1344) :** ZipExtractor (minizip-ng, path traversal + zip bomb protection), installFromZip/installFromUrl, PermissionPromptDialog Chrome-style, toast install success/error.
+
+**Lot G — PluginManagerPanel + ErrorsPanel (12 iter, I-1345→I-1356) :** PluginManagerPanel (Installed tab list+badges+context menu+sort+search+disable all/enable all), PluginErrorsPanel (PluginErrorLog ring-buffer), StudioApp drag&drop handler ZIP, status bar badge plugins, menu Plugins > Errors (Ctrl+Shift+E).
+
+**Lot H — CommunityBrowserPanel (18 iter, I-1357→I-1374) :** CommunityIndex fetcher GitHub, cache local, 3-column panel (sidebar filters categories/tags/author/license/rating/sort + grid cards 256x256 animated thumbnails + detail tabs README/Screenshots/Changelog/Reviews), MarkdownRenderer ImGui, install wired, CommandPalette (Ctrl+Shift+P), featured section, dbg community commands.
+
+**Lot I — Ratings + Deep Links + Author Profile (10 iter, I-1375→I-1384) :** GitHub Reactions API rating overlay, Windows HKCU bbfx:// URL scheme, DeepLinkHandler (install/enable/disable/run), argv parsing + IPC mutex, AuthorProfilePanel.
+
+**Lot J — GamepadManager + Haptic + Sensors (10 iter, I-1385→I-1394) :** JoystickManager → GamepadManager rename, GamepadType enum + detection, GamepadState extended, haptic rumble (low/high + triggers), gyroscope + accelerometre, Kalman filter, calibrateGyro offset, bindings bbfx.gamepad alias bbfx.joystick.
+
+**Lot K — Touchpad + LED + Battery + Node + Profiles (8 iter, I-1395→I-1402) :** Touchpad 2 fingers, LED RGB, battery level+state, GamepadNode DAG (33 outputs), GamepadMappingProfile JSON, 3 profils livres (PS5 VJ / Xbox DJ / SwitchPro Performance).
+
+**Lot L — GamepadPanel + Learn + Lua Bindings (7 iter, I-1403→I-1409) :** GamepadPanel (sticks/triggers/buttons visu, 3D gyro cube, touchpad pad, LED picker, battery bar, test buttons, calibration flow), learn mode global, bindings bbfx.gamepad complet.
+
+**Lot M — MIDI/OSC/Artnet/TextureShare Lua API (14 iter, I-1410→I-1423) :** bbfx.midi.* complet (listPorts/getCC/notes/send/learn), bbfx.osc.* (send/on/get), bbfx.artnet.* (send/sendBulk/onReceive/getChannels), ArtnetInputNode DAG, TextureShareReceiver (abstract + SpoutReceiver + DmaBuf + Null), bbfx.textureShare.*.
+
+**Lot N — Noise/Easing/Tempo/Timeline (14 iter, I-1424→I-1437) :** NoiseGenerator FastNoiseLite (simplex/worley/curl/fbm + GPU generateTexture), easing.lua (30 fonctions + helpers), TempoManager unification (AUDIO/MIDI_CLOCK/MANUAL + callbacks), LuaTimeline (keyframes + interpolation + event firing).
+
+**Lot O — HTTP/WebSocket/Fs/JSON Lua API (10 iter, I-1438→I-1447) :** bbfx.http expose sandboxed, bbfx.websocket expose, bbfx.fs.* (readFile/writeFile/readLines/exists/listDir sandboxed plugin dir), bbfx.json encode/decode, permission enforcement, 3 penetration test plugins.
+
+**Lot P — ImGui Lua API + Custom Inspector Widgets (12 iter, I-1448→I-1459) :** bbfx_imgui_bindings.cpp, 40+ widgets (text/button/checkbox/sliders/inputs/color/combo/listBox/layout/image OGRE/plotLines/tabs/popups/progressBar), bbfx.ui.registerPanel + registerInspectorWidget, permission enforcement ui.
+
+**Lot Q — FFmpeg + Images + Sequences + Models 3D (16 iter, I-1460→I-1475) :** vcpkg +assimp, FFmpegBridge (subprocess pipe, play/pause/seek/speed/loop), ImageLoader OGRE, SequencePlayer (GIF stb_image + PNG sequences), MeshImporter Assimp, bbfx.media/images/sequences/models, non-regression Theora.
+
+**Lot R — Noise GPU + Geometry + SDF + L-system (16 iter, I-1476→I-1491) :** NoiseGenerator GPU fragment shader, GeometryGenerator (createMesh/updateVertices/primitives), SDFPrimitives + Marching Cubes, Mandelbrot/Julia GLSL (4 palettes), LSystem parser + turtle + generateMesh, bbfx.geometry/sdf/fractals/lsystem.
+
+**Lot S — Preset Authoring + Scene/Output Plugins (12 iter, I-1492→I-1503) :** PluginAuthoringDialog (Export mode right-click + Create mode), exportSubgraph/exportScenePreset/exportOutputTemplate, bbfx.authoring.*, resources auto-detect + copy.
+
+**Lot T — RTT + Compositor + FrameBuffer Lua API (6 iter, I-1504→I-1509) :** bbfx.renderTexture.create (MSAA/depth/formats), setCamera/update/readPixels, bbfx.frameBuffer (saveToFile/getPixel/getResolution), bbfx.compositor (enable/disable/registerCustom).
+
+**Lot U — New Plugin Wizard + Hot Reload + CLI (9 iter, I-1510→I-1518) :** PluginAuthoringDialog wizard 4 etapes + 6 templates Lua, PluginHotReloader (500ms polling + debounce), CLI argv (--install/--uninstall/--validate-plugin/--list-plugins/--export-plugin).
+
+**Lot V — GitHub OAuth + Publish + Community Repo (10 iter, I-1519→I-1528) :** GitHubPublisher (REST API v3), OAuth device flow (no client-secret), token XOR+base64 scramble, fork + branch + commit + PR, community repo bootstrap (index.json + CI GitHub Action).
+
+**Lot W — Plugins Exemples + Tests + Docs + Polish (11 iter, I-1529→I-1539) :** 3 plugins exemples (plasma-wave, sdf-raymarch, lsystem-tree), 40+ assertions dbg.test, 20+ tests imgui_test_engine, docs exhaustifs (plugin-api.md 27 namespaces, sandbox-security.md, gamepad-mapping-guide.md), Splash/About/status bar/help mis a jour, benchmark 5 plugins, audit final. Total cumule : 673 tests PASS, 0 FAIL.
+
+**Hotfix post-implementation (FIX-001, 2026-04-18) :** Segfault au lancement — GamepadPanel::ctor appelait ImGui::GetTime() avant que le contexte ImGui soit cree (le constructeur est appele dans StudioApp::ctor, avant la boucle SDL). Fix : suppression de l'appel, le champ mLastUpdateSec est deja initialise a 0.0 dans le header.
 

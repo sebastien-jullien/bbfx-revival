@@ -1,32 +1,14 @@
 #pragma once
 
-#include "../bbfx.h"
-#include <SDL3/SDL.h>
-#include <vector>
+// v3.5 Lot J — `JoystickManager` was the v3.0..v3.4 name for this class.
+// It is now an alias for the renamed-and-extended `GamepadManager` so that
+// every existing `bbfx::JoystickManager` reference keeps compiling
+// unchanged. New code should reach for GamepadManager directly.
+
+#include "GamepadManager.h"
 
 namespace bbfx {
 
-class JoystickManager {
-public:
-    JoystickManager();
-    ~JoystickManager();
-
-    void init();
-    void handleEvent(const SDL_Event& evt);
-
-    float getAxisValue(int joystickId, int axis) const;
-    bool isButtonDown(int joystickId, int button) const;
-    int getCount() const;
-
-private:
-    struct GamepadEntry {
-        SDL_JoystickID id;
-        SDL_Gamepad*   gamepad;   // non-null if SDL gamepad mapping exists
-        SDL_Joystick*  joystick;  // non-null if raw joystick fallback
-    };
-    std::vector<GamepadEntry> mGamepads;
-
-    SDL_Gamepad* findGamepad(int joystickId) const;
-};
+using JoystickManager = GamepadManager;
 
 } // namespace bbfx

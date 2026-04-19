@@ -2,6 +2,9 @@
 #include "core/Engine.h"
 #include "core/Animator.h"
 #include "bindings/bbfx_bindings.h"
+#include "plugin/PluginManager.h"
+#include "network/HttpClient.h"
+#include "studio/SettingsManager.h"
 #include <ogre_lua/ogre_lua.h>
 
 #include <sol/sol.hpp>
@@ -89,6 +92,23 @@ int main(int argc, char* argv[]) {
         bbfx::Animator animator;
         bbfx::RootTimeNode timeNode;
         bbfx::Engine engine(lua);
+
+        // Load persisted settings (enabledPlugins list used right below).
+        bbfx::SettingsManager::instance().load();
+
+        // Scan installed plugins (headless mode discovers them so that
+        // registered command-line tools like --validate-plugin can reuse the
+        // same code path, and so Lua scripts can query bbfx.plugin.list()).
+        bbfx::PluginManager::instance().setLuaState(lua);
+        bbfx::PluginManager::instance().scanDirectories();
+        {
+            const auto ids = bbfx::PluginManager::instance().listPlugins();
+            std::cout << "[BBFx] Plugins: found " << ids.size() << " at "
+                      << bbfx::PluginManager::instance().getUserPluginsDir() << std::endl;
+        }
+
+        // Auto-enable plugins persisted from previous sessions.
+        bbfx::PluginManager::instance().autoEnableFromSettings();
 
         // Pass command-line arguments to Lua (standard arg table)
         sol::table luaArg = lua.create_table();

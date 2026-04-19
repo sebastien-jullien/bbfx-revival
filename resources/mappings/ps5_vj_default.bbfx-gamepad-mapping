@@ -1,0 +1,14 @@
+{
+  "name": "PS5 DualSense - VJ default",
+  "deviceType": "PS5",
+  "description": "Camera driven by gyroscope, faders on the touchpad, L2/R2 intensity and speed.",
+  "mappings": [
+    { "source": "gyroX",        "target": "camera.rotX",       "scale": 0.02, "offset": 0.0, "invert": false },
+    { "source": "gyroY",        "target": "camera.rotY",       "scale": 0.02, "offset": 0.0, "invert": false },
+    { "source": "touchpad0X",   "target": "mixer.fader1",      "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "touchpad0Y",   "target": "mixer.fader2",      "scale": 1.0,  "offset": 0.0, "invert": true  },
+    { "source": "leftTrigger",  "target": "fx.intensity",      "scale": 1.0,  "offset": 0.0, "invert": false },
+    { "source": "rightTrigger", "target": "fx.speed",          "scale": 2.0,  "offset": 0.0, "invert": false },
+    { "source": "buttonA",      "target": "triggers.flash",    "scale": 1.0,  "offset": 0.0, "invert": false }
+  ]
+}

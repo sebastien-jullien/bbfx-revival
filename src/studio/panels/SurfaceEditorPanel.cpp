@@ -16,10 +16,8 @@
 #include <cmath>
 #include <iostream>
 
-// stb_image for background image loading (header-only; implementation in this TU)
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#define STBI_ONLY_JPEG
+// stb_image for background image loading (header-only; implementation
+// lives in src/media/stb_image_impl.cpp so multiple TUs can share it).
 #include <stb_image.h>
 
 #ifdef _WIN32
