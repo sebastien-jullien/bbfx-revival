@@ -178,6 +178,82 @@ fragment_program BBFx/MotionTrail_fp glsl
     }
 }
 
+// Bloom — single-pass threshold + gaussian blur + additive blend (v3.5.1)
+fragment_program BBFx/Bloom_fp glsl
+{
+    source bloom.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named threshold float 0.7
+        param_named intensity float 1.5
+        param_named blur_size float 3.0
+    }
+}
+
+// DOF — single-pass variable-radius blur based on focus distance (v3.5.1)
+fragment_program BBFx/DOF_fp glsl
+{
+    source dof.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named focus float 0.5
+        param_named range float 0.3
+        param_named blur_amount float 5.0
+    }
+}
+
+// BlackAndWhite — luminance desaturation (v3.5.1)
+fragment_program BBFx/BlackAndWhite_fp glsl
+{
+    source BlackAndWhite.glsl
+    default_params
+    {
+        param_named tex0 int 0
+    }
+}
+
+// Embossed — edge emboss with auto texelSize (v3.5.1)
+fragment_program BBFx/Embossed_fp glsl
+{
+    source bbfx_embossed.frag
+    default_params
+    {
+        param_named tex0 int 0
+    }
+}
+
+// OldTV — vintage TV distortion with procedural noise (v3.5.1)
+fragment_program BBFx/OldTV_fp glsl
+{
+    source bbfx_oldtv.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named distortionFreq float 2.7
+        param_named distortionScale float 2.5
+        param_named distortionRoll float 0.93
+        param_named interference float 0.5
+        param_named frameLimit float 0.40
+        param_named frameSharpness float 6.0
+    }
+}
+
+// Glass — procedural water distortion (v3.5.1)
+fragment_program BBFx/Glass_fp glsl
+{
+    source bbfx_glass.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named time float 0
+        param_named distortion float 5.0
+        param_named speed float 1.0
+    }
+}
+
 // === Materials ===
 
 material BBFx/EdgeBlend
@@ -470,6 +546,343 @@ material BBFx/MotionTrail
             vertex_program_ref StdQuad_vp_glsl {}
             fragment_program_ref BBFx/MotionTrail_fp {}
             texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Bloom
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Bloom_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear linear
+            }
+        }
+    }
+}
+
+material BBFx/DOF
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/DOF_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear linear
+            }
+        }
+    }
+}
+
+material BBFx/BlackAndWhite
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/BlackAndWhite_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Embossed
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Embossed_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/OldTV
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/OldTV_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+material BBFx/Glass
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Glass_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// === v3.5.1 Lot H — New Post-Process Effects ===
+
+// Halftone — CMYK-style dot pattern (v3.5.1)
+fragment_program BBFx/Halftone_fp glsl
+{
+    source halftone.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named dot_size float 0.01
+        param_named angle float 45.0
+    }
+}
+
+material BBFx/Halftone
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/Halftone_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// CrossHatch — pencil hatching effect (v3.5.1)
+fragment_program BBFx/CrossHatch_fp glsl
+{
+    source cross_hatch.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named line_density float 50.0
+        param_named threshold float 0.8
+    }
+}
+
+material BBFx/CrossHatch
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/CrossHatch_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// OilPaint — Kuwahara filter (v3.5.1)
+fragment_program BBFx/OilPaint_fp glsl
+{
+    source oil_paint.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named radius float 4.0
+    }
+}
+
+material BBFx/OilPaint
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/OilPaint_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// ColorLUT — parametric color grading (v3.5.1)
+fragment_program BBFx/ColorLUT_fp glsl
+{
+    source color_lut.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named lut_intensity float 1.0
+        param_named temperature float 0.0
+        param_named tint float 0.0
+        param_named contrast float 0.0
+        param_named saturation float 0.0
+    }
+}
+
+material BBFx/ColorLUT
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/ColorLUT_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// RadialBlur — radial zoom blur from center point (v3.5.1)
+fragment_program BBFx/RadialBlur_fp glsl
+{
+    source radial_blur.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named center_x float 0.5
+        param_named center_y float 0.5
+        param_named intensity float 5.0
+        param_named samples float 16.0
+    }
+}
+
+material BBFx/RadialBlur
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/RadialBlur_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// FeedbackZoom — temporal feedback with zoom/rotation (v3.5.1)
+fragment_program BBFx/FeedbackZoom_fp glsl
+{
+    source feedback_zoom.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named prevFrame int 1
+        param_named decay float 0.5
+        param_named zoom float 1.0
+        param_named rotation float 0.5
+    }
+}
+
+material BBFx/FeedbackZoom
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/FeedbackZoom_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+            texture_unit PrevFrame
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
+// MotionTrail (feedback) — real temporal trails using prevFrame (v3.5.1)
+// Replaces the filmgrain approximation
+fragment_program BBFx/MotionTrailFB_fp glsl
+{
+    source pp_motion_trail.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named prevFrame int 1
+        param_named trail_decay float 0.3
+    }
+}
+
+material BBFx/MotionTrailFB
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/MotionTrailFB_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+            texture_unit PrevFrame
             {
                 tex_address_mode clamp
                 filtering linear linear none

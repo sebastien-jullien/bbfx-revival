@@ -4,7 +4,13 @@
 #include "../core/Engine.h"
 #include <OgreMeshManager.h>
 #include <OgreEntity.h>
+#include <OgreSubEntity.h>
+#include <OgreMaterial.h>
+#include <OgreTechnique.h>
+#include <OgrePass.h>
+#include <OgreTextureUnitState.h>
 #include <OgreSceneManager.h>
+#include <OgreHardwareVertexBuffer.h>
 #include <iostream>
 #include <algorithm>
 
@@ -72,8 +78,6 @@ void PerlinFxNode::addCloneForTarget(const std::string& targetName) {
     clone.entityCreated = false;
 
     mClones[targetName] = std::move(clone);
-    std::cout << "[PerlinFxNode] Clone created for target '" << targetName
-              << "' (mesh: " << sourceMesh << ")" << std::endl;
 }
 
 void PerlinFxNode::removeClone(const std::string& targetName) {
@@ -83,10 +87,10 @@ void PerlinFxNode::removeClone(const std::string& targetName) {
     auto& clone = it->second;
     clone.shader->disable();
 
-    // Restore target visibility
+    // Restore target visibility (undo the setFxHidden(true) from resolveTargets)
     auto* sceneObj = findTargetSceneObj(targetName);
-    if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
-        sceneObj->getSceneNode()->setVisible(true);
+    if (sceneObj)
+        sceneObj->setFxHidden(false);
 
     // Remove OGRE objects
     auto* engine = Engine::instance();
@@ -105,7 +109,6 @@ void PerlinFxNode::removeClone(const std::string& targetName) {
     }
 
     mClones.erase(it);
-    std::cout << "[PerlinFxNode] Clone removed for target '" << targetName << "'" << std::endl;
 }
 
 void PerlinFxNode::setCloneVisible(const std::string& targetName, bool vis) {
@@ -131,6 +134,10 @@ void PerlinFxNode::createDeferredEntities() {
         if (!cloneMesh) continue;
         try {
             auto* entity = sceneMgr->createEntity(clone.entityName, clone.cloneMeshName);
+            // Tag clone entity with the target DAG node name so ViewportPicker
+            // can map picks on FX clones back to the original SceneObjectNode
+            entity->getUserObjectBindings().setUserAny(
+                "bbfx_target_dag", Ogre::Any(targetName));
             auto* sceneNode = sceneMgr->getRootSceneNode()->createChildSceneNode(clone.sceneNodeName);
             sceneNode->attachObject(entity);
             clone.entityCreated = true;
@@ -197,11 +204,13 @@ void PerlinFxNode::resolveTargets() {
         }
 
         // Respect the SceneObjectNode's intended visibility (ParamSpec BOOL / DAG port).
-        // The clone replaces the original, so the original SceneNode is always hidden.
+        // The clone replaces the original, so the original must stay hidden.
+        // Use setFxHidden(true) — separate from mUserVisible so isNodeVisible() still works.
         setCloneVisible(targetName, sceneObj->isNodeVisible());
-        sceneObj->getSceneNode()->setVisible(false);
 
-        // Position clone at target
+        sceneObj->setFxHidden(true);
+
+        // Position clone at target + transfer materials
         if (sceneMgr && it->second.entityCreated) {
             try {
                 if (sceneMgr->hasSceneNode(it->second.sceneNodeName)) {
@@ -209,6 +218,23 @@ void PerlinFxNode::resolveTargets() {
                     fxSn->setPosition(sceneObj->getSceneNode()->_getDerivedPosition());
                     fxSn->setScale(sceneObj->getSceneNode()->_getDerivedScale());
                     fxSn->setOrientation(sceneObj->getSceneNode()->_getDerivedOrientation());
+                }
+                // Transfer materials from original entity to clone
+                auto* origEntity = sceneObj->getEntity();
+                if (origEntity && sceneMgr->hasEntity(it->second.entityName)) {
+                    auto* cloneEntity = sceneMgr->getEntity(it->second.entityName);
+                    unsigned origSubs = origEntity->getNumSubEntities();
+                    unsigned cloneSubs = cloneEntity->getNumSubEntities();
+
+                    // Transfer materials from original to clone
+                    unsigned numSubs = std::min(origSubs, cloneSubs);
+                    for (unsigned i = 0; i < numSubs; ++i) {
+                        auto matName = origEntity->getSubEntity(i)->getMaterialName();
+                        auto cloneMatName = cloneEntity->getSubEntity(i)->getMaterialName();
+                        if (!matName.empty() && matName != cloneMatName) {
+                            cloneEntity->getSubEntity(i)->setMaterialName(matName);
+                        }
+                    }
                 }
             } catch (...) {}
         }
@@ -254,8 +280,8 @@ void PerlinFxNode::cleanup() {
     for (auto& [name, clone] : mClones) {
         clone.shader->disable();
         auto* sceneObj = findTargetSceneObj(name);
-        if (sceneObj && sceneObj->isEnabled() && sceneObj->getSceneNode())
-            sceneObj->getSceneNode()->setVisible(true);
+        if (sceneObj)
+            sceneObj->setFxHidden(false);
         // Destroy clone OGRE objects (not just hide)
         if (sceneMgr && clone.entityCreated) {
             try {

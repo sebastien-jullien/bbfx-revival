@@ -4,7 +4,7 @@ return {
     description = "Vintage film grain look",
     tags = {"film", "vintage"},
     params = ParamSpec.declare({
-        ParamSpec.compositor("compositor", "Old TV"),
+        ParamSpec.compositor("compositor", "OldTV"),
     }),
-    build = function(params) return {type="CompositorNode", params=params} end
+    build = function(params) return {type="PostProcessNode", params=params} end
 }

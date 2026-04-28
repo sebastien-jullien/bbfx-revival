@@ -68,9 +68,16 @@ void MasterViewPanel::renderOutputTiles(OutputManager* mgr) {
         if (col > 0) ImGui::SameLine();
 
         ImGui::BeginGroup();
+
+        // Dim the thumbnail when the output is hidden.
+        const bool hidden = !slot.visible;
+        if (hidden) {
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.35f);
+        }
+
         // Thumbnail — zone-cropped to show what the output actually displays
         ImTextureID texId = mgr->getTextureID(slot.id);
-        if (texId) {
+        if (texId && !hidden) {
             float uMin = 0.f, vMin = 0.f, uMax = 1.f, vMax = 1.f;
             if (auto* sm = mgr->getSurfaceMap()) {
                 if (slot.zoneId >= 0) {
@@ -85,7 +92,14 @@ void MasterViewPanel::renderOutputTiles(OutputManager* mgr) {
             }
             ImGui::Image(texId, ImVec2(tileW, tileH), {uMin, vMin}, {uMax, vMax});
         } else {
+            // Hidden or no texture: dark placeholder
+            ImVec2 cursor = ImGui::GetCursorScreenPos();
             ImGui::Dummy(ImVec2(tileW, tileH));
+            if (hidden) {
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    cursor, ImVec2(cursor.x + tileW, cursor.y + tileH),
+                    IM_COL32(30, 30, 30, 200));
+            }
         }
 
         // Overlay: Out N + resolution
@@ -94,19 +108,20 @@ void MasterViewPanel::renderOutputTiles(OutputManager* mgr) {
         snprintf(label, sizeof(label), "Out %d", slot.id);
         ImGui::GetWindowDrawList()->AddText(
             ImVec2(overlayPos.x + 4, overlayPos.y + 2),
-            IM_COL32(255, 255, 255, 220), label);
+            IM_COL32(255, 255, 255, hidden ? 100 : 220), label);
 
         char resLabel[32];
         snprintf(resLabel, sizeof(resLabel), "%ux%u", slot.width, slot.height);
         ImGui::GetWindowDrawList()->AddText(
             ImVec2(overlayPos.x + 4, overlayPos.y + 16),
-            IM_COL32(200, 200, 200, 200), resLabel);
+            IM_COL32(200, 200, 200, hidden ? 80 : 200), resLabel);
 
         // Warp/Blend/Grid badges
         float badgeX = overlayPos.x + tileW - 44;
         float badgeY = overlayPos.y + 2;
         auto drawBadge = [&](const char* ch, bool enabled) {
-            ImU32 color = enabled ? IM_COL32(0, 220, 0, 220) : IM_COL32(120, 120, 120, 150);
+            ImU32 color = enabled ? IM_COL32(0, 220, 0, hidden ? 80 : 220)
+                                  : IM_COL32(120, 120, 120, hidden ? 60 : 150);
             ImGui::GetWindowDrawList()->AddText(ImVec2(badgeX, badgeY), color, ch);
             badgeX += 14;
         };
@@ -114,10 +129,26 @@ void MasterViewPanel::renderOutputTiles(OutputManager* mgr) {
         drawBadge("B", slot.blendEnabled);
         drawBadge("G", slot.gridWarpEnabled);
 
-        // Tooltip on hover
-        if (ImGui::IsItemHovered()) {
+        if (hidden) {
+            ImGui::PopStyleVar(); // Alpha
+        }
+
+        // Visibility toggle button
+        ImGui::PushID(slot.id);
+        const char* toggleLabel = slot.visible ? "Hide" : "Show";
+        if (ImGui::SmallButton(toggleLabel)) {
+            mgr->setOutputVisible(slot.id, !slot.visible);
+        }
+        ImGui::PopID();
+
+        // Tooltip on hover (over the thumbnail image/dummy)
+        // Check the image rect, not the button
+        ImVec2 rectMin = overlayPos;
+        ImVec2 rectMax = ImVec2(overlayPos.x + tileW, overlayPos.y + tileH);
+        if (ImGui::IsMouseHoveringRect(rectMin, rectMax)) {
             ImGui::BeginTooltip();
             ImGui::Text("Output %d — %ux%u", slot.id, slot.width, slot.height);
+            ImGui::Text("Visible: %s", slot.visible ? "Yes" : "No");
             ImGui::Text("Warp: %s", slot.warpEnabled ? "ON" : "OFF");
             if (slot.warpEnabled) {
                 const auto& c = slot.warpProfile.corners;

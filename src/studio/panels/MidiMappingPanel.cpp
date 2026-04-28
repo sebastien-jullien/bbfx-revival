@@ -110,7 +110,20 @@ void MidiMappingPanel::render() {
 
     ImGui::Separator();
     if (ImGui::Button("Clear All Bindings")) {
-        bindings.clear();
+        ImGui::OpenPopup("ConfirmClearMidi");
+    }
+    if (ImGui::BeginPopupModal("ConfirmClearMidi", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Clear all MIDI bindings? This cannot be undone.");
+        ImGui::Spacing();
+        if (ImGui::Button("Yes", {80, 0})) {
+            bindings.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("No", {80, 0})) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     ImGui::End();

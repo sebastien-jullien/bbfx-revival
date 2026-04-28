@@ -50,6 +50,7 @@ void SettingsManager::load(const std::string& path) {
         }
         if (j.contains("pluginsLastScanAt")) mSettings.pluginsLastScanAt = j["pluginsLastScanAt"];
         if (j.contains("communityCacheTTL")) mSettings.communityCacheTTL = j["communityCacheTTL"];
+        if (j.contains("defaultLightingMode")) mSettings.defaultLightingMode = j["defaultLightingMode"];
         // v3.5 Lot V — GitHub publishing token (scrambled). `githubToken`
         // here is already post-XOR ; callers should go through
         // GitHubPublisher::decodeStoredToken to get the raw OAuth token.
@@ -73,6 +74,7 @@ void SettingsManager::save() const {
         j["enabledPlugins"] = mSettings.enabledPlugins;
         j["pluginsLastScanAt"] = mSettings.pluginsLastScanAt;
         j["communityCacheTTL"] = mSettings.communityCacheTTL;
+        j["defaultLightingMode"] = mSettings.defaultLightingMode;
         j["githubToken"]       = mSettings.githubToken;
         j["githubLogin"]       = mSettings.githubLogin;
         std::ofstream f(p);

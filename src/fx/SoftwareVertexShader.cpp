@@ -1,5 +1,6 @@
 #include "SoftwareVertexShader.h"
 #include <cstring>
+#include <cmath>
 #include <iostream>
 
 #include <SDL3/SDL.h>
@@ -125,6 +126,62 @@ void SoftwareVertexShader::_extractPositions(VertexData*, CpuMeshData&) {}
 void SoftwareVertexShader::_extractCpuData(VertexData*, IndexData*, CpuMeshData&) {}
 void SoftwareVertexShader::_fillCloneFromCpu(VertexData*, VertexData*, const CpuMeshData&) {}
 
+// Generate spherical UVs for clone meshes that lack VES_TEXTURE_COORDINATES.
+// Without UVs, RTSS-generated shaders sample texture at (0,0) → black.
+static void addTexCoordsIfMissing(VertexData* vd) {
+    if (!vd) return;
+    if (vd->vertexDeclaration->findElementBySemantic(VES_TEXTURE_COORDINATES)) return;
+
+    auto* posElem = vd->vertexDeclaration->findElementBySemantic(VES_POSITION);
+    if (!posElem) return;
+
+    unsigned short posSrc = posElem->getSource();
+    auto oldBuf = vd->vertexBufferBinding->getBuffer(posSrc);
+    size_t oldVertSize = oldBuf->getVertexSize();
+    size_t numVerts = oldBuf->getNumVertices();
+    size_t newVertSize = oldVertSize + sizeof(float) * 2;
+
+    auto newBuf = HardwareBufferManager::getSingleton().createVertexBuffer(
+        newVertSize, numVerts, HBU_CPU_TO_GPU, true);
+
+    const uint8_t* oldData = static_cast<const uint8_t*>(
+        oldBuf->lock(HardwareBuffer::HBL_READ_ONLY));
+    uint8_t* newData = static_cast<uint8_t*>(
+        newBuf->lock(HardwareBuffer::HBL_DISCARD));
+
+    size_t posOffset = posElem->getOffset();
+    constexpr float PI = 3.14159265358979323846f;
+
+    for (size_t v = 0; v < numVerts; v++) {
+        // Copy original vertex data (POS + NORMAL + whatever else)
+        std::memcpy(newData + v * newVertSize, oldData + v * oldVertSize, oldVertSize);
+
+        // Read position, normalize, compute spherical UV
+        const float* pos = reinterpret_cast<const float*>(
+            oldData + v * oldVertSize + posOffset);
+        float x = pos[0], y = pos[1], z = pos[2];
+        float len = std::sqrt(x * x + y * y + z * z);
+        if (len > 1e-6f) { x /= len; y /= len; z /= len; }
+
+        float u = 0.5f + std::atan2(z, x) / (2.0f * PI);
+        float vc = 0.5f - std::asin(std::max(-1.0f, std::min(1.0f, y))) / PI;
+
+        float* uv = reinterpret_cast<float*>(newData + v * newVertSize + oldVertSize);
+        uv[0] = u;
+        uv[1] = vc;
+    }
+
+    oldBuf->unlock();
+    newBuf->unlock();
+
+    vd->vertexBufferBinding->setBinding(posSrc, newBuf);
+    vd->vertexDeclaration->addElement(
+        posSrc, oldVertSize, VET_FLOAT2, VES_TEXTURE_COORDINATES, 0);
+
+    std::cout << "[SoftwareVS] Added spherical UVs: vertexSize " << oldVertSize
+              << " -> " << newVertSize << " (" << numVerts << " verts)" << std::endl;
+}
+
 void SoftwareVertexShader::_prepareClonedMesh() {
     // Step 1: Read ALL vertex/index data from original mesh into CPU arrays
     // This happens once at load time. Shadow buffers ensure no GPU stall.
@@ -218,7 +275,7 @@ void SoftwareVertexShader::_prepareClonedMesh() {
                 auto it = snaps.find(src);
                 if (it != snaps.end()) {
                     auto buf = HardwareBufferManager::getSingleton().createVertexBuffer(
-                        it->second.vertexSize, it->second.numVertices, HBU_CPU_TO_GPU, false);
+                        it->second.vertexSize, it->second.numVertices, HBU_CPU_TO_GPU, true);
                     // Write snapshot data into the new CPU buffer
                     void* dst = buf->lock(HardwareBuffer::HBL_DISCARD);
                     std::memcpy(dst, it->second.data.data(), it->second.data.size());
@@ -234,6 +291,12 @@ void SoftwareVertexShader::_prepareClonedMesh() {
     };
 
     clonedMesh->sharedVertexData = createCloneVD(originalMesh->sharedVertexData, sharedSnaps);
+    addTexCoordsIfMissing(clonedMesh->sharedVertexData);
+
+    std::cout << "[SoftwareVS] _prepareClonedMesh: orig='" << originalMesh->getName()
+              << "' clone='" << mMeshName << "'"
+              << " numSubs=" << originalMesh->getNumSubMeshes()
+              << " hasSharedVD=" << (originalMesh->sharedVertexData != nullptr) << std::endl;
 
     for (unsigned sm = 0; sm < originalMesh->getNumSubMeshes(); sm++) {
         auto* sub0 = originalMesh->getSubMesh(sm);
@@ -242,11 +305,36 @@ void SoftwareVertexShader::_prepareClonedMesh() {
         sub->useSharedVertices = sub0->useSharedVertices;
         if (!sub0->useSharedVertices) {
             sub->vertexData = createCloneVD(sub0->vertexData, subSnaps[sm]);
+            addTexCoordsIfMissing(sub->vertexData);
         }
         sub->indexData->indexBuffer = sub0->indexData->indexBuffer;
         sub->indexData->indexStart = sub0->indexData->indexStart;
         sub->indexData->indexCount = sub0->indexData->indexCount;
+
+        std::cout << "[SoftwareVS]   sub[" << sm << "] useShared=" << sub0->useSharedVertices
+                  << " mat='" << sub0->getMaterialName() << "'"
+                  << " idxCount=" << sub0->indexData->indexCount;
+        // Log vertex data details
+        VertexData* srcVd = sub0->useSharedVertices ? originalMesh->sharedVertexData : sub0->vertexData;
+        if (srcVd) {
+            auto posElem = srcVd->vertexDeclaration->findElementBySemantic(VES_POSITION);
+            if (posElem) {
+                auto buf = srcVd->vertexBufferBinding->getBuffer(posElem->getSource());
+                std::cout << " bufVertSize=" << buf->getVertexSize()
+                          << " bufNumVerts=" << buf->getNumVertices()
+                          << " shadow=" << buf->hasShadowBuffer();
+            }
+        }
+        std::cout << std::endl;
+        // Log CPU data
+        std::cout << "[SoftwareVS]   cpuData[" << sm << "] verts=" << mSubMeshCpuData[sm].vertexCount
+                  << " posSize=" << mSubMeshCpuData[sm].positions.size()
+                  << " idxSize=" << mSubMeshCpuData[sm].indices.size() << std::endl;
     }
+
+    // Finalize the manual mesh — required for GL3Plus to properly set up
+    // internal buffer bindings, vertex declaration compilation, and resource state.
+    clonedMesh->load();
 }
 
 void SoftwareVertexShader::_loadMesh(const String& meshName) {

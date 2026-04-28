@@ -15,6 +15,10 @@ public:
     static std::vector<std::string> listParticleTemplates();
     static std::vector<std::string> listCompositors();
     static std::vector<std::string> listShaders();
+    static std::vector<std::string> listPresets();
+    static std::vector<std::string> listTemplates();
+    /// Alias for listCompositors() — semantic name for post-process effects.
+    static std::vector<std::string> listPostProcessEffects();
 
     /// Invalidate all caches (call after resource reload)
     static void invalidateCache();
@@ -27,6 +31,8 @@ private:
     static std::vector<std::string> sParticles;
     static std::vector<std::string> sCompositors;
     static std::vector<std::string> sShaders;
+    static std::vector<std::string> sPresets;
+    static std::vector<std::string> sTemplates;
 };
 
 } // namespace bbfx

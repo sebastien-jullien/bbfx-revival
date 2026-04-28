@@ -37,7 +37,7 @@
 24. [BBFx Studio Content (v3.2)](#24-bbfx-studio-content-v32)
 25. [BBFx Studio Interactive Viewport (v3.2.1)](#25-bbfx-studio-interactive-viewport-v321)
 
-**Sections compactes (v3.2.2 → v3.5)**
+**Sections compactes (v3.2.2 → v3.5.1)**
 - [v3.2.2 — Multi-Object Scene](#v322--multi-object-scene)
 - [v3.2.3 — Timeline Automation](#v323--timeline-automation)
 - [v3.2.4 — Asset Pipeline & Visual Application](#v324--asset-pipeline--visual-application)
@@ -45,6 +45,7 @@
 - [v3.3 — Connect](#v33--connect)
 - [v3.4 — Stage](#v34--stage)
 - [v3.5 — Community](#v35--community)
+- [v3.5.1 — Asset Library & Polish](#v351--asset-library--polish)
 
 ---
 
@@ -2021,4 +2022,164 @@ Schema URL `bbfx://` (Windows HKCU registry) : `bbfx://install/<pluginId>`, `bbf
 **Lot W — Plugins Exemples + Tests + Docs + Polish (11 iter, I-1529→I-1539) :** 3 plugins exemples (plasma-wave, sdf-raymarch, lsystem-tree), 40+ assertions dbg.test, 20+ tests imgui_test_engine, docs exhaustifs (plugin-api.md 27 namespaces, sandbox-security.md, gamepad-mapping-guide.md), Splash/About/status bar/help mis a jour, benchmark 5 plugins, audit final. Total cumule : 673 tests PASS, 0 FAIL.
 
 **Hotfix post-implementation (FIX-001, 2026-04-18) :** Segfault au lancement — GamepadPanel::ctor appelait ImGui::GetTime() avant que le contexte ImGui soit cree (le constructeur est appele dans StudioApp::ctor, avant la boucle SDL). Fix : suppression de l'appel, le champ mLastUpdateSec est deja initialise a 0.0 dans le header.
+
+### v3.5.1 — Asset Library & Polish
+**195 iterations (I-1540 → I-1735, I-1723 skip), 15 lots (A-O) + 37 hotfixes, 6 phases, 15 epics (EPIC-185 → EPIC-199), ~232 tests PASS / 0 FAIL**
+
+v3.5.1 transforme le Studio d'une infrastructure parfaite a une bibliotheque d'assets de niveau professionnel : pre-enregistrement meshes proceduraux, PostProcessStack independant d'OGRE Compositor, 6 modes camera, particules colorees parametrables, tunnel signature 2006, Asset Browser dedie, EffectRackPanel autonome, audit UI exhaustif des 27 panels, nettoyage presets (101 → 93).
+
+#### Architecture v3.5.1
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  COUCHE STUDIO v3.5.1 (ImGui v1.92.7 + OGRE 14)                            │
+│  AssetBrowserPanel · EffectRackPanel · MasterViewPanel · 27 panels audites │
+│  + ColorShiftNode pattern FX standard (port entity)                         │
+│  + Inspector ports liaison masques + mEntityVersion counter                 │
+│  + Docking layout persistant (SaveIniSettingsToDisk)                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE FX v3.5.1                                                           │
+│  PostProcessStack (ping-pong RTT + prevFrame RTT)                           │
+│  Rectangle2D + _render() direct (bypass CompositorManager)                  │
+│  PostProcessEffect catalogue 29 effets · PostProcessNode DAG (violet)       │
+│  ShaderFxNode vec2/3/4 + BPM fallback audio uniforms                        │
+│  SoftwareVertexShader::addTexCoordsIfMissing() UVs spheriques               │
+│  PerlinFxNode HBL_NORMAL preserves UVs + bbfx_target_dag tag                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE NODES v3.5.1                                                        │
+│  CameraNode 6 modes dispatch (orbit/fly_through/shake/dolly_zoom/track/crane)│
+│  ParticleNode 8 ports DAG defaults -1 + multiplier mode + color override   │
+│  TextureNode lighting modes (unlit/lit/emissive) + apply seq priority      │
+│  SceneObjectNode mFxHidden + mEntityVersion + mCurrentMaterial              │
+│  ColorShiftNode dynamic resolveTarget via getSourceNodes                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COUCHE CORE v3.5.1                                                         │
+│  MeshGenerator::registerDefaults() 12 meshes proceduraux au startup        │
+│  ViewportCameraController OrbitState (extraJson["camera"])                  │
+│  OutputManager visible flag (skip render/blit/swap)                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Lots detailles
+
+**Lot A — Meshes proceduraux + materiaux casses (8 iter, I-1540 → I-1547, EPIC-185)**
+`MeshGenerator::registerDefaults()` : 7 meshes canoniques au startup via helper `createNamedMesh` (resourceExists check). `generateCube()` ajoute. `ShaderPreviewRenderer` simplifie : sphere=geosphere4500, plane=bbfx_plane. Extraction textures dragon depuis `prog/bbfx.media/packs/dragon.zip` (renommage minuscule→majuscule pour matcher Example.material). Material `Examples/Robot` (r2skin.jpg, nom extrait du binaire). Suppression `Examples/StormySkyBox/MorningSkyBox/EveningSkyBox` cassees. Extraction cubemaps (skybox.zip stevecube_*, cubemap.zip, cubemapsJS.zip) → `resources/materials/textures/skybox/`. Nouveau `skybox.material` avec 5 BBFx skybox materials (Stormy/Morning/Evening/EarlyMorning/CloudyNoon, format `cubic_texture <prefix>_FR.jpg ... separateUV`). `resources/LICENSES.md` cree. Fix exportSubgraph ID invalide ('dbg.lot_s.sub' → 'dbg-lots.subgraph'). 8 nouvelles assertions (87 PASS).
+
+**Lot B — PostProcessStack architecture (14 iter, I-1548 → I-1561, EPIC-186)**
+Nouveau `src/fx/PostProcessEffect.h/.cpp` (data class : name, materialName, params, enabled, order, parseUniforms). Nouveau `src/fx/PostProcessStack.h/.cpp` : pipeline ping-pong (`_PostProcess_Ping`, `_PostProcess_Pong`) format PF_R8G8B8A8. **`apply()` utilise Rectangle2D + `_setRenderTarget` + `_setViewport` + `_setPass` + `_render()` direct — bypass complet de CompositorManager** (corruption FBO ImGui evitee). `getOutput()` null si 0 effets (ViewportPanel utilise RT source). API complete : addEffect/removeEffect/reorder/setEnabled. Nouveau `src/studio/nodes/PostProcessNode.h/.cpp` (DAG, ParamSpec compositor/enabled/order, categorie violet). CompositorNode preserve placeholder. Integration `ViewportPanel::updateOgreRender()` + 7 commandes dbg (postprocess_list/add/remove/order/param/enable/clear). 0 effets = pixel-identical, RTTs detruites proprement via `destroyRTTs()` + `texMgr.remove()`, resize uniquement si dimensions changent. 10 assertions (97 PASS).
+
+**Lot C — PostProcess shaders migration (8 iter, I-1562 → I-1569, EPIC-187)**
+16 effets BBFx existants migres tels quels (Vignette, FilmGrain, Invert, Posterize, EdgeDetect, Pixelate, Barrel, Kaleidoscope, ChromaticAberration, VHS, HeatDistort, ASCII, MotionTrail, EdgeBlend, QuadWarp, GridWarp). **Bloom single-pass** (`bloom.frag` : threshold + 9-tap gaussian cross + additive blend, parametres threshold/intensity/blur_size, choix architectural simplicite + perf VJ). **DOF single-pass** (`dof.frag` : variable-radius blur, focus line UV). OGRE effects standalone : `bbfx_glass.frag` (procedural wave), `bbfx_oldtv.frag` (procedural noise hash), `bbfx_embossed.frag` (textureSize() auto), reutilisation `BlackAndWhite.glsl`. `PostProcessCatalogueEntry` + `getAvailableEffects()` (22 entries). 4 presets PostProcess migres (bloom_dream, bw_high_contrast, depth_of_field, old_film → type=PostProcessNode + compositor=Bloom/BlackAndWhite/DOF/OldTV). 3 assertions catalogue (100 PASS).
+
+**Lot D — CameraNode modes complets (10 iter, I-1570 → I-1579, EPIC-188)**
+Refactoring dispatch via `mMode` → 6 methodes privees. Enum etendu : orbit/fly_through/shake/dolly_zoom/track/crane. `updateOrbit()` conserve. `updateFlyThrough()` : axe configurable (0=X/1=Y/2=Z), ping-pong ±100u, camera orientee dans direction. `updateShake()` : noise hash-based 3 composantes + offsets temporels, additif sur orbit, decay exp. `updateDollyZoom()` : oscillation distance + compensation FOV `2*atan(targetDist*tan(baseFov/2)/dist)` clamp [5,150] (Vertigo Hitchcock). `updateTrack()` : suivi premier Entity scene via MovableObjectIterator, lerp `t = 1-pow(damping, dt*60)`, offset (0,8,20). `updateCrane()` : sinusoide vertical + rotation horizontale radius=25. **Transitions** : `transitionTo(pos, lookAt, fov, duration)` smoothstep + Slerp + lerp FOV, mode courant suspendu pendant transition. Ports DAG : target.x/y/z, shake_intensity, transition_time, fly_speed, fly_axis, damping, crane_amplitude, crane_speed, dolly_speed, target_distance. `dbg.camera_mode(mode)` + `dbg.camera_transition()`. 5 presets corriges. 7 assertions (107 PASS).
+
+**Lot E — ParticleNode dynamique + 10 templates (10 iter, I-1580 → I-1589, EPIC-189) + Hotfix I-1674/1675/1676/1690**
+Ports DAG : color.r/g/b/a, particle_size, velocity, lifetime — **defaults -1.0** (Hotfix I-1675) pour preserver template, mode multiplicateur via `mOrigWidth/Height/VelMin/Max` stockes apres creation. **Color override conditionnel (Hotfix I-1690)** : suppression dynamique des affectors couleur (ColourImage/ColourFader/ColourFader2/ColourInterpolator) qui ecrasaient chaque frame, clonage materiau avec `setVertexColourTracking(TVC_DIFFUSE)` + invalidation RTSS, restauration au desactivement, OR au lieu de AND (un seul canal >= 0 active l'override). **10 templates BBFx** dans `bbfx_extended.particle` (recalibres en I-1674 pour camera Studio 50u, tailles x3-5) : Fire (point, gravity, w/h 25x25, ttl 2.0), ElectricArc (oriented_self, vel 300-500, w/h 8x50), Confetti (box 50x1x50, multicolore, Rotator, w/h 12x12), MagicDust (box 40x40x40, pastel, alpha decay, w/h 10x10), NeonTrail (additive, bright green, w/h 8x50), Bubbles (Y+ scaler, w/h 15x15), LaserBeam (oriented_common Z-, w/h 4x80), Galaxy (Rotator multicolore, w/h 12x12, quota 1500), MatrixRain (Y- vert, w/h 10x10, quota 2000), **`BBFx/ParticleTunnel`** (signature 2006 : Ring r=30, vel 80-120 Z-, ports ring_radius/ring_speed/ring_density, quota 3000). 3 materials sprites BBFx (ParticleGlow/ParticleSolid/ParticleTrail). 10 presets Lua + ParticleTunnel pilotable au gamepad. **Aureola_tweak fix (I-1676)** : position emitter (0,-30,0), force_vector (0,50,20). Test visuel `lua/tests/test_visual_assets.lua` (39 assets, screenshots auto). 6 assertions (115 PASS).
+
+**Lot F — Presets correction et deduplication (8 iter, I-1590 → I-1597, EPIC-190)**
+mirror_kaleidoscope → alias mandelbrot_explorer (rewrite Lot O en vrai Kaleidoscope). glitch_fx (truchet → glitch_block.frag), motion_trail (reaction_diffusion → motion_trail.frag). Geometry 6→3 (perlin_organic Geosphere8000 smooth, perlin_glitch Geosphere4500 ChromaticAberration, perlin_explosion BeatTrigger flash) + 6 alias retro-compat. Color 4→2+2 (hue_cycle/desaturate CPU + color_lut_cinematic/split_tone_warm GPU) + 4 alias. particle_symphony (4 ParticleNodes liees AudioAnalyzer band_0/2/4/6). material_cycle (ColorShiftNode saturation boost). starwars_tribute (3 systemes Galaxy/SparkBurst/StarField + camera orbit). 6 assertions (121 PASS).
+
+**Lot G — Vertex shaders + fragment generateurs (12 iter, I-1598 → I-1609, EPIC-191)**
+5 vertex shaders : `explode.vert` (pos += normal*intensity*noise hash-based), `inflate.vert` (uniforme), `spiral.vert` (twist Y), `audio_pulse.vert` (bass/mid/high), `flatten.vert` (mix Y → 0). 8 fragment generators : `glitch_block.frag` (block displacement + RGB offset + scanlines + noise), `julia.frag` (zoom/cx/cy/max_iter/color_speed), `fire.frag` (FBM + palette feu), `fbm_warp.frag` (domain warping), `cellular_automata.frag` (Game of Life approx), `hexagonal.frag` (pavage), `moire.frag` (interference), `waveform.frag` (audio). Activation 4 orphelins via presets (wave_gpu_morph, perlin_gpu_deform, datamosh, pixel_sort). 12 presets (5 vertex + 7 fragment). 5 assertions (126 PASS).
+
+**Lot H — Fragment post-process + ShaderFxNode vec + feedback RTT (10 iter, I-1610 → I-1619, EPIC-192)**
+7 fragments post-process : `halftone.frag` (CMYK dot + smoothstep AA), `cross_hatch.frag` (4 couches /\HV par luminosite), `oil_paint.frag` (Kuwahara 4 quadrants variance min, uniform radius), `color_lut.frag` (temperature/tint/contrast/saturation), `radial_blur.frag` (multi-sample gaussien), `feedback_zoom.frag` (accumulation prevFrame + zoom/rotation), `pp_motion_trail.frag` (decay simple). **3e RTT `_PostProcess_PrevFrame`** : blit output→prevFrame apres chaque frame, auto-detection via `_findNamedConstantDefinition("prevFrame")` dans `addEffect()`, materials feedback avec 2 TUS. **ShaderFxNode vec support** : regex `uniform (vec[234]) (\w+)` → ports `name.x/y/z/w`, vecAccum collecte → `setNamedConstant(Vector2/3/4)` Ogre::Vector2/3/4. Compatible legacy `uniform float`. **Catalogue 22 → 29 effets**. 7 presets (halftone_comic, oil_painting, color_grade_cinematic, feedback_tunnel, glitch_corruption, sketch_mode, radial_zoom). 8 assertions (134 PASS).
+
+**Lot I — Templates fonctionnels (12 iter, I-1620 → I-1631, EPIC-193)**
+13 templates convertis (empty conserve) : bonneballe_basic (geosphere+perlin+colorshift+camera+light), ambient (BPM 70 Geosphere8000), hiphop (90 Torus), house (124 Bloom), techno (135 multi-meshes), dubstep (140 VHS), dnb (172 ChromaticAberration+Particle), beat_machine (128, 6 nodes), particle_show (140, 4 ParticleNodes + camera + light), shader_lab (120 bbfx_plane+ShaderFx+camera), audio_reactive (0, 6 nodes), full_performance (128, ≥ 8 nodes set VJ complet), video_mix (120, 5 nodes placeholders). **Helper utilise** : `dbg.create_with_param()` pour injection mesh_file lors creation differee (set_param synchrone echouait). Header comments (Template/Description/BPM/Nodes). **Fixes shaders trouves pendant Lot I** : retrait `uniform float time` inutilise dans halftone/feedback_zoom/pp_motion_trail (GLSL optimise away → erreur OGRE) + `param_named time float 0` dans bbfx_compositors.material. testTemplate() utilise delta count + `_dbg_flush_deletes()` pour cleanup gPendingDeletes. 14 assertions (148 PASS).
+
+**Lot J — Presets enrichis (10 iter, I-1632 → I-1641, EPIC-194)**
+Format `CompositionNode` (Format B) : `build()` retourne `{type="CompositionNode", nodes={...}, links={...}}`, le Debugger cree les nodes avec prefixe + applique params + links via CompoundCommand. Fix syntaxe `ParamSpec.float("amplitude", 0.3, {min=0, max=2})` au lieu de positional. **8 compositions** : bonneballe_classic (flagship ≥ 5 nodes), tunnel_party (ParticleTunnel + LFO + beat flash + FogNode), fractal_explorer (mandelbrot.frag + zoom auto + audio→color), neon_geometry (3 meshes torus+knot+star3d + spiral.vert + BBFx/Neon + trails), fluid_dreams (Geosphere8000 + fbm_warp + slow orbit + MagicDust + FogNode), glitch_art (glitch_block + pixel_sort + chromatic), retro_arcade (ASCII + pixelate + posterize), frequency_landscape (plane_1m + audio_pulse.vert + orbit haute + FogNode). **6 audio-reactifs** (initial — 5 supprimes/renommes en Lot O) : bass_pulse_sphere, spectrum_bars, beat_flash, audio_color_cycle, waveform_ring, audio_landscape. 18 assertions (166 PASS).
+
+**Lot K — Meshes/Textures/Materials/Skyboxes (8 iter, I-1642 → I-1649, EPIC-195)**
+**5 meshes proceduraux** via MeshGenerator : `generateMobius(name, segments, width)` (Mobius parametrique avec normales + UVs), `generateLissajous(name, a, b, c, segments)` (courbe 3D extrudee tube), `generateHelix(name, turns, radius, tubeRadius, segments)` (double helice ADN), `generateDiamond(name, topFacets, bottomFacets)` (diamant facette), `generateStar3D(name, points, innerRadius, outerRadius, depth)` (etoile extrudee). Tous dans `registerDefaults()`. **8 materials VJ** dans `bbfx_materials.material` : Chrome (env_map spherical Chrome.jpg), Neon (emissive 10,10,10), **GlassVJ** (renomme depuis Glass pour eviter conflit avec compositor Glass post-process), Wireframe, Hologram (scene_blend add scanlines, **`self_illumination` retire** car non supporte par OGRE 14), Emissive, Gradient (vertex_colour_binding), Reflective (cubic_reflection). 5 presets meshes dormants (athene_sculpture supprime en Lot O, knot_dance, fish_swim, barrel_roll, cube_transform). Nettoyage textures orphelines dans `resources/archive/unused_textures/`. 18 assertions (184 PASS).
+
+**Lot L — Asset Browser Panel (12 iter, I-1650 → I-1661, EPIC-196) + Hotfix I-1670→1684**
+`src/studio/panels/AssetBrowserPanel.h/.cpp` (~450 lignes) : 9 categories sidebar avec compteurs (Meshes/Textures/Materials/Shaders/Particles/Effects/Cameras/Presets/Templates), grille 64x64 + vue liste toggle, recherche instantanee (substring case-insensitive < 16ms), tags multi-select AND, info tooltip (vertices/triangles meshes, uniforms shaders, nodes presets), favoris persistes, **drag&drop avec 8 payloads typés** (MESH_NAME/TEXTURE_NAME/SHADER_NAME/PARTICLE_NAME/MATERIAL_NAME/PRESET_NAME/COMPOSITOR_NAME/TEMPLATE_NAME), virtualisation ImGui (ClipperHelper). **ResourceEnumerator etendu** : listMeshes (+ proceduraux via MeshManager iterator), listTextures, listMaterials, listShaders, listParticleTemplates, listPostProcessEffects, listPresets (scan lua/presets/), listTemplates (scan lua/templates/). Menu View > Asset Browser + Ctrl+Shift+A. Asset Browser dans default layout (tabbed avec Timeline). 6 assertions (190 PASS).
+
+**Hotfix Asset Browser (I-1670→I-1672)** : audit complet flux drag&drop + corrections (payloads alignes, double-clic implemente, types Texture/Material/Shader, particle template fix, MESH_NAME → NodeEditor, TEMPLATE_NAME via dofile, NavigateButtonIndex 1→2 pour eviter pan canvas NE par clic droit Viewport, IsWindowHovered pour Quick Add menu).
+
+**Hotfix cause racine I-1673** : Animator graph-driven n'appelle update() que via propagation BFS. Noeud isole (drag&drop) → ParamSpec modifie mais update() jamais appele. Fix : `node->update()` explicite apres injection de param post-create dans 4 chemins (Debugger _dbg_process_pending, viewport setCreateNodeCallback LambdaCommand, NE callback, double-clic callback).
+
+**Hotfix Perlin clones (I-1677→I-1686)** : **mFxHidden flag** sur SceneObjectNode (separe de mUserVisible, evite re-ecrasement chaque frame), `bbfx_target_dag` tag via UserObjectBindings (fast-path findDAGNodeForEntity), HBL_DISCARD→HBL_NORMAL preserve UVs/tangents, **`addTexCoordsIfMissing()` dans SoftwareVertexShader.cpp** (UVs spheriques `u = 0.5 + atan2(z,x)/(2π)`, `v = 0.5 - asin(y)/π` pour meshes sans VES_TEXTURE_COORDINATES — fix rendu noir clone Perlin avec texture sur geosphere), **mCurrentMaterial** tracking (sans ecraser materials embarques per-submesh).
+
+**Lot M — Tests, non-regression, polish final (8 iter, I-1662 → I-1669, EPIC-197)**
+Non-regression v3.5 (673 tests preserves), test chargement projets v3.5 (CompositorNode preserve), test plugins (plasma-wave, sdf-raymarch, lsystem-tree). Tests exhaustifs presets/templates/camera modes/particules/Asset Browser. Polish : tooltips Inspector, descriptions, tags, USAGE.md, splash version "v3.5.1", `active_version.md`. ResourceEnumerator::listMeshes etendu. **Resultats** : 32 meshes, 58 shaders, 23 effets PP (29 apres correction), 101 presets, 0 FAIL sur 190 tests.
+
+**Hotfix Phase 6 — TextureNode + ParticleNode + EffectRack (I-1687→I-1706)**
+**TextureNode lighting modes (I-1687/1688/1689)** : ambient 0.3 → 1.0 (alignement BaseWhite), ParamDef ENUM `lighting_mode` {unlit, lit, emissive}, material name inclut le mode pour forcer recreation, **setting global `defaultLightingMode`** dans SettingsManager (combo "Default texture lighting" dans Settings dialog), lecture defaut global dans constructeur + surcharge locale via Inspector.
+
+**ParticleNode color override cause racine (I-1690)** : suppression dynamique des affectors couleur (ColourImage/ColourFader/ColourFader2/ColourInterpolator) qui ecrasent chaque frame pendant `_update()`, forcage `Particle::mColour` sur particules vivantes apres `_update()`, clonage materiau avec `setVertexColourTracking(TVC_DIFFUSE)` + invalidation RTSS pour regenerer un shader qui lit les vertex colours du BillboardSet. Activation des qu'UN canal >= 0 (OR au lieu d'AND), clamp [0,1]. Restauration materiau original au desactivement. Test automatise particules ROUGES via screenshot.
+
+**Settings combo persistant (I-1691)** : `static Settings sSettingsEdit` + flag `sSettingsLoaded` (au lieu de copie locale recreee chaque frame qui perdait la valeur du combo).
+
+**TextureNode multi-textures (I-1692/1693/1694)** : `resolveTargets()` n'applique que sur targets nouvellement connectes, disable/re-enable correct (mCurrentTargets.clear, autre TextureNode prend la main au disable), priorite par compteur statique `sApplySeqCounter` + map `mApplySeq` par target — TextureNode connecte plus tard reprend la main au re-enable.
+
+**Persistance camera viewport (I-1695)** : struct `OrbitState` + accesseurs dans ViewportCameraController, serialisation `extraJson["camera"]` (yaw, pitch, distance, centerX/Y/Z) dans saveProject/loadProject/tickAutoSave, retro-compatible.
+
+**TextureNode reload sync (I-1696)** : `mLightingMode = lightMode` dans applyToEntity() pour eviter re-apply spurieux au premier update().
+
+**Nettoyage logs PerlinFxNode (I-1697)** : suppression blocs [PerlinFx MAT/DIAG/XFER] (~170 lignes), conservation cerr d'erreur creation entite.
+
+**MasterView toggle outputs (I-1698)** : champ `bool visible = true` dans OutputSlot (retro-compat), API setOutputVisible/isOutputVisible (Win32 ShowWindow / Unix SDL_ShowWindow), skip complet rendu/blit/swap/texture sharing pour !visible, lazy creation (fenetre creee puis cachee immediatement), serialisation visible avec fallback true. MasterViewPanel : bouton Show/Hide par output, thumbnail dimmed (alpha 0.35), fond noir 30/30/30.
+
+**PresetBrowser cleanup (I-1699)** : suppression section Assets (redondante avec AssetBrowserPanel) + Quick Access bar (UX inutilisable) — ~370 lignes. Effect Rack reste en place initialement (corrige en I-1701).
+
+**EffectRackPanel autonome (I-1700→I-1706)** : **extraction depuis PresetBrowserPanel** vers `src/studio/panels/EffectRackPanel.h/.cpp` (~420 lignes), pattern singleton dans render. **Fix bypass undoable** via `SetEnabledCommand` (au lieu de `port->setValue(0.0f)` casse — re-ecrase par `propagateFreshValues`), source de verite = `node->isEnabled()`. **Feedback LED-style** : cercle vert (actif) / rouge (bypass) avant chaque checkbox + texte grise quand desactive. **MIDI Learn par ligne** : bouton M, badge `[CC42]` ou `[N60]`, MidiLearnManager target type "rack_toggle", application par frame via `MidiDeviceManager::getLastCCValue()` (state cache, pas de drain queue), CC > 0.5 = enable / NoteDown = enable. **Gamepad Learn** : bouton G, badge `[buttonA]`, delegation `GamepadPanel::setLearnCallback()`, detection front montant. **Keyboard Learn** : bouton K, badge `[F]`, `handleKeyEvent()` appele AVANT shortcuts globaux dans dispatch SDL, capture uniquement si `mKeyLearnNodeName` non vide (zero impact sinon), warning conflits (F1-F8/Space/Escape), respect `WantCaptureKeyboard`. **Serialisation** : keyBindings + gamepadBindings dans `state.extraJson["effectRack"]`, MIDI gere par MidiLearnManager. F9 raccourci.
+
+**Lot N — Audit UI 27 panels (24 iter, I-1707 → I-1730 + I-1726, EPIC-198)**
+
+**Critiques (P0)** :
+- I-1707 : double status bar — `renderStatusBar()` (~150 lignes) supprime, badges manquants ajoutes inline (Plugin, MIDI, Scene, Dirty), version "v3.4.0" → "v3.5.1"
+- I-1708 : auto-save complet — 6 sections ajoutees a `tickAutoSave()` (zone snapshots, outputs, surface map, network, effect rack, MIDI bindings)
+- I-1709 : EffectRack `updateBindings()` — MIDI/Gamepad/Keyboard actifs meme quand panel ferme
+- I-1710 : SetEditor playback — `update(deltaTime)` accumulation beats, auto-advance, transitions cut/crossfade/fade_in/fade_out, callbacks loadProject + setBpm, bouton Stop, barre progression
+- I-1711 : SurfaceEditor 8 resize handles — hit-test (TL/T/TR/R/BR/B/BL/L) coordonnees normalisees, taille min 0.05f, clamp [0,1]
+- I-1726 : status bar overlap fix — dockspace reduit en hauteur de `statusBarH`
+
+**Moyens (P1)** : I-1712 (shortcuts dialog corrige : Ctrl+Shift+P "Command Palette", Ctrl+Shift+1 PANIC ALL, F9/Ctrl+Shift+A/G/X/E/C ajoutes), I-1713 (MIDI bindings dans projet via `MidiLearnManager::toJson/fromJson`), I-1714 (Ctrl+N alignement `newProject()` extrait), I-1715 (Ctrl+D duplication debloque), I-1716 (NetworkPanel auto-discovery `BeginDisabled` + tooltip), I-1717 (PluginManager onglet Community → bouton "Open Community Browser" via callback).
+
+**Mineurs (P2)** : I-1718 (`mShowCreateMenu` dead code), I-1719 (Console Up/Down via `ImGuiInputTextFlags_CallbackHistory`), I-1720 (MidiActivity filtre device `InputInt`), I-1721 (MidiMapping confirmation modale), I-1722 (`mShowSplash`/`renderSplashScreen` dead code), I-1724 (Viewport overlay toggle + suppression 6 logs `[VP-Drop]`), I-1725 (test U-210 annotation).
+
+**Architecture (P0)** :
+- **I-1727 — ColorShiftNode resolution dynamique** : seul FX node a ne pas suivre le pattern standard (port `entity` + resolution dynamique). Reecriture complete : port `entity` ajoute (multiLink), `onLinkChanged()`/`setEnabled()`/`resolveTarget()`/`applyToEntity()`/`detachFromEntity()`, membres `mEntity` + `mTargetNodeName`. Factory simplifiee. 9 presets composition fonctionnent (liens entity Lua deja presents), 3 standalone bare nodes inchanges
+- **I-1728 — Inspector ports liaison masques** : filtre `entity`, `dt`, `beat`, `beatFrac` dans `renderFloatPorts()` (coherent avec batch editing existant)
+- **I-1729 — FX nodes entity reload (version counter)** : Cause racine = pointeur dangling + reutilisation adresse memoire au chargement. SceneObjectNode `mEntityVersion` monotone incremente a chaque createDefaultObject + mesh-change. ColorShiftNode/ShaderFxNode comparent par version au lieu de pointeur brut. PerlinFxNode/WaveVertexShader non concernes (clones)
+- **I-1730 — Docking layout persistant** : Cause racine = `DockBuilderRemoveNode()` + rebuild ecrasait imgui.ini a chaque lancement. DockBuilder ne s'execute que si `DockBuilderGetNode == nullptr`, Asset Browser ajoute au layout par defaut (tabbed avec Timeline), `ImGui::SaveIniSettingsToDisk()` dans saveProject(). Utilisateurs existants conservent leur layout
+
+**Lot O — Audit presets + cleanup + BPM fallback (5 iter, I-1731 → I-1735, EPIC-199)**
+
+**FAIL fixes (I-1731)** : glitch_art compositor "GlitchBlock" inexistant → "VHS", tunnel_party param `particle_template` → `template`.
+
+**WARNING type incorrect (I-1732)** : 26 presets composition corrigés en `type="CompositionNode"` (etaient ShaderFxNode/PerlinFxNode/ParticleNode). Renames + rewrites : color_lut_cinematic → posterize_stylized, split_tone_warm → vignette_warm, glitch_corruption rewrite (composition VHS+FeedbackZoom), mirror_kaleidoscope rewrite vrai Kaleidoscope, material_cycle/texture_sweep descriptions corrigees.
+
+**Descriptions audio (I-1733)** : 6 presets sans AudioCaptureNode dans le graphe — descriptions et tags audio retires (audio_reactive_sphere, spectrum_bars, beat_flash, audio_color_cycle, bass_pulse_sphere, particle_symphony).
+
+**Cleanup definitif (I-1734)** : **5 presets supprimes** (creux/doublons : spectrum_bars, athene_sculpture, beat_flash, audio_color_cycle, bass_pulse_sphere), 3 alias supprimes (fractal_growth, mesh_morph_cycle, rainbow_cycle), 3 renames (audio_reactive_sphere → perlin_sphere, audio_mesh → audio_pulse_deform, audio_landscape → landscape_deform), params fantomes supprimes (perlin_sphere 6 params, particle_symphony, starwars_tribute). test_suite.lua + Debugger.cpp mis a jour. **Total : 101 → 93 presets actifs** + 6 alias retro-compat (color_shift, monochrome_fade, perlin_pulse, perlin_breath, geosphere_explode, vertex_noise).
+
+**ShaderFxNode BPM fallback (I-1735)** : detection automatique des uniforms audio (`bass`/`mid`/`high`) dans `parseUniforms()` → flag `mHasAudioUniforms`. Methode `computeBpmFallback()` : envelope exponentielle pulsee au tempo BPM de RootTimeNode (bass=noires, mid=croches, high=doubles-croches, `exp(-4*frac)`). Detection ports non connectes via `Animator::getSourceNodes()` → injection valeurs synthetiques. Desactivation automatique quand AudioCaptureNode branche. **4 presets beneficiaires** : audio_pulse_deform, landscape_deform, frequency_landscape, waveform_ring.
+
+#### Metriques v3.5.1
+
+| Indicateur | Valeur |
+|---|---|
+| Iterations | 195 (I-1540 → I-1735, I-1723 skip) |
+| Lots | 15 (A-O) + 37 hotfixes |
+| Phases | 6 |
+| Epics | 15 (EPIC-185 → EPIC-199) |
+| Tests automatises | ~232 PASS, 0 FAIL (cumule) |
+| Meshes accessibles | 32 (≥ 25 requis) |
+| Shaders actifs | 58 (≥ 30 requis) |
+| Effets PostProcess | 29 (≥ 22 requis) |
+| Templates particules | 23 (≥ 13 requis) |
+| Materials VJ | 8 + 5 skybox |
+| Presets actifs | 93 (≥ 60 requis) + 6 alias |
+| Templates de scene | 14 |
+| Camera modes | 6 (≥ 5 requis) |
+| Build | exit 0, 0 warnings |
+| Date release initiale | 2026-04-23 |
+| Date Lots N+O finaux | 2026-04-28 |
+
+*Section v3.5.1 ajoutee en avril 2026. Sebastien Jullien.*
 

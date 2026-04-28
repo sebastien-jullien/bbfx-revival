@@ -11,27 +11,129 @@ namespace bbfx {
 
 SetEditorPanel::SetEditorPanel(sol::state& lua) : mLua(lua) {}
 
+void SetEditorPanel::update(float deltaTime) {
+    if (!mPlaying || mSegments.empty()) return;
+    if (mCurrentSegment >= (int)mSegments.size()) {
+        stopPlayback();
+        return;
+    }
+
+    auto& seg = mSegments[mCurrentSegment];
+    double beatsPerSecond = seg.bpm / 60.0;
+    double dBeats = beatsPerSecond * deltaTime;
+    mElapsedBeats += dBeats;
+
+    double totalBeats = seg.durationBars * 4.0; // 4 beats per bar
+
+    // Transition phase check (starts transitionBeats before end)
+    double transitionStart = totalBeats - seg.transitionBeats;
+    if (mElapsedBeats >= transitionStart && !mInTransition && seg.transition != "cut") {
+        mInTransition = true;
+        mTransitionBeats = 0.0;
+    }
+
+    // Update transition alpha
+    if (mInTransition && mCrossfadeAlphaCb) {
+        mTransitionBeats += dBeats;
+        float alpha = static_cast<float>(mTransitionBeats / seg.transitionBeats);
+        if (alpha > 1.0f) alpha = 1.0f;
+
+        if (seg.transition == "crossfade") {
+            mCrossfadeAlphaCb(alpha); // 0→1 blend to next
+        } else if (seg.transition == "fade_out") {
+            mCrossfadeAlphaCb(1.0f - alpha); // 1→0 fade out current
+        } else if (seg.transition == "fade_in") {
+            mCrossfadeAlphaCb(alpha); // 0→1 fade in next
+        }
+    }
+
+    // Auto-advance when segment duration is reached
+    if (mElapsedBeats >= totalBeats) {
+        int nextIdx = mCurrentSegment + 1;
+        if (nextIdx < (int)mSegments.size()) {
+            advanceToSegment(nextIdx);
+        } else {
+            // End of set
+            stopPlayback();
+            std::cout << "[SetEditor] Set playback finished" << std::endl;
+        }
+    }
+}
+
+void SetEditorPanel::advanceToSegment(int index) {
+    if (index < 0 || index >= (int)mSegments.size()) return;
+    mCurrentSegment = index;
+    mElapsedBeats = 0.0;
+    mInTransition = false;
+    mTransitionBeats = 0.0;
+
+    auto& seg = mSegments[index];
+
+    // Set BPM
+    if (mSetBpmCb) mSetBpmCb(seg.bpm);
+
+    // Reset crossfade alpha
+    if (mCrossfadeAlphaCb) mCrossfadeAlphaCb(1.0f);
+
+    // Load source project if specified
+    if (!seg.source.empty() && mLoadProjectCb) {
+        mLoadProjectCb(seg.source);
+    }
+
+    std::cout << "[SetEditor] Now playing segment " << index << ": " << seg.name << std::endl;
+}
+
+void SetEditorPanel::stopPlayback() {
+    mPlaying = false;
+    mElapsedBeats = 0.0;
+    mInTransition = false;
+    mTransitionBeats = 0.0;
+    if (mCrossfadeAlphaCb) mCrossfadeAlphaCb(1.0f);
+}
+
 void SetEditorPanel::render() {
     ImGui::Begin("Set Editor");
 
     ImGui::TextDisabled("VJ Set List");
 
-    // Add segment button
+    // Transport controls
     if (ImGui::Button("+ Add Segment")) {
         Segment seg;
         seg.name = "Segment " + std::to_string(mSegments.size() + 1);
         mSegments.push_back(seg);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Play Set") && !mSegments.empty()) {
-        mPlaying = !mPlaying;
-        if (mPlaying) mCurrentSegment = 0;
+    if (!mPlaying) {
+        if (ImGui::Button("Play Set") && !mSegments.empty()) {
+            mPlaying = true;
+            advanceToSegment(0);
+        }
+    } else {
+        if (ImGui::Button("Stop")) {
+            stopPlayback();
+        }
     }
-    if (mPlaying) {
+
+    if (mPlaying && mCurrentSegment < (int)mSegments.size()) {
+        auto& seg = mSegments[mCurrentSegment];
+        double totalBeats = seg.durationBars * 4.0;
+        float progress = static_cast<float>(mElapsedBeats / totalBeats);
+        if (progress > 1.0f) progress = 1.0f;
+
         ImGui::SameLine();
-        ImGui::TextColored({0, 1, 0, 1}, "PLAYING: %s",
-            mCurrentSegment < (int)mSegments.size() ?
-            mSegments[mCurrentSegment].name.c_str() : "END");
+        ImGui::TextColored({0, 1, 0, 1}, "PLAYING: %s", seg.name.c_str());
+
+        // Progress bar
+        char overlay[64];
+        int currentBar = static_cast<int>(mElapsedBeats / 4.0) + 1;
+        std::snprintf(overlay, sizeof(overlay), "Bar %d / %d", currentBar, seg.durationBars);
+        ImGui::ProgressBar(progress, {-1, 0}, overlay);
+
+        // Transition indicator
+        if (mInTransition) {
+            ImGui::SameLine();
+            ImGui::TextColored({1.0f, 0.6f, 0.0f, 1.0f}, "[%s]", seg.transition.c_str());
+        }
     }
 
     ImGui::Separator();

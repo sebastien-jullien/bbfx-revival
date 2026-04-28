@@ -1,5 +1,6 @@
 #include "TextureNode.h"
 #include "SceneObjectNode.h"
+#include "../SettingsManager.h"
 #include <OgreEntity.h>
 #include <OgreSubEntity.h>
 #include <OgreMaterialManager.h>
@@ -7,9 +8,10 @@
 #include <OgreTechnique.h>
 #include <OgrePass.h>
 #include <OgreTextureUnitState.h>
-#include <iostream>
 
 namespace bbfx {
+
+unsigned TextureNode::sApplySeqCounter = 0;
 
 TextureNode::TextureNode(const std::string& name)
     : AnimationNode(name)
@@ -22,6 +24,18 @@ TextureNode::TextureNode(const std::string& name)
     texDef.type = ParamType::TEXTURE;
     texDef.stringVal = "";
     mSpec.addParam(texDef);
+
+    // Default from global settings, overridable per-node
+    const auto& globalDefault = SettingsManager::instance().get().defaultLightingMode;
+
+    ParamDef lightDef;
+    lightDef.name = "lighting_mode";
+    lightDef.label = "Lighting";
+    lightDef.type = ParamType::ENUM;
+    lightDef.stringVal = globalDefault;
+    lightDef.choices = {"unlit", "lit", "emissive"};
+    mSpec.addParam(lightDef);
+    mLightingMode = globalDefault;
 
     ParamDef tgtDef;
     tgtDef.name = "target_entity";
@@ -51,17 +65,52 @@ void TextureNode::resolveTargets() {
     for (auto& old : mCurrentTargets) {
         bool stillLinked = false;
         for (auto& n : newTargets) { if (n == old) { stillLinked = true; break; } }
-        if (!stillLinked) detachFromEntity(old);
+        if (!stillLinked) {
+            detachFromEntity(old);
+            mApplySeq.erase(old); // Clear connection order for removed links
+        }
     }
 
-    mCurrentTargets = newTargets;
-
-    // Apply to all current targets (only if enabled)
+    // Apply ONLY to newly added targets — not every frame.
     if (mEnabled) {
-        for (auto& t : mCurrentTargets) {
+        for (auto& t : newTargets) {
+            bool isNew = true;
+            for (auto& old : mCurrentTargets) { if (old == t) { isNew = false; break; } }
+            if (!isNew) continue;
+
+            if (mReenabling) {
+                // On re-enable, only skip if a LATER-connected TextureNode is active.
+                // Connection order is tracked by mApplySeq (monotonic counter set on first link).
+                unsigned mySeq = mApplySeq.count(t) ? mApplySeq[t] : 0;
+                bool laterActive = false;
+                for (auto& nodeName : animator->getRegisteredNodeNames()) {
+                    auto* otherNode = animator->getRegisteredNode(nodeName);
+                    if (otherNode && otherNode != this && otherNode->getTypeName() == "TextureNode"
+                        && otherNode->isEnabled()) {
+                        auto* otherTex = dynamic_cast<TextureNode*>(otherNode);
+                        if (otherTex) {
+                            for (auto& ot : otherTex->getCurrentTargets()) {
+                                if (ot == t && otherTex->getApplySeq(t) > mySeq) {
+                                    laterActive = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (laterActive) break;
+                }
+                if (laterActive) continue;
+            } else {
+                // New connection: assign a sequence number
+                mApplySeq[t] = ++sApplySeqCounter;
+            }
+
             applyToEntity(t);
         }
     }
+
+    mCurrentTargets = newTargets;
+    mReenabling = false;
 }
 
 void TextureNode::applyToEntity(const std::string& targetName) {
@@ -111,17 +160,31 @@ void TextureNode::applyToEntity(const std::string& targetName) {
         mOriginalMaterials[targetName] = origMats;
     }
 
-    // Create a unique material with the texture
-    std::string matName = "TexNode_" + getName() + "_" + mTextureName;
+    // Read lighting mode from ParamSpec and sync cached value
+    auto* lightParam = mSpec.getParam("lighting_mode");
+    std::string lightMode = lightParam ? lightParam->stringVal : "lit";
+    mLightingMode = lightMode;
+
+    // Material name includes lighting mode so mode changes create a new material
+    std::string matName = "TexNode_" + getName() + "_" + mTextureName + "_" + lightMode;
     auto& matMgr = Ogre::MaterialManager::getSingleton();
     auto mat = matMgr.getByName(matName);
     if (!mat) {
         mat = matMgr.create(matName, Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         auto* pass = mat->getTechnique(0)->getPass(0);
         pass->createTextureUnitState(mTextureName);
-        pass->setLightingEnabled(true);
-        pass->setDiffuse(1, 1, 1, 1);
-        pass->setAmbient(0.3f, 0.3f, 0.3f);
+        if (lightMode == "unlit") {
+            pass->setLightingEnabled(false);
+        } else if (lightMode == "emissive") {
+            pass->setLightingEnabled(true);
+            pass->setDiffuse(1, 1, 1, 1);
+            pass->setAmbient(1.0f, 1.0f, 1.0f);
+            pass->setSelfIllumination(1.0f, 1.0f, 1.0f);
+        } else { // "lit"
+            pass->setLightingEnabled(true);
+            pass->setDiffuse(1, 1, 1, 1);
+            pass->setAmbient(1.0f, 1.0f, 1.0f);
+        }
     }
 
     // Apply to ALL sub-entities
@@ -143,8 +206,8 @@ void TextureNode::detachFromEntity(const std::string& targetName) {
     auto* entity = soNode->getEntity();
 
     // Check if another ACTIVE TextureNode is also linked to this target
-    // If so, let it handle the materials — don't restore originals
-    bool otherActiveTexture = false;
+    // If so, tell it to re-apply its texture immediately
+    TextureNode* otherActiveTex = nullptr;
     for (auto& nodeName : animator->getRegisteredNodeNames()) {
         auto* otherNode = animator->getRegisteredNode(nodeName);
         if (otherNode && otherNode != this && otherNode->getTypeName() == "TextureNode"
@@ -152,24 +215,26 @@ void TextureNode::detachFromEntity(const std::string& targetName) {
             auto* otherTex = dynamic_cast<TextureNode*>(otherNode);
             if (otherTex) {
                 for (auto& t : otherTex->getCurrentTargets()) {
-                    if (t == targetName) { otherActiveTexture = true; break; }
+                    if (t == targetName) { otherActiveTex = otherTex; break; }
                 }
             }
         }
-        if (otherActiveTexture) break;
+        if (otherActiveTex) break;
     }
 
     // Restore original materials per sub-entity
     auto origIt = mOriginalMaterials.find(targetName);
     if (origIt != mOriginalMaterials.end()) {
-        if (!otherActiveTexture) {
+        if (!otherActiveTex) {
             // No other active TextureNode → restore the REAL originals
             auto& origMats = origIt->second;
             for (unsigned s = 0; s < entity->getNumSubEntities() && s < origMats.size(); ++s) {
                 entity->getSubEntity(s)->setMaterialName(origMats[s]);
             }
+        } else {
+            // Another active TextureNode exists — re-apply its texture now
+            otherActiveTex->applyToEntity(targetName);
         }
-        // else: another TextureNode is active, it will re-apply its texture in the next update()
         mOriginalMaterials.erase(origIt);
     }
 }
@@ -179,8 +244,12 @@ void TextureNode::setEnabled(bool en) {
     if (!en) {
         // Detach from all targets (restore originals)
         for (auto& t : mCurrentTargets) detachFromEntity(t);
+        // Clear so resolveTargets() sees them as new on re-enable
+        mCurrentTargets.clear();
+    } else {
+        mReenabling = true;
+        resolveTargets(); // Apply immediately — update() may not be called
     }
-    // On re-enable, resolveTargets() in next update() will re-attach
 }
 
 void TextureNode::onLinkChanged() {
@@ -188,9 +257,22 @@ void TextureNode::onLinkChanged() {
 }
 
 void TextureNode::update() {
+    if (!mEnabled) return;
+
     auto* texParam = mSpec.getParam("texture");
+    auto* lightParam = mSpec.getParam("lighting_mode");
+    std::string newLightMode = lightParam ? lightParam->stringVal : "lit";
+
+    bool needReapply = false;
     if (texParam && texParam->stringVal != mTextureName && !texParam->stringVal.empty()) {
         mTextureName = texParam->stringVal;
+        needReapply = true;
+    }
+    if (newLightMode != mLightingMode) {
+        mLightingMode = newLightMode;
+        needReapply = true;
+    }
+    if (needReapply) {
         for (auto& t : mCurrentTargets) applyToEntity(t);
     }
     resolveTargets();
@@ -201,6 +283,7 @@ void TextureNode::cleanup() {
     for (auto& t : mCurrentTargets) detachFromEntity(t);
     mCurrentTargets.clear();
     mOriginalMaterials.clear();
+    mApplySeq.clear();
 }
 
 } // namespace bbfx

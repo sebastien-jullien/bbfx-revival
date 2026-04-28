@@ -10,6 +10,7 @@ local function tick()
         print("[dbg_autotest] Running dbg.test()...")
         dbg.test()
         print("[dbg_autotest] Done.")
+        os.exit(0)
     end
 end
 

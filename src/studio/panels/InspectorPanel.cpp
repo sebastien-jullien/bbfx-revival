@@ -608,6 +608,9 @@ void InspectorPanel::renderFloatPorts() {
 
     ImGui::TextDisabled("Input Ports");
     for (auto& [portName, port] : node->getInputs()) {
+        // Skip link-only ports — not user-editable values
+        if (portName == "entity" || portName == "dt" || portName == "beat" || portName == "beatFrac")
+            continue;
         float val = port->getValue();
         std::string label = "##in_" + portName;
         ImGui::Text("%s", portName.c_str());

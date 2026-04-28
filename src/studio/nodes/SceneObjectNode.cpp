@@ -1,6 +1,7 @@
 #include "SceneObjectNode.h"
 #include "../../core/Animator.h"
 #include <OgreEntity.h>
+#include <OgreSubEntity.h>
 #include <OgreMeshManager.h>
 #include <cmath>
 #include <iostream>
@@ -64,11 +65,20 @@ void SceneObjectNode::createDefaultObject() {
     auto* meshParam = mSpec.getParam("mesh_file");
     if (meshParam && !meshParam->stringVal.empty()) meshName = meshParam->stringVal;
     mCurrentMesh = meshName;
+    // Read material from ParamSpec
+    std::string matName = "BaseWhiteNoLighting";
+    auto* matParam = mSpec.getParam("material");
+    if (matParam && !matParam->stringVal.empty()) matName = matParam->stringVal;
+    mCurrentMaterial = matName;
+
     try {
         std::string entityName = getName() + "_entity_" + id;
         std::string snName = getName() + "_sn_" + id;
         auto* entity = mScene->createEntity(entityName, meshName);
+        // Do NOT call entity->setMaterialName() here — let the mesh keep its
+        // embedded per-submesh materials (Ogre/Skin, Ogre/Eyes, etc.).
         mMovable = entity;
+        ++mEntityVersion;
         mSceneNode = mScene->getRootSceneNode()->createChildSceneNode(snName);
         mSceneNode->attachObject(entity);
         if (meshName == "geosphere4500.mesh" || meshName == "geosphere8000.mesh")
@@ -92,10 +102,24 @@ void SceneObjectNode::update() {
         std::string id = std::to_string(++sSceneObjCounter);
         try {
             auto* entity = mScene->createEntity("sceneobj_ent_" + id, mCurrentMesh);
+            // Do NOT force material — preserve mesh-embedded materials.
             mMovable = entity;
+            ++mEntityVersion;
             if (mSceneNode) mSceneNode->attachObject(entity);
         } catch (...) { mMovable = nullptr; }
     }
+
+    // Check if material changed via ParamSpec
+    auto* matParam = mSpec.getParam("material");
+    if (matParam && !matParam->stringVal.empty() && matParam->stringVal != mCurrentMaterial && mMovable) {
+        mCurrentMaterial = matParam->stringVal;
+        auto* entity = dynamic_cast<Ogre::Entity*>(mMovable);
+        if (entity) {
+            for (unsigned s = 0; s < entity->getNumSubEntities(); ++s)
+                entity->getSubEntity(s)->setMaterialName(mCurrentMaterial);
+        }
+    }
+
     if (!mSceneNode) return;
 
     // Periodically refresh which ports are DAG-linked
@@ -168,7 +192,7 @@ void SceneObjectNode::update() {
         auto* p = mSpec.getParam("visible");
         vis = p ? p->boolVal : true;
     }
-    mSceneNode->setVisible(vis && mEnabled && mUserVisible);
+    mSceneNode->setVisible(vis && mEnabled && mUserVisible && !mFxHidden);
 
     fireUpdate();
 }

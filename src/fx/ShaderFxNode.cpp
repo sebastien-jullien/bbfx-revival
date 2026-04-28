@@ -1,5 +1,6 @@
 #include "ShaderFxNode.h"
 #include "../core/Animator.h"
+#include "../core/PrimitiveNodes.h"
 #include "../studio/nodes/SceneObjectNode.h"
 #include <OgreHighLevelGpuProgramManager.h>
 #include <OgreMaterialManager.h>
@@ -10,9 +11,11 @@
 #include <OgreTextureUnitState.h>
 #include <OgreSceneManager.h>
 #include <OgreResourceGroupManager.h>
+#include <OgreVector.h>
 #include <fstream>
 #include <sstream>
 #include <regex>
+#include <cmath>
 #include <iostream>
 
 namespace bbfx {
@@ -44,9 +47,13 @@ void ShaderFxNode::parseUniforms(const std::string& source) {
         "lightDiffuse", "ambientLight", "materialDiffuse",
         "lightPosition", "lightDirection", "cameraPosition"
     };
+    static const std::set<std::string> autoSamplers = {
+        "tex0", "rt0", "prevFrame"
+    };
 
-    std::regex uniformRx(R"(uniform\s+float\s+(\w+)\s*;)");
-    std::sregex_iterator it(source.begin(), source.end(), uniformRx);
+    // Match uniform float
+    std::regex floatRx(R"(uniform\s+float\s+(\w+)\s*;)");
+    std::sregex_iterator it(source.begin(), source.end(), floatRx);
     std::sregex_iterator end;
 
     for (; it != end; ++it) {
@@ -54,6 +61,25 @@ void ShaderFxNode::parseUniforms(const std::string& source) {
         if (ogreAutoParams.count(uname) == 0) {
             mUniforms.push_back({uname, 0.0f});
             addInput(new AnimationPort(uname, 0.0f));
+            if (uname == "bass" || uname == "mid" || uname == "high")
+                mHasAudioUniforms = true;
+        }
+    }
+
+    // Match uniform vec2/vec3/vec4 → expand to component ports
+    std::regex vecRx(R"(uniform\s+(vec[234])\s+(\w+)\s*;)");
+    std::sregex_iterator vit(source.begin(), source.end(), vecRx);
+    for (; vit != end; ++vit) {
+        std::string type = (*vit)[1].str();
+        std::string uname = (*vit)[2].str();
+        if (ogreAutoParams.count(uname) != 0 || autoSamplers.count(uname) != 0) continue;
+
+        int components = type[3] - '0'; // vec2→2, vec3→3, vec4→4
+        static const char* suffixes[] = {"x", "y", "z", "w"};
+        for (int c = 0; c < components; ++c) {
+            std::string portName = uname + "." + suffixes[c];
+            mUniforms.push_back({portName, 0.0f});
+            addInput(new AnimationPort(portName, 0.0f));
         }
     }
 }
@@ -207,6 +233,13 @@ void ShaderFxNode::resolveTarget() {
     if (targetName != mTargetNodeName) {
         if (mEntity) detachFromEntity();
         mTargetNodeName = targetName;
+        mEntityVersion = -1;
+    }
+
+    // Entity recreated (mesh change during project load) — detach so we reattach
+    int curVersion = sceneObj->getEntityVersion();
+    if (mEntity && curVersion != mEntityVersion) {
+        detachFromEntity();
     }
 
     // Apply if not yet applied
@@ -214,6 +247,7 @@ void ShaderFxNode::resolveTarget() {
         std::cout << "[ShaderFx] Applying material '" << mMaterial->getName()
                   << "' to entity of '" << targetName << "'" << std::endl;
         applyToEntity(sceneObj->getEntity());
+        mEntityVersion = curVersion;
     }
 }
 
@@ -257,6 +291,24 @@ void ShaderFxNode::detachFromEntity() {
     mOriginalMaterials.clear();
 }
 
+float ShaderFxNode::computeBpmFallback(const std::string& uniformName,
+                                       float totalTime, float bpm) const {
+    if (bpm <= 0.0f) bpm = 120.0f;
+    float beatsPerSec = bpm / 60.0f;
+
+    // Multiplier: bass=quarter notes (1x), mid=eighth notes (2x), high=sixteenth notes (4x)
+    float mult = 1.0f;
+    if (uniformName == "mid")  mult = 2.0f;
+    if (uniformName == "high") mult = 4.0f;
+
+    float phase = totalTime * beatsPerSec * mult;
+    float frac = phase - std::floor(phase); // 0..1 sawtooth
+
+    // Exponential decay envelope: sharp attack, smooth decay
+    // e^(-4*frac) gives a punchy pulse that decays to ~0.02 by end of beat
+    return std::exp(-4.0f * frac);
+}
+
 void ShaderFxNode::update() {
     if (!mVertParams) return;
 
@@ -267,21 +319,89 @@ void ShaderFxNode::update() {
     float dt = mInputs.count("dt") ? mInputs["dt"]->getValue() : 0.016f;
     mTime += dt;
 
+    // BPM fallback: check which audio ports are unconnected (only if shader has audio uniforms)
+    bool bpmFallbackBass = false, bpmFallbackMid = false, bpmFallbackHigh = false;
+    float bpmVal = 120.0f;
+    float totalTime = 0.0f;
+    if (mHasAudioUniforms) {
+        auto* animator = Animator::instance();
+        auto* timeNode = RootTimeNode::instance();
+        if (animator && timeNode) {
+            bpmVal = timeNode->getBPM();
+            totalTime = timeNode->getTotalTime();
+            auto& ins = getInputs();
+            auto checkPort = [&](const std::string& name) -> bool {
+                auto it = ins.find(name);
+                if (it == ins.end()) return false;
+                return animator->getSourceNodes(it->second).empty();
+            };
+            bpmFallbackBass = checkPort("bass");
+            bpmFallbackMid  = checkPort("mid");
+            bpmFallbackHigh = checkPort("high");
+        }
+    }
+
     // Push custom uniforms to GPU
+    // Collect vec components: "offset.x" → vec uniform "offset"
+    std::map<std::string, std::vector<float>> vecAccum;
+
     for (auto& u : mUniforms) {
+        // Check if this is a vec component (has .x/.y/.z/.w suffix)
+        auto dotPos = u.name.rfind('.');
+        if (dotPos != std::string::npos) {
+            std::string base = u.name.substr(0, dotPos);
+            float val = mInputs.count(u.name) ? mInputs[u.name]->getValue() : u.defaultValue;
+            auto& vec = vecAccum[base];
+            if (vec.empty()) vec.resize(4, 0.0f);
+            char comp = u.name[dotPos + 1];
+            int idx = (comp == 'x') ? 0 : (comp == 'y') ? 1 : (comp == 'z') ? 2 : 3;
+            vec[idx] = val;
+            continue;
+        }
+
         float val = 0.0f;
         if (u.name == "time") {
             val = mTime;
         } else if (mInputs.count(u.name)) {
             val = mInputs[u.name]->getValue();
         }
+
+        // BPM fallback for unconnected audio uniforms
+        if ((u.name == "bass" && bpmFallbackBass) ||
+            (u.name == "mid"  && bpmFallbackMid)  ||
+            (u.name == "high" && bpmFallbackHigh)) {
+            val = computeBpmFallback(u.name, totalTime, bpmVal);
+        }
+
         if (mVertParams) {
             try { mVertParams->setNamedConstant(u.name, val); }
-            catch (...) { /* Uniform may not exist in vertex shader — safe to ignore */ }
+            catch (...) {}
         }
         if (mFragParams) {
             try { mFragParams->setNamedConstant(u.name, val); }
-            catch (...) { /* Uniform may not exist in fragment shader — safe to ignore */ }
+            catch (...) {}
+        }
+    }
+
+    // Set vec uniforms
+    for (auto& [name, comps] : vecAccum) {
+        // Determine vec size by counting registered components
+        int size = 0;
+        for (const auto& u : mUniforms) {
+            if (u.name.substr(0, name.size() + 1) == name + ".") size++;
+        }
+        if (size == 2) {
+            Ogre::Vector2 v(comps[0], comps[1]);
+            if (mVertParams) { try { mVertParams->setNamedConstant(name, v); } catch (...) {} }
+            if (mFragParams) { try { mFragParams->setNamedConstant(name, v); } catch (...) {} }
+        } else if (size == 3) {
+            Ogre::Vector3 v(comps[0], comps[1], comps[2]);
+            if (mVertParams) { try { mVertParams->setNamedConstant(name, v); } catch (...) {} }
+            if (mFragParams) { try { mFragParams->setNamedConstant(name, v); } catch (...) {} }
+        } else if (size == 4) {
+            Ogre::Vector4 v(comps[0], comps[1], comps[2], comps[3]);
+            if (mVertParams) { try { mVertParams->setNamedConstant(name, v); } catch (...) {} }
+            if (mFragParams) { try { mFragParams->setNamedConstant(name, v); } catch (...) {} }
         }
     }
 

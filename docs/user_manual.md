@@ -1,11 +1,36 @@
 # BBFx Studio — User Manual
 
-> **Manual version:** v3.5 "Community"
+> **Manual version:** v3.5.1 "Asset Library & Polish"
 > **Product:** `bbfx-studio.exe`
 > **Audience:** end users (VJs, stage designers, creatives) — not developers
 > **Language:** English
 
 This manual describes **every visible and interactive feature** of BBFx Studio: interface, panels, menus, shortcuts, nodes, and workflows. It does not cover the internal C++ API, implementation choices or architecture — those belong to the CDC, Roadmap and Epics.
+
+---
+
+## What's new in v3.5.1 "Asset Library & Polish"
+
+BBFx Studio v3.5.1 transforms the Studio from infrastructure-perfect to content-rich. Headlines:
+
+- **Asset Browser panel** (`Ctrl+Shift+A`, **chapter 9bis**) — 9 categories sidebar (Meshes, Textures, Materials, Shaders, Particles, Effects, Cameras, Presets, Templates) with instant search, AND multi-select tags, persisted favorites, info tooltip, and **8 typed drag&drop payloads** (Mesh/Texture/Material/Shader/Particle/Preset/Compositor/Template) + double-click actions. Ships with the new default layout (tabbed with Timeline).
+- **Effect Rack panel** (`F9`, **section 10.3**) — standalone panel (extracted from Preset Browser) with LED-style green/red feedback per node, undoable bypass via `SetEnabledCommand`, and **MIDI / Gamepad / Keyboard learn buttons per row** (M/G/K) with badges showing the binding. Bindings stay active even when the panel is closed.
+- **Camera with 6 modes** — `orbit` / `fly_through` / `shake` / `dolly_zoom` / `track` / `crane`, with smooth transitions (`transitionTo` smoothstep + Slerp + lerp FOV). DAG ports `target.x/y/z`, `shake_intensity`, `transition_time`, `fly_speed`, `damping`, `crane_amplitude`. 5 ready-to-use camera presets.
+- **Colored particles** — ParticleNode now has 8 DAG ports (`color.r/g/b/a`, `particle_size`, `velocity`, `lifetime`, `emission_rate`). Defaults of `-1.0` preserve the template values; non-negative values override (multiplier mode for size/velocity).
+- **10 new BBFx particle templates** — Fire, ElectricArc, Confetti, MagicDust, NeonTrail, Bubbles, LaserBeam, Galaxy, MatrixRain, and the **signature 2006 ParticleTunnel** (Ring emitter, gamepad-controllable `ring_radius`/`ring_speed`/`ring_density`).
+- **PostProcess in Studio viewport** — 29 effects available via `PostProcessNode` (16 BBFx + 6 OGRE adapted single-pass + 7 new). Effects appear immediately in the Studio Viewport, not just in Performance Mode. Use the `compositor` parameter on a PostProcessNode to pick from: Vignette, FilmGrain, Invert, Posterize, EdgeDetect, Pixelate, Barrel, Kaleidoscope, ChromaticAberration, VHS, HeatDistort, ASCII, MotionTrail, EdgeBlend, QuadWarp, GridWarp, Bloom, DOF, BlackAndWhite, Embossed, OldTV, Glass, Halftone, CrossHatch, OilPaint, ColorLUT, RadialBlur, FeedbackZoom, MotionTrailFB.
+- **TextureNode lighting modes** — new ENUM parameter `lighting_mode` with **unlit / lit / emissive** options. `unlit` shows raw texture colors, `lit` adds standard lighting, `emissive` makes the surface glow at full brightness. A global default is configurable in `File → Settings... → Default texture lighting`.
+- **15 new shaders** — 5 vertex (`explode`, `inflate`, `spiral`, `audio_pulse`, `flatten`) + 8 fragment generators (`glitch_block`, `julia`, `fire`, `fbm_warp`, `cellular_automata`, `hexagonal`, `moire`, `waveform`) + 7 post-process (`halftone`, `cross_hatch`, `oil_paint`, `color_lut`, `radial_blur`, `feedback_zoom`, `pp_motion_trail`). ShaderFxNode now accepts vec2/vec3/vec4 uniforms (decomposed as `.x/.y/.z/.w` ports).
+- **8 new VJ materials** — `BBFx/Chrome`, `BBFx/Neon`, `BBFx/GlassVJ`, `BBFx/Wireframe`, `BBFx/Hologram`, `BBFx/Emissive`, `BBFx/Gradient`, `BBFx/Reflective` — pick from the Asset Browser or via a MaterialNode.
+- **5 new procedural meshes** — `mobius.mesh`, `lissajous.mesh`, `helix.mesh`, `diamond.mesh`, `star3d.mesh`. Plus the 7 canonical procedural meshes are now reliably available at startup (`torus.mesh`, `cylinder.mesh`, `cone.mesh`, `plane_1m.mesh`, `torusknot.mesh`, `cube_1m.mesh`, `bbfx_plane.mesh`).
+- **5 functional skyboxes** — Stormy, Morning, Evening, EarlyMorning, CloudyNoon (with bundled cubemaps).
+- **14 functional scene templates** — every template in `File → Recent Templates ▶` now creates a complete starting scene (mesh, FX, camera, light, etc.) instead of just setting the BPM. Genre-tuned templates: ambient (BPM 70), hiphop (90), house (124), techno (135), dubstep (140), dnb (172), beat_machine (128), particle_show (140), shader_lab (120), audio_reactive (0), full_performance (≥ 8 nodes), video_mix (120), bonneballe_basic.
+- **93 curated presets** + 6 backward-compatibility aliases — preset library cleaned up (101 → 93 active), 26 composition presets corrected to the proper `CompositionNode` format, misleading names renamed, phantom parameters removed. Renamed presets keep working through aliases (color_shift, monochrome_fade, perlin_pulse, perlin_breath, geosphere_explode, vertex_noise).
+- **Audio "fallback" without a microphone** — ShaderFxNode shaders that use `bass`/`mid`/`high` uniforms (e.g. `audio_pulse.vert`) now produce a tempo-pulsed envelope automatically when no AudioCaptureNode is connected (quarters/eighths/sixteenths). Plug an AudioCaptureNode and the synthetic values are bypassed.
+- **Persistent docking layout** — your panel arrangement is saved on `Ctrl+S` and restored on next launch (no more reset to default).
+- **Persistent viewport camera** — orbit position (yaw, pitch, distance, center) is saved with the project.
+- **Master View output toggling** — show/hide each output window independently from `MasterViewPanel` (rendering and texture sharing are skipped for hidden outputs).
+- **27-panel UI audit** — double status bar removed, complete auto-save (zone snapshots, outputs, surface map, network, effect rack, MIDI bindings now persisted), `SetEditorPanel` playback (cut/crossfade/fade transitions), `SurfaceEditorPanel` 8 resize handles, full `Ctrl+N` / `Ctrl+D` parity with menu actions, Console history (`Up`/`Down`), `MidiActivity` device filter, `MidiMapping` Clear All confirmation, shortcuts dialog corrected.
 
 ---
 
@@ -20,6 +45,7 @@ This manual describes **every visible and interactive feature** of BBFx Studio: 
 7. [The Timeline](#7-the-timeline)
 8. [The Scene Hierarchy](#8-the-scene-hierarchy)
 9. [The Preset Browser](#9-the-preset-browser)
+9bis. [The Asset Browser (v3.5.1)](#9bis-the-asset-browser-v351)
 10. [Set Editor & Performance Mode](#10-set-editor--performance-mode)
 11. [Audio & MIDI](#11-audio--midi)
 12. [Video (Theora)](#12-video-theora)
@@ -48,8 +74,8 @@ This manual describes **every visible and interactive feature** of BBFx Studio: 
 
 When launched (on Windows: `build/windows-debug/Debug/bbfx-studio.exe`), a centered **splash window** titled **"BBFx Studio"** appears. It contains:
 
-- Coloured title: `BBFx Studio v3.5.0 Community`
-- Subtitle: *Plugin Ecosystem, Community Browser & Gamepad*
+- Coloured title: `BBFx Studio v3.5.1 Asset Library & Polish`
+- Subtitle: *Curated assets, post-process pipeline, asset browser, effect rack*
 - Welcome message
 - Two buttons:
   - **"New Empty Project"** — closes the splash, opens an empty project
@@ -178,10 +204,12 @@ This menu controls visibility of the "general" panels. Each entry is a checkbox:
 | **Inspector** | F3 | Properties panel for the selected node (see chapter 6) |
 | **Timeline** | F4 | Timeline / keyframes / BPM (see chapter 7) |
 | **Preset Browser** | F6 | Preset library (see chapter 9) |
+| **Asset Browser** | Ctrl+Shift+A | Library navigation: meshes, textures, materials, shaders, particles, effects, presets, templates (v3.5.1) |
 | **Console** | F2 | Lua REPL and logs (see chapter 15) |
 | **Set Editor** | — | Set editor for live performance (see chapter 10) |
 | **Scene Hierarchy** | F8 | Scene tree (see chapter 8) |
 | **Compositor Stack** | — | Post-processing stack (see chapter 14) |
+| **Effect Rack** | F9 | Standalone effect rack with MIDI/Gamepad/Keyboard learn (v3.5.1, see section 10.3) |
 | **Shader Gallery** | — | Shader catalog (see chapter 13) |
 | **Material Editor** | — | OGRE material editor (see chapter 13) |
 | **Undo History** | — | Clickable undo/redo history |
@@ -247,11 +275,12 @@ Opened via **File → Settings...** or **Ctrl+,**. Global parameters:
 
 **Rendering**
 - **Viewport scale** — 0.25 to 4.0. Scale factor for the internal render (>1: super-sampling, <1: faster render).
+- **Default texture lighting** *(v3.5.1)* — `unlit` / `lit` / `emissive`. Sets the default `lighting_mode` for newly created `TextureNode`s. Each TextureNode can override locally via the Inspector. `unlit` = raw texture colours, `lit` = standard lighting/ambient, `emissive` = self-illuminated (texture is never darker than its source).
 
 **Audio**
 - **Default BPM** — 60 to 240 BPM. Fallback BPM when no `BeatDetector` node is active.
 
-Buttons **Save** (applies + persists to the settings file) / **Cancel**.
+Buttons **Save** (applies + persists to the settings file) / **Cancel**. (v3.5.1: the dialog now uses a persistent edit buffer — combo boxes correctly remember selections between frames.)
 
 ---
 
@@ -686,41 +715,99 @@ Scans `lua/presets/*.lua` on start-up, reads the `category` field of each file a
 
 Category is cached after first scan. The full preset list is in [Appendix C](#appendix-c--preset-catalog).
 
-### 9.2 Assets
+> **v3.5.1** — The previous *Assets* section and *Quick Access* bar have been **removed** from the Preset Browser. Asset navigation has moved to the dedicated **Asset Browser panel** (`Ctrl+Shift+A`, see chapter 9bis), and the effect rack has been **extracted** into its own panel with proper bypass and learn modes (`F9`, see section 10.3). The Preset Browser now focuses purely on preset listing.
 
-**Search assets...** field + filter tabs:
+---
 
-| Tab | Contents |
+## 9bis. The Asset Browser (v3.5.1)
+
+Dedicated panel for browsing, searching and dragging every kind of asset registered in the Studio. Title: **Asset Browser**. Shortcut: **Ctrl+Shift+A**. Available from the **View** menu and from the *Open Asset Browser* entry of the Node Editor context menu.
+
+### 9bis.1 Layout
+
+The panel is split into two regions:
+
+- **Sidebar** (left) — categories and tags
+- **Main area** (right) — toolbar (search bar + Grid/List toggle) and grid/list of assets
+
+### 9bis.2 Categories
+
+The sidebar lists 9 categories with live counts:
+
+| Category | Source | Approx. count |
+|---|---|---|
+| **All** | Aggregation of every category | ~ 200+ |
+| **Meshes** | `MeshManager` (incl. procedural via iterator) — `.mesh` files | 32 |
+| **Textures** | OGRE texture pool | varies |
+| **Materials** | OGRE materials (incl. `BBFx/*` VJ materials) | 8 BBFx + 5 skybox + library |
+| **Shaders** | `.frag` / `.vert` files in `resources/shaders/` | 58 |
+| **Particles** | Particle templates (`BBFx/*`, `Examples/*`) | 23 |
+| **Effects** | Post-process compositors / `getAvailableEffects()` | 29 |
+| **Cameras** | (reserved) | — |
+| **Presets** | `lua/presets/*.lua` | 93 + 6 aliases |
+| **Templates** | `lua/templates/*.lua` | 14 |
+
+Click a category to filter. **All** shows everything by default.
+
+### 9bis.3 Search and tags
+
+- **Search field** (top of the main area) — instant filter on **name + description + tags**, case-insensitive substring match. Refreshes within 16 ms even with 200+ assets.
+- **Tags** in the sidebar (under categories) — each asset is tagged (`geometry`, `audio`, `beat`, `organic`, `glitch`, `retro`, `glow`, `abstract`, `composition`, `flagship`, `postprocess`, `camera`, `particle`, `shader`, etc.). Multi-select uses **AND** (intersection).
+- The 3 filters (category + tags + search) **stack** — assets must match all simultaneously.
+
+### 9bis.4 Grid view (default)
+
+64×64 thumbnails arranged in a responsive grid. Default thumbnails are generic icons per type (mesh = cube, texture = image swatch, shader = code icon, etc.). The number of columns adapts to the panel width. Scroll is virtualized via `ImGuiClipper` for fluid 60 fps with hundreds of assets.
+
+### 9bis.5 List view
+
+Toggle the **Grid/List** button in the toolbar. Each row shows: name + type + description on a single line. Same data, easier to read for long lists.
+
+### 9bis.6 Tooltip
+
+Hovering an asset shows a tooltip with:
+
+- Name + type
+- Description
+- For **meshes**: vertex / triangle count when available
+- For **shaders**: list of uniforms parsed from the file
+- For **presets**: number of nodes in the graph
+
+### 9bis.7 Favorites
+
+Right-click an asset → context menu **Add to Favorites** / **Remove from Favorites**. A **Favorites** section is pinned to the top of the grid, separated from the rest by a visual divider. Favorites are persisted in the user preferences (`settings.json`).
+
+### 9bis.8 Drag and drop
+
+Drag any asset out of the panel onto a compatible target. Eight typed payloads are emitted (aligned with `ViewportPanel` and `NodeEditorPanel`):
+
+| Payload | Source asset type | Targets and effect |
+|---|---|---|
+| `MESH_NAME` | Mesh | **Viewport** → creates a `SceneObjectNode` at the drop position (raycast). **Node Editor** → creates a `SceneObjectNode` at the drop point with `mesh_file` pre-set. |
+| `TEXTURE_NAME` | Texture | **SceneObjectNode** (Viewport or Node Editor) → creates a `TextureNode` linked to that scene object. |
+| `MATERIAL_NAME` | Material | **SceneObjectNode** → creates a `MaterialNode` linked to that scene object. |
+| `SHADER_NAME` | `.frag` / `.vert` | **SceneObjectNode** → creates a `ShaderFxNode` via `dbg.create_with_shader`. |
+| `PARTICLE_NAME` | Particle template | **Viewport** / **Node Editor** → creates a `ParticleNode` with the `template` parameter pre-set (uses `dbg.create_with_param`). |
+| `COMPOSITOR_NAME` | Post-process effect | **Node Editor** → creates a `PostProcessNode` with `compositor` pre-set. |
+| `PRESET_NAME` | Preset | **Viewport** / **Node Editor** → instantiates the entire graph via `dbg.preset()`. |
+| `TEMPLATE_NAME` | Template | **Node Editor** → loads the template via `dofile`. |
+
+### 9bis.9 Double-click actions
+
+Double-clicking an asset performs the same action as the typical drop target:
+
+| Asset type | Action |
 |---|---|
-| **All** | Every category |
-| **Meshes** | `.mesh` files enumerated by `ResourceEnumerator::listMeshes()` |
-| **Textures** | Texture files (with **List** / **Grid** toggle for thumbnails) |
-| **Particles** | OGRE particle system definitions |
-| **Compositors** | Available OGRE compositors |
-| **Shaders** | Procedural shaders from the Shader Gallery |
-| **Materials** | Referenced OGRE materials |
+| Mesh | Creates a `SceneObjectNode` in the active scene |
+| Preset | Instantiates the preset (same as drop on Viewport) |
+| Particle | Creates a `ParticleNode` with the chosen template |
+| Effect | Creates a `PostProcessNode` |
+| Template | Loads the template |
+| Texture / Material / Shader | Creates the corresponding node with the asset pre-filled |
 
-Each asset is **Selectable** and can be **dragged** to the Viewport or Node Editor. Payload carries the asset name (`MESH_NAME`, `TEXTURE_NAME`, `SHADER_NAME`, `MATERIAL_NAME`, `PARTICLE_NAME`, `COMPOSITOR_NAME`).
+### 9bis.10 Default layout
 
-Hover tooltips show type and name.
-
-### 9.3 Effect Rack
-
-Lists every registered node with, for each:
-
-- **##rack_\<name\>** checkbox — unchecked = bypass (node outputs are zeroed but the node stays in the graph)
-- Node name + type (grey)
-
-Bypass is non-destructive and instant — useful to isolate an effect during a show.
-
-### 9.4 Quick Access
-
-A **2×4 = 8 slot** grid (48 px square buttons) for one-click access to favourite presets / chords.
-
-- **Empty slot**: neutral button with a free-form label.
-- **Assigned slot**: blue-cyan button, showing the first 6 characters of the name.
-- **Click** on an assigned slot: activates the preset or ChordSystem chord (tries Lua first, falls back to preset instantiation).
-- **Drop** a preset (`PRESET_NAME`) on a slot: assigns the preset.
+The Asset Browser is **enabled by default** and docked alongside the Timeline (tabbed in the bottom dock). The first launch sets the default layout; subsequent launches restore the user's customised layout (saved on every `Ctrl+S`).
 
 ---
 
@@ -757,6 +844,8 @@ Each segment is a collapsible **TreeNode** (green background when currently play
 Bottom: with at least one segment, **<< Prev** and **Next >>** for manual navigation.
 
 The set is saved/loaded as JSON (`saveSet` / `loadSet` methods, triggered by export extensions or the Lua API).
+
+> **v3.5.1** — Set Editor playback is fully implemented: the *Play Set* button now drives `update(deltaTime)` with beat accumulation, auto-advance to the next segment on duration completion, transitions (cut / crossfade / fade_in / fade_out via alpha callback), per-segment BPM application, **Stop** button, and a progress bar of the current segment (bar X / Y). Set lists are also persisted across launches.
 
 ### 10.2 Performance Mode (F5)
 
@@ -855,6 +944,34 @@ When a MIDI device is connected:
 #### 10.2.8 MacroRunner
 
 Macros (lists of actions on a trigger) run *beat-gated*: each action waits for the current beat to reach the target before executing. Syntax `wait:N` = wait N beats before the next action.
+
+### 10.3 Effect Rack (v3.5.1)
+
+Standalone panel that lists every node currently registered in the graph and lets you toggle each one on/off in real time, with optional MIDI / Gamepad / Keyboard bindings per row. Title: **Effect Rack**. Shortcut: **F9**. Available from the **Connect** menu.
+
+The Effect Rack used to live inside the Preset Browser; in v3.5.1 it is a fully autonomous panel with proper bypass and learn modes. Bindings remain active **even when the panel is closed**.
+
+#### 10.3.1 Per-row controls
+
+Each node appears on its own row with the following controls (left to right):
+
+| Control | Behaviour |
+|---|---|
+| **LED dot** | Round dot showing the node state — **green** when active, **red** when bypassed. Dimmed/grey text when bypassed. Pattern matches the role indicators in MasterView. |
+| **Checkbox** | Toggles the node's `enabled` flag. The action is **undoable** via `SetEnabledCommand` (same command as the Node Editor right-click *Disable* — both stay in sync). |
+| **Node name + type** | Display name of the node (instance name + type label). |
+| **M (MIDI Learn)** | Click to enter MIDI learn mode for this row, then move a fader / press a pad. Once captured the button shows a badge such as `[CC42]` or `[N60]`. CC > 0.5 → enable, CC ≤ 0.5 → disable. Note Down → enable, Note Up → disable. Uses `MidiLearnManager` with target type `rack_toggle`. |
+| **G (Gamepad Learn)** | Click then press a button on any connected gamepad. Badge shows the source token, e.g. `[buttonA]`. Application uses front-edge detection (one toggle per press). |
+| **K (Keyboard Learn)** | Click then press any keyboard key. Badge shows the bound key, e.g. `[F]`. Front-edge detection. The handler runs **before** the global shortcut dispatcher, so any key can be bound — a yellow tooltip warns when binding a globally-used key (F1-F8, Space, Escape, etc.). The handler respects `WantCaptureKeyboard` (no toggle while typing in a text field). |
+
+#### 10.3.2 Persistence
+
+- **Keyboard and gamepad bindings** are saved with the project in `extraJson["effectRack"]` (key codes as integers, gamepad source tokens as strings).
+- **MIDI bindings** are managed by `MidiLearnManager` and saved in the project's MIDI bindings section.
+
+#### 10.3.3 Live performance use
+
+Bindings continue to work whether the Effect Rack panel is visible, hidden, or used in Performance Mode. The bindings update tick is unconditional: enable/disable a node by hitting the bound MIDI CC, gamepad button, or keyboard key from anywhere in the application.
 
 ---
 

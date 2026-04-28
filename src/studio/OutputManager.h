@@ -61,6 +61,9 @@ struct OutputSlot {
     GridWarpProfile gridWarpProfile;
     bool            gridWarpEnabled = false;
 
+    // ── Visibility (v3.5.1 — MasterView toggle) ──────────────────────
+    bool visible = true; ///< Whether the output window is shown (default: visible)
+
     // ── Texture sharing output (v3.4 Lot H, cross-platform Lot N) ──────
     bool                              textureShareEnabled = false;
     std::string                       textureShareSourceName; ///< defaults to "BBFx Output <id>"
@@ -150,6 +153,10 @@ public:
     /// Apply zone warp/blend configuration to a slot (v3.4 Lot O — Scene Switcher).
     void applyZoneWarpBlend(int slotId, const WarpProfile& wp, bool warpEn,
                             const BlendProfile& bp, bool blendEn);
+
+    /// Show / hide an output window (v3.5.1 — MasterView toggle).
+    void setOutputVisible(int id, bool visible);
+    bool isOutputVisible(int id) const;
 
     /// Enable / disable texture sharing on a slot (v3.4 Lot H, cross-platform Lot N).
     void enableTextureShare(int id, const std::string& sourceName = "");

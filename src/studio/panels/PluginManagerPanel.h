@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace bbfx {
 
@@ -25,6 +26,9 @@ public:
     int  activeTab() const { return mActiveTab; }
     void setActiveTab(int tab) { mActiveTab = tab; }
 
+    /// Callback to open the dedicated CommunityBrowserPanel.
+    void setOpenCommunityBrowserCb(std::function<void()> cb) { mOpenCommunityBrowser = std::move(cb); }
+
 private:
     void renderInstalledTab();
     void renderCommunityTab();
@@ -38,6 +42,8 @@ private:
     // Uninstall confirm modal
     std::string mPendingUninstall;  // non-empty while the modal is open
     bool        mOpenUninstallPopup = false;
+
+    std::function<void()> mOpenCommunityBrowser;
 };
 
 } // namespace bbfx

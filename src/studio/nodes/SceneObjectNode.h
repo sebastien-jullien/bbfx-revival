@@ -23,6 +23,10 @@ public:
     std::string getTypeName() const override { return "SceneObjectNode"; }
     Ogre::SceneNode* getSceneNode() const { return mSceneNode; }
     Ogre::Entity* getEntity() const { return dynamic_cast<Ogre::Entity*>(mMovable); }
+    /// Monotonically increasing counter, bumped each time the OGRE entity is
+    /// recreated (mesh change).  FX nodes compare this against a cached value
+    /// to detect entity replacement (avoids dangling-pointer / address-reuse UB).
+    int getEntityVersion() const { return mEntityVersion; }
     std::string getMeshName() const { return mCurrentMesh; }
 
     // ── Transform offsets (v3.3) ──────────────────────────────────────────
@@ -51,12 +55,18 @@ public:
     /// Used by FX clones (PerlinFxNode, WaveVertexShader) to sync their clone visibility.
     bool isNodeVisible() const;
 
+    /// FX override: hides the original entity while an FX clone replaces it.
+    /// Separate from mUserVisible so isNodeVisible() still returns the intended state.
+    void setFxHidden(bool h) { mFxHidden = h; }
+    bool isFxHidden() const { return mFxHidden; }
+
 private:
     Ogre::SceneManager* mScene;
     Ogre::SceneNode* mSceneNode = nullptr;
     Ogre::MovableObject* mMovable = nullptr;
     ParamSpec mSpec;
     std::string mCurrentMesh;
+    std::string mCurrentMaterial;
     Ogre::Vector3 mOffsetPos   = Ogre::Vector3::ZERO;
     Ogre::Vector3 mOffsetRot   = Ogre::Vector3::ZERO;
     Ogre::Vector3 mOffsetScale = Ogre::Vector3::UNIT_SCALE;
@@ -66,6 +76,8 @@ private:
     bool mLinkedRotX = false, mLinkedRotY = false, mLinkedRotZ = false;
     bool mLinkedSclX = false, mLinkedSclY = false, mLinkedSclZ = false;
     bool mLinkedVis  = false;
+    bool mFxHidden = false; // FX clone replaces this entity visually
+    int mEntityVersion = 0; // bumped on entity (re)creation
     int mLinkRefreshCounter = 0; // refresh link cache every N frames
 
     void createDefaultObject();

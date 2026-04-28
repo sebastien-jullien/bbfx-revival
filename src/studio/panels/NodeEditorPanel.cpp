@@ -73,6 +73,7 @@ ImVec4 NodeEditorPanel::nodeColor(const std::string& typeName) const {
 NodeEditorPanel::NodeEditorPanel(sol::state& lua) : mLua(lua) {
     ned::Config cfg;
     cfg.SettingsFile = ""; // Don't persist to file — positions managed by .bbfx-project
+    cfg.NavigateButtonIndex = 2; // Middle mouse button for canvas panning (avoid conflict with viewport right-click camera)
     mEditorContext = ned::CreateEditor(&cfg);
 }
 
@@ -710,8 +711,11 @@ void NodeEditorPanel::render() {
     }
 
     // ── Quick-add popup: double-click in void or Ctrl+Space ────────────────
-    if ((ImGui::IsMouseDoubleClicked(0) && !ned::GetHoveredNode() && !ned::GetHoveredLink() && !ned::GetHoveredPin()) ||
-        (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Space))) {
+    // Guard: only trigger when the Node Editor window itself is hovered,
+    // not when double-clicking in Asset Browser or other panels.
+    bool neHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_RootWindow);
+    if ((ImGui::IsMouseDoubleClicked(0) && neHovered && !ned::GetHoveredNode() && !ned::GetHoveredLink() && !ned::GetHoveredPin()) ||
+        (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Space) && neHovered)) {
         mShowQuickAdd = true;
         mQuickAddPos = ned::ScreenToCanvas(ImGui::GetMousePos());
         std::memset(mQuickAddBuf, 0, sizeof(mQuickAddBuf));
@@ -1164,10 +1168,27 @@ void NodeEditorPanel::render() {
         ImGui::EndPopup();
     }
 
-    // ── Drag-drop target for presets ─────────────────────────────────────
+    // ── Drag-drop target for all asset types ─────────────────────────────
     // Use window-level drop target (works even after ned::End)
     if (ImGui::BeginDragDropTargetCustom(ImGui::GetCurrentWindow()->ContentRegionRect,
                                           ImGui::GetCurrentWindow()->ID)) {
+        // Accept mesh drag → create SceneObjectNode
+        if (auto* payload = ImGui::AcceptDragDropPayload("MESH_NAME")) {
+            std::string meshName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            std::string nodeName = meshName;
+            // Remove extension for clean node name
+            auto dotPos = nodeName.rfind('.');
+            if (dotPos != std::string::npos) nodeName = nodeName.substr(0, dotPos);
+            for (auto& ch : nodeName) { if (ch == '/' || ch == ' ') ch = '_'; }
+            sol::optional<sol::table> dbg = mLua["dbg"];
+            if (dbg) {
+                sol::optional<sol::function> cwpFn = (*dbg)["create_with_param"];
+                if (cwpFn) (*cwpFn)("SceneObjectNode", nodeName, "mesh_file", meshName);
+            }
+            // Trigger deferred positioning at drop location
+            mDropPresetName = nodeName;
+        }
         if (auto* payload = ImGui::AcceptDragDropPayload("PRESET_NAME")) {
             std::string presetName(static_cast<const char*>(payload->Data));
             // Save drop screen position — will be converted to canvas in next frame
@@ -1182,15 +1203,20 @@ void NodeEditorPanel::render() {
                 }
             }
         }
-        // Accept particle drag → create ParticleNode
+        // Accept particle drag → create ParticleNode with correct template
         if (auto* payload = ImGui::AcceptDragDropPayload("PARTICLE_NAME")) {
             std::string particleName(static_cast<const char*>(payload->Data));
             mDropScreenPos = ImGui::GetMousePos();
+            // Generate a clean node name from the particle template name
+            std::string nodeName = "particle_" + particleName;
+            for (auto& ch : nodeName) { if (ch == '/' || ch == '.' || ch == ' ') ch = '_'; }
             sol::optional<sol::table> dbg = mLua["dbg"];
             if (dbg) {
-                sol::optional<sol::function> createFn = (*dbg)["create"];
-                if (createFn) (*createFn)("ParticleNode", particleName);
+                sol::optional<sol::function> cwpFn = (*dbg)["create_with_param"];
+                if (cwpFn) (*cwpFn)("ParticleNode", nodeName, "template", particleName);
             }
+            // Trigger deferred positioning at drop location
+            mDropPresetName = nodeName;
         }
         // Accept compositor drag → create CompositorNode with correct compositor name
         if (auto* payload = ImGui::AcceptDragDropPayload("COMPOSITOR_NAME")) {
@@ -1205,6 +1231,8 @@ void NodeEditorPanel::render() {
                 sol::optional<sol::function> cwpFn = (*dbg)["create_with_param"];
                 if (cwpFn) (*cwpFn)("CompositorNode", nodeName, "compositor", compName);
             }
+            // Trigger deferred positioning at drop location
+            mDropPresetName = nodeName;
         }
         // Accept shader drag → create ShaderFxNode with the dropped shader
         if (auto* payload = ImGui::AcceptDragDropPayload("SHADER_NAME")) {
@@ -1223,6 +1251,8 @@ void NodeEditorPanel::render() {
                 sol::optional<sol::function> cwsFn = (*dbg)["create_with_shader"];
                 if (cwsFn) (*cwsFn)(nodeName, vertShader, fragShader);
             }
+            // Trigger deferred positioning at drop location
+            mDropPresetName = nodeName;
         }
         // Helper: find SceneObjectNode under cursor using cached transform + node rects
         auto findSceneObjUnderCursor = [this]() -> std::string {
@@ -1272,6 +1302,12 @@ void NodeEditorPanel::render() {
             if (mCreateNodeFn) {
                 mCreateNodeFn("MaterialNode", matName, linkTarget);
             }
+        }
+        // Accept template drag → load the template via Lua
+        if (auto* payload = ImGui::AcceptDragDropPayload("TEMPLATE_NAME")) {
+            std::string tmplName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            mLua.script("local t = dofile('lua/templates/" + tmplName + ".lua'); if t and t.setup then t.setup() end");
         }
         ImGui::EndDragDropTarget();
     }

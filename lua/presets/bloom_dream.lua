@@ -6,5 +6,5 @@ return {
     params = ParamSpec.declare({
         ParamSpec.compositor("compositor", "Bloom"),
     }),
-    build = function(params) return {type="CompositorNode", params=params} end
+    build = function(params) return {type="PostProcessNode", params=params} end
 }

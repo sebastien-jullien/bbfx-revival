@@ -18,6 +18,9 @@ struct Settings {
     int64_t pluginsLastScanAt = 0;             // unix epoch seconds
     int communityCacheTTL = 3600;              // seconds (Lot H uses this)
 
+    // v3.5.1 — TextureNode default lighting mode ("unlit", "lit", "emissive")
+    std::string defaultLightingMode = "lit";
+
     // v3.5 Lot V — GitHub publishing. `githubToken` is stored XOR-scrambled
     // with a per-machine key; the raw OAuth token never lives on disk in
     // clear-text. `githubLogin` caches the authenticated username.

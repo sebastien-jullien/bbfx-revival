@@ -722,3 +722,40 @@ Le media pipeline v3.5 est modulaire :
 | Spout SDK | optional | externe (ifdef BBFX_HAS_SPOUT) |
 | EGL/GBM | optional | systeme Linux (ifdef BBFX_HAS_DMABUF) |
 | FastNoiseLite | header-only | embarque (src/plugin/procedural/) |
+
+## Etat des dependances v3.5.1 (Avril 2026)
+
+**Aucune nouvelle dependance vcpkg ajoutee en v3.5.1.** La version 3.5.1 "Asset Library & Polish" est un release de contenu et de polish UI : tout est implemente avec les dependances deja en place depuis v3.5.
+
+### Modules nouveaux livres avec dependances existantes
+
+| Module v3.5.1 | Dependances utilisees | Source |
+|--------------|----------------------|--------|
+| **PostProcessStack** | OGRE 14 (RTT, Rectangle2D, _render direct) | deja vcpkg |
+| **PostProcessNode + PostProcessEffect** | OGRE 14, ImGui | deja vcpkg / FetchContent |
+| **AssetBrowserPanel** | ImGui (drag&drop payloads, ClipperHelper virtualisation) | FetchContent |
+| **EffectRackPanel** | ImGui, MidiLearnManager (rtmidi) | deja en place |
+| **CameraNode 6 modes** | OGRE math (Vector3/Quaternion/Matrix3) | OGRE 14 |
+| **GeometryGenerator (mobius/lissajous/helix/diamond/star3d)** | OGRE Mesh API | OGRE 14 |
+| **MeshGenerator::registerDefaults()** | OGRE MeshManager | OGRE 14 |
+| **Materials BBFx VJ (Chrome/Neon/GlassVJ/Wireframe/...)** | OGRE Material scripts (.material) | OGRE 14 |
+| **Skybox materials fonctionnels** | OGRE cubic_texture | OGRE 14 |
+| **TextureNode lighting modes** | OGRE pass setAmbient/setSelfIllumination | OGRE 14 |
+| **OrbitState persistence** | nlohmann-json (extraJson) | deja vcpkg |
+| **Docking layout persistence** | ImGui SaveIniSettingsToDisk | FetchContent |
+| **ShaderFxNode vec2/3/4 support** | sol2 + OGRE setNamedConstant | deja en place |
+| **ShaderFxNode BPM fallback** | BeatDetector + Animator::getSourceNodes | deja en place |
+
+### Architecture PostProcessStack — choix technique majeur
+
+Le pipeline PostProcessStack contourne completement `Ogre::CompositorManager` car celui-ci corrompt le FBO de Dear ImGui en mode Studio (le compositor OGRE prend le controle du framebuffer, ImGui ne peut plus dessiner). Solution v3.5.1 :
+- Ping-pong RTT custom (`_PostProcess_Ping`, `_PostProcess_Pong`)
+- 3e RTT `_PostProcess_PrevFrame` pour effets feedback (FeedbackZoom, MotionTrailFB)
+- Rectangle2D fullscreen quad + `_setRenderTarget` + `_setViewport` + `_setPass` + `_render()` direct
+- Les materiaux .material existants sont reutilises tels quels (compatibilite shaders BBFx)
+
+Cela permet de faire fonctionner les 29 effets post-process en Studio sans necessiter une refonte complete d'OGRE.
+
+### Stack complete v3.5.1
+
+Identique a v3.5 (voir tableau ci-dessus). Aucun ajout, aucun retrait.

@@ -2,6 +2,7 @@
 
 #include "../core/Engine.h"
 #include "OutputManager.h"
+#include "../fx/PostProcessStack.h"
 #include <OgreTexture.h>
 #include <OgreRenderTexture.h>
 #include <SDL3/SDL.h>
@@ -81,8 +82,12 @@ public:
     /// Access the OutputManager for multi-output (v3.4).
     OutputManager* getOutputManager() { return mOutputManager.get(); }
 
+    /// Access the PostProcessStack (v3.5.1).
+    PostProcessStack* getPostProcessStack() { return mPostProcessStack.get(); }
+
 private:
     std::unique_ptr<OutputManager> mOutputManager;
+    std::unique_ptr<PostProcessStack> mPostProcessStack;
 };
 
 } // namespace bbfx

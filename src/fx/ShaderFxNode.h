@@ -49,6 +49,7 @@ private:
     Ogre::SceneManager* mScene;
     Ogre::Entity* mEntity = nullptr;
     std::string mTargetNodeName;
+    int mEntityVersion = -1;       // SceneObjectNode entity version when last attached
     Ogre::MaterialPtr mMaterial;
     Ogre::GpuProgramParametersSharedPtr mVertParams;
     Ogre::GpuProgramParametersSharedPtr mFragParams;
@@ -63,6 +64,12 @@ private:
     float mTime = 0.0f;
     bool mNeedsTex0 = false; // true if frag shader uses sampler2D tex0
     std::vector<std::string> mOriginalMaterials; // per sub-entity
+
+    // BPM-based fallback for audio uniforms (bass, mid, high)
+    // When these ports exist but have no incoming link, generate
+    // synthetic values pulsed to the BPM from RootTimeNode.
+    bool mHasAudioUniforms = false;  // true if shader declares bass/mid/high
+    float computeBpmFallback(const std::string& uniformName, float totalTime, float bpm) const;
 };
 
 } // namespace bbfx

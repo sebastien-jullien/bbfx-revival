@@ -107,13 +107,7 @@ void ShaderPreviewRenderer::createPreviewRTT(const std::string& name, const std:
 
         // Create a mesh entity in the preview scene
         std::string entityName = "PreviewEntity_" + name;
-        std::string meshName = isSphere ? "sphere.mesh" : "bbfx_plane.mesh";
-
-        // Check if the mesh exists, use a built-in one otherwise
-        if (!Ogre::MeshManager::getSingleton().resourceExists(meshName,
-            Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME)) {
-            meshName = isSphere ? "geosphere.mesh" : "razor.mesh";
-        }
+        std::string meshName = isSphere ? "geosphere4500.mesh" : "bbfx_plane.mesh";
 
         Ogre::Entity* entity = nullptr;
         try {

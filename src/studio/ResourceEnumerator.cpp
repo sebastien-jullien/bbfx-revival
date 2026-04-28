@@ -18,6 +18,8 @@ std::vector<std::string> ResourceEnumerator::sMaterials;
 std::vector<std::string> ResourceEnumerator::sParticles;
 std::vector<std::string> ResourceEnumerator::sCompositors;
 std::vector<std::string> ResourceEnumerator::sShaders;
+std::vector<std::string> ResourceEnumerator::sPresets;
+std::vector<std::string> ResourceEnumerator::sTemplates;
 
 void ResourceEnumerator::invalidateCache() { sCacheDirty = true; }
 
@@ -44,6 +46,19 @@ static std::vector<std::string> scanResourceGroup(const std::string& pattern) {
 std::vector<std::string> ResourceEnumerator::listMeshes() {
     if (sCacheDirty || sMeshes.empty()) {
         sMeshes = scanResourceGroup("*.mesh");
+        // Also include procedural meshes registered in MeshManager
+        auto it = Ogre::MeshManager::getSingleton().getResourceIterator();
+        while (it.hasMoreElements()) {
+            auto res = it.peekNextValue();
+            if (res) {
+                std::string name = res->getName();
+                if (std::find(sMeshes.begin(), sMeshes.end(), name) == sMeshes.end()) {
+                    sMeshes.push_back(name);
+                }
+            }
+            it.moveNext();
+        }
+        std::sort(sMeshes.begin(), sMeshes.end());
     }
     return sMeshes;
 }
@@ -135,6 +150,37 @@ std::vector<std::string> ResourceEnumerator::listShaders() {
     }
     sCacheDirty = false;
     return sShaders;
+}
+
+static std::vector<std::string> scanLuaDir(const std::string& dir) {
+    std::vector<std::string> result;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) return result;
+    for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".lua") continue;
+        std::string name = entry.path().stem().string();
+        if (!name.empty() && name[0] != '_') result.push_back(name);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::vector<std::string> ResourceEnumerator::listPresets() {
+    if (sPresets.empty()) {
+        sPresets = scanLuaDir("lua/presets");
+    }
+    return sPresets;
+}
+
+std::vector<std::string> ResourceEnumerator::listTemplates() {
+    if (sTemplates.empty()) {
+        sTemplates = scanLuaDir("lua/templates");
+    }
+    return sTemplates;
+}
+
+std::vector<std::string> ResourceEnumerator::listPostProcessEffects() {
+    return listCompositors();
 }
 
 } // namespace bbfx

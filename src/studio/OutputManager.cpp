@@ -336,7 +336,8 @@ nlohmann::json OutputSlot::toJson() const {
         {"spoutSourceName", textureShareSourceName},
         {"gridWarpEnabled", gridWarpEnabled},
         {"gridWarp", gridWarpProfile.toJson()},
-        {"zoneId", zoneId}
+        {"zoneId", zoneId},
+        {"visible", visible}
     };
     return j;
 }
@@ -359,6 +360,7 @@ void OutputSlot::fromJson(const nlohmann::json& j) {
     if (j.contains("gridWarpEnabled")) gridWarpEnabled = j["gridWarpEnabled"].get<bool>();
     if (j.contains("gridWarp"))       gridWarpProfile.fromJson(j["gridWarp"]);
     if (j.contains("zoneId"))         zoneId = j["zoneId"].get<int>();
+    if (j.contains("visible"))        visible = j["visible"].get<bool>();
 }
 
 // ── OutputManager ───────────────────────────────────────────────────────────
@@ -461,6 +463,7 @@ void OutputManager::updateAll() {
     // Texture sharing (v3.4 Lot H): send main texture for each slot that needs it.
     if (srcTexId) {
         for (auto& slot : mSlots) {
+            if (!slot.visible) continue; // Skip hidden outputs
             if (!slot.textureShareEnabled || !slot.textureSender) continue;
             if (!slot.textureSender->isInitialised()) {
                 std::string name = slot.textureShareSourceName.empty()
@@ -480,6 +483,9 @@ void OutputManager::updateAll() {
         if (!slot.nativeHWND) {
             if (!createNativeOutputWindow(slot))
                 continue;
+            // If slot was marked hidden before window creation, hide immediately.
+            if (!slot.visible)
+                ShowWindow(static_cast<HWND>(slot.nativeHWND), SW_HIDE);
             // Apply deferred monitor/fullscreen settings.
             if (slot.monitorIndex >= 0)
                 setMonitor(slot.id, slot.monitorIndex);
@@ -492,11 +498,15 @@ void OutputManager::updateAll() {
                     SDL_Rect bounds;
                     SDL_GetDisplayBounds(displays[monIdx], &bounds);
                     SetWindowPos(static_cast<HWND>(slot.nativeHWND), HWND_TOP,
-                        bounds.x, bounds.y, bounds.w, bounds.h, SWP_SHOWWINDOW);
+                        bounds.x, bounds.y, bounds.w, bounds.h,
+                        slot.visible ? SWP_SHOWWINDOW : SWP_NOACTIVATE);
                 }
                 if (displays) SDL_free(displays);
             }
         }
+
+        // Skip rendering for hidden outputs (no GL context switch, no blit, no swap).
+        if (!slot.visible) continue;
 
         if (!makeNativeWindowCurrent(slot))
             continue;
@@ -519,7 +529,11 @@ void OutputManager::updateAll() {
             SDL_GL_MakeCurrent(mMainWindow, mSharedGLContext);
             if (slot.monitorIndex >= 0) setMonitor(slot.id, slot.monitorIndex);
             if (slot.fullscreen) SDL_SetWindowFullscreen(slot.window, true);
+            // If slot was marked hidden before window creation, hide immediately.
+            if (!slot.visible) SDL_HideWindow(slot.window);
         }
+        // Skip rendering for hidden outputs.
+        if (!slot.visible) continue;
         SDL_GL_MakeCurrent(slot.window, mSharedGLContext);
         if (slot.testPattern.active) {
             renderTestPattern(slot);
@@ -536,6 +550,29 @@ void OutputManager::updateAll() {
 #else
     SDL_GL_MakeCurrent(mMainWindow, mSharedGLContext);
 #endif
+}
+
+void OutputManager::setOutputVisible(int id, bool vis) {
+    auto* slot = getSlot(id);
+    if (!slot || slot->visible == vis) return;
+    slot->visible = vis;
+#ifdef _WIN32
+    if (slot->nativeHWND) {
+        ShowWindow(static_cast<HWND>(slot->nativeHWND), vis ? SW_SHOW : SW_HIDE);
+    }
+#else
+    if (slot->window) {
+        if (vis) SDL_ShowWindow(slot->window);
+        else     SDL_HideWindow(slot->window);
+    }
+#endif
+    std::cout << "[OutputManager] Output " << id
+              << (vis ? " shown" : " hidden") << std::endl;
+}
+
+bool OutputManager::isOutputVisible(int id) const {
+    const auto* slot = getSlot(id);
+    return slot ? slot->visible : false;
 }
 
 void OutputManager::enableTextureShare(int id, const std::string& sourceName) {
@@ -625,8 +662,10 @@ void OutputManager::toggleFullscreen(int id) {
             if (displays && monIdx < displayCount) {
                 SDL_Rect bounds;
                 SDL_GetDisplayBounds(displays[monIdx], &bounds);
+                // Only show the window if the slot is visible.
+                UINT flags = slot->visible ? SWP_SHOWWINDOW : SWP_NOACTIVATE;
                 SetWindowPos(hwnd, HWND_TOP,
-                    bounds.x, bounds.y, bounds.w, bounds.h, SWP_SHOWWINDOW);
+                    bounds.x, bounds.y, bounds.w, bounds.h, flags);
             }
             if (displays) SDL_free(displays);
         } else {
@@ -887,6 +926,9 @@ void OutputManager::fromJson(const nlohmann::json& j, Ogre::SceneManager* sceneM
                 if (wasWarpEnabled)     enableWarp(newId);
                 if (wasGridWarpEnabled) enableGridWarp(newId);  // grid warp after quad warp
                 if (wasTexShareEnabled) enableTextureShare(newId, slot->textureShareSourceName);
+                // Visibility defaults to true; if saved as hidden, apply it.
+                // Window doesn't exist yet (lazy creation), so the flag is enough —
+                // updateAll() will hide the window immediately after creation.
             }
         }
     }

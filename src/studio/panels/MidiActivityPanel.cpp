@@ -88,6 +88,11 @@ void MidiActivityPanel::render() {
     ImGui::InputInt("Ch Filter", &mFilterChannel);
     if (mFilterChannel < 0) mFilterChannel = 0;
     if (mFilterChannel > 16) mFilterChannel = 16;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("Dev Filter", &mFilterDevice);
+    if (mFilterDevice < -1) mFilterDevice = -1;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("-1 = all devices");
 
     ImGui::Separator();
 

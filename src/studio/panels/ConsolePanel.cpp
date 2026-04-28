@@ -138,8 +138,36 @@ void ConsolePanel::render() {
     ImGui::Separator();
     bool reclaim = false;
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue |
-                                ImGuiInputTextFlags_EscapeClearsAll;
-    if (ImGui::InputText("##console_input", mInputBuf, sizeof(mInputBuf), flags)) {
+                                ImGuiInputTextFlags_EscapeClearsAll |
+                                ImGuiInputTextFlags_CallbackHistory;
+
+    auto historyCallback = [](ImGuiInputTextCallbackData* data) -> int {
+        auto* panel = static_cast<ConsolePanel*>(data->UserData);
+        if (panel->mInputHistory.empty()) return 0;
+
+        if (data->EventKey == ImGuiKey_UpArrow) {
+            if (panel->mHistoryPos == -1)
+                panel->mHistoryPos = static_cast<int>(panel->mInputHistory.size()) - 1;
+            else if (panel->mHistoryPos > 0)
+                panel->mHistoryPos--;
+        } else if (data->EventKey == ImGuiKey_DownArrow) {
+            if (panel->mHistoryPos != -1) {
+                panel->mHistoryPos++;
+                if (panel->mHistoryPos >= static_cast<int>(panel->mInputHistory.size()))
+                    panel->mHistoryPos = -1;
+            }
+        }
+
+        const char* text = (panel->mHistoryPos >= 0)
+            ? panel->mInputHistory[panel->mHistoryPos].c_str()
+            : "";
+        data->DeleteChars(0, data->BufTextLen);
+        data->InsertChars(0, text);
+        return 0;
+    };
+
+    if (ImGui::InputText("##console_input", mInputBuf, sizeof(mInputBuf), flags,
+                         historyCallback, this)) {
         std::string cmd(mInputBuf);
         if (!cmd.empty()) {
             addLog("bbfx> " + cmd);

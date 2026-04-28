@@ -403,28 +403,104 @@ void SurfaceEditorPanel::renderCanvas(ImVec2 canvasPos, ImVec2 canvasSize) {
         ImGui::EndPopup();
     }
 
-    // Left-click: select zone, start drag.
+    // Left-click: check resize handles first, then select zone or start drag.
     if (ImGui::IsItemHovered()) {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            int hitId = zoneAtPos(normPos.x, normPos.y);
-            mSelectedZoneId = hitId;
-            if (hitId >= 0) {
-                auto* zone = mSurfaceMap->getZone(hitId);
-                if (zone) {
-                    mDragging    = true;
-                    mDragOriginX = normPos.x;
-                    mDragOriginY = normPos.y;
-                    mDragZoneX   = zone->x;
-                    mDragZoneY   = zone->y;
-                    mDragZoneW   = zone->width;
-                    mDragZoneH   = zone->height;
+            // Check resize handles for the selected zone.
+            bool startedResize = false;
+            if (mSelectedZoneId >= 0) {
+                auto* selZone = mSurfaceMap->getZone(mSelectedZoneId);
+                if (selZone) {
+                    float hx[8], hy[8];
+                    float zx = selZone->x, zy = selZone->y;
+                    float zw = selZone->width, zh = selZone->height;
+                    hx[0] = zx;        hy[0] = zy;           // TL
+                    hx[1] = zx+zw*0.5f; hy[1] = zy;          // T
+                    hx[2] = zx+zw;     hy[2] = zy;           // TR
+                    hx[3] = zx+zw;     hy[3] = zy+zh*0.5f;   // R
+                    hx[4] = zx+zw;     hy[4] = zy+zh;        // BR
+                    hx[5] = zx+zw*0.5f; hy[5] = zy+zh;       // B
+                    hx[6] = zx;        hy[6] = zy+zh;        // BL
+                    hx[7] = zx;        hy[7] = zy+zh*0.5f;   // L
+
+                    float hitRadius = (canvasSize.x > 0) ? 8.0f / canvasSize.x : 0.02f;
+                    for (int i = 0; i < 8; ++i) {
+                        float ddx = normPos.x - hx[i];
+                        float ddy = normPos.y - hy[i];
+                        if (ddx*ddx + ddy*ddy < hitRadius*hitRadius) {
+                            mResizing     = true;
+                            mResizeHandle = i;
+                            mDragOriginX  = normPos.x;
+                            mDragOriginY  = normPos.y;
+                            mDragZoneX    = selZone->x;
+                            mDragZoneY    = selZone->y;
+                            mDragZoneW    = selZone->width;
+                            mDragZoneH    = selZone->height;
+                            startedResize = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!startedResize) {
+                int hitId = zoneAtPos(normPos.x, normPos.y);
+                mSelectedZoneId = hitId;
+                if (hitId >= 0) {
+                    auto* zone = mSurfaceMap->getZone(hitId);
+                    if (zone) {
+                        mDragging    = true;
+                        mDragOriginX = normPos.x;
+                        mDragOriginY = normPos.y;
+                        mDragZoneX   = zone->x;
+                        mDragZoneY   = zone->y;
+                        mDragZoneW   = zone->width;
+                        mDragZoneH   = zone->height;
+                    }
                 }
             }
         }
     }
 
-    // Drag zone.
-    if (mDragging && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    // Resize zone via handles.
+    constexpr float kMinSize = 0.05f;
+    if (mResizing && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        auto* zone = mSelectedZoneId >= 0 ? mSurfaceMap->getZone(mSelectedZoneId) : nullptr;
+        if (zone) {
+            float dx = normPos.x - mDragOriginX;
+            float dy = normPos.y - mDragOriginY;
+            float nx = mDragZoneX, ny = mDragZoneY;
+            float nw = mDragZoneW, nh = mDragZoneH;
+
+            switch (mResizeHandle) {
+                case 0: nx += dx; ny += dy; nw -= dx; nh -= dy; break; // TL
+                case 1:           ny += dy;           nh -= dy; break; // T
+                case 2:           ny += dy; nw += dx; nh -= dy; break; // TR
+                case 3:                     nw += dx;           break; // R
+                case 4:                     nw += dx; nh += dy; break; // BR
+                case 5:                               nh += dy; break; // B
+                case 6: nx += dx;           nw -= dx; nh += dy; break; // BL
+                case 7: nx += dx;           nw -= dx;           break; // L
+            }
+
+            // Enforce minimum size
+            if (nw < kMinSize) { nw = kMinSize; nx = mDragZoneX + mDragZoneW - kMinSize; }
+            if (nh < kMinSize) { nh = kMinSize; ny = mDragZoneY + mDragZoneH - kMinSize; }
+            // Clamp to canvas bounds [0, 1]
+            if (nx < 0.f) { nw += nx; nx = 0.f; }
+            if (ny < 0.f) { nh += ny; ny = 0.f; }
+            if (nx + nw > 1.f) nw = 1.f - nx;
+            if (ny + nh > 1.f) nh = 1.f - ny;
+            // Final min size check after clamping
+            if (nw >= kMinSize && nh >= kMinSize) {
+                zone->x = nx; zone->y = ny;
+                zone->width = nw; zone->height = nh;
+            }
+        }
+    }
+
+    // Drag zone (move).
+    if (mDragging && !mResizing && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         auto* zone = mSelectedZoneId >= 0 ? mSurfaceMap->getZone(mSelectedZoneId) : nullptr;
         if (zone) {
             float dx = normPos.x - mDragOriginX;
@@ -435,6 +511,8 @@ void SurfaceEditorPanel::renderCanvas(ImVec2 canvasPos, ImVec2 canvasSize) {
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         mDragging = false;
+        mResizing = false;
+        mResizeHandle = -1;
     }
 }
 

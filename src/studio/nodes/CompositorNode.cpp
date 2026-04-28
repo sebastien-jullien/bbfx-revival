@@ -2,10 +2,13 @@
 #include <OgreTexture.h>
 #include <OgreCompositorManager.h>
 #include <OgreViewport.h>
+#include <iostream>
 namespace bbfx {
 
 CompositorNode::CompositorNode(const std::string& name, Ogre::Viewport* viewport)
     : AnimationNode(name), mViewport(viewport) {
+    std::cout << "[CompositorNode] '" << name
+              << "' — deprecated, use PostProcessNode instead" << std::endl;
     ParamDef compDef; compDef.name = "compositor"; compDef.label = "Compositor"; compDef.type = ParamType::COMPOSITOR;
     compDef.stringVal = "Bloom";
     mSpec.addParam(compDef);

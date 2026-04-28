@@ -190,6 +190,8 @@ add_library(bbfx-core
     src/fx/WaveVertexShader.cpp
     src/fx/ColorShiftNode.cpp
     src/fx/ShaderFxNode.cpp
+    src/fx/PostProcessEffect.cpp
+    src/fx/PostProcessStack.cpp
     src/bindings/bbfx_bindings.cpp
     src/core/ParamSpec.cpp
     src/core/AutomationData.cpp
@@ -391,6 +393,7 @@ add_executable(bbfx-studio
     src/studio/nodes/LightNode.cpp
     src/studio/nodes/ParticleNode.cpp
     src/studio/nodes/CompositorNode.cpp
+    src/studio/nodes/PostProcessNode.cpp
     src/studio/nodes/TextureNode.cpp
     src/studio/nodes/MaterialNode.cpp
     src/studio/nodes/CameraNode.cpp
@@ -418,6 +421,7 @@ add_executable(bbfx-studio
     src/studio/panels/UndoHistoryPanel.cpp
     src/studio/panels/MidiActivityPanel.cpp
     src/studio/panels/MidiMappingPanel.cpp
+    src/studio/panels/EffectRackPanel.cpp
     src/studio/panels/OutputManagerPanel.cpp
     src/studio/OutputManager.cpp
     src/studio/WarpProfile.cpp
@@ -452,6 +456,7 @@ add_executable(bbfx-studio
     src/studio/commands/TransformCommands.cpp
     src/studio/commands/SceneCommands.cpp
     src/studio/panels/SceneHierarchyPanel.cpp
+    src/studio/panels/AssetBrowserPanel.cpp
     src/studio/project/ProjectSerializer.cpp
     src/studio/project/ExportDialog.cpp
     # imgui-node-editor (compiled directly — FetchContent target unreliable)

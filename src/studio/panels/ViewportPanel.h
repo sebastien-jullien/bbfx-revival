@@ -76,7 +76,6 @@ private:
     uint32_t mLastHeight = 0;
     uint32_t mPendingW   = 0;
     uint32_t mPendingH   = 0;
-    bool mShowOverlay = true;
     bool mIsHovered      = false;
     bool mRightMouseDown = false;
     bool mFpsCaptured    = false;  // true while RMB-held FPS mode with cursor locked

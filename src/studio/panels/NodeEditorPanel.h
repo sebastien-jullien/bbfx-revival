@@ -152,9 +152,6 @@ private:
     std::string mDropAssetTarget;    // SceneObjectNode target (for positioning next to it)
     ImVec2 mDropAssetScreenPos = {0, 0};
 
-    bool mShowCreateMenu = false;
-    ImVec2 mCreateMenuPos;
-
     // Quick-add popup state
     bool mShowQuickAdd = false;
     ImVec2 mQuickAddPos;           // canvas position for node creation
@@ -173,6 +170,7 @@ private:
     bool mShowSavePresetDialog = false;
     char mPresetNameBuf[128] = {};
 
+    ImVec2 mCreateMenuPos;  // screen position where context menu was opened
     std::vector<NodePosition> mPendingPositions;
     std::vector<std::string> mNewNodes;  // nodes added in current syncFromDAG call
 

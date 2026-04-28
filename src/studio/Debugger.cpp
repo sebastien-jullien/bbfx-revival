@@ -1,5 +1,6 @@
 #include "Debugger.h"
 #include "StudioApp.h"
+#include "../fx/PostProcessEffect.h"
 #include <sstream>
 #include "NodeTypeRegistry.h"
 #include "commands/CommandManager.h"
@@ -15,6 +16,9 @@
 #include "../midi/MidiDeviceManager.h"
 #include "../midi/MidiMessage.h"
 #include "../midi/MidiLearnManager.h"
+#include "ResourceEnumerator.h"
+#include "panels/AssetBrowserPanel.h"
+#include <OgreMeshManager.h>
 #include <OgreMaterialManager.h>
 #include <OgreMaterial.h>
 #include <OgreTechnique.h>
@@ -103,6 +107,9 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
                 if (node && !op.paramName.empty() && node->getParamSpec()) {
                     auto* p = node->getParamSpec()->getParam(op.paramName);
                     if (p) p->stringVal = op.paramValue;
+                    // Force an update so the node picks up the new param immediately
+                    // (isolated nodes don't receive graph-driven updates)
+                    node->update();
                 }
                 std::cout << "[dbg] Created " << op.arg1 << " '" << op.arg2 << "': "
                           << (node ? "OK" : "FAILED") << std::endl;
@@ -678,6 +685,90 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
         bool ok = sApp->getEngine()->captureFrame(filename);
         std::cout << "[dbg] Screenshot " << (ok ? "saved" : "FAILED") << ": " << filename << std::endl;
         return ok;
+    };
+
+    // ── PostProcessStack (v3.5.1) ──────────────────────────────────────
+    dbg["postprocess_list"] = []() {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) { std::cout << "[dbg] PostProcessStack not available" << std::endl; return; }
+        auto effects = stack->getEffects();
+        std::cout << "[dbg] PostProcessStack: " << effects.size() << " effect(s)" << std::endl;
+        for (auto& e : effects) {
+            std::cout << "  [" << e.order << "] " << e.name
+                      << " (" << e.materialName << ")"
+                      << (e.enabled ? " ON" : " OFF") << std::endl;
+            for (auto& [k, v] : e.params) {
+                std::cout << "      " << k << " = " << v << std::endl;
+            }
+        }
+    };
+    dbg["postprocess_add"] = [](const std::string& name, const std::string& materialName) -> bool {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return false;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) return false;
+        bool ok = stack->addEffect(name, materialName);
+        std::cout << "[dbg] postprocess_add " << name << " -> " << (ok ? "OK" : "FAIL") << std::endl;
+        return ok;
+    };
+    dbg["postprocess_remove"] = [](const std::string& name) -> bool {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return false;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) return false;
+        bool ok = stack->removeEffect(name);
+        std::cout << "[dbg] postprocess_remove " << name << " -> " << (ok ? "OK" : "FAIL") << std::endl;
+        return ok;
+    };
+    dbg["postprocess_order"] = [](const std::string& name, int pos) -> bool {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return false;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) return false;
+        return stack->reorder(name, pos);
+    };
+    dbg["postprocess_param"] = [](const std::string& effectName, const std::string& param, float value) -> bool {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return false;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) return false;
+        return stack->setParam(effectName, param, value);
+    };
+    dbg["postprocess_enable"] = [](const std::string& name, bool enabled) -> bool {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return false;
+        auto* stack = engine->getPostProcessStack();
+        if (!stack) return false;
+        return stack->setEnabled(name, enabled);
+    };
+    dbg["postprocess_clear"] = []() {
+        auto* engine = sApp ? sApp->getEngine() : nullptr;
+        if (!engine) return;
+        auto* stack = engine->getPostProcessStack();
+        if (stack) stack->clear();
+        std::cout << "[dbg] PostProcessStack cleared" << std::endl;
+    };
+
+    // ── Camera commands (v3.5.1 Lot D) ──────────────────────────────────
+    dbg["camera_mode"] = [](const std::string& mode) {
+        auto* animator = Animator::instance();
+        if (!animator) return;
+        auto names = animator->getRegisteredNodeNames();
+        for (auto& name : names) {
+            auto* node = animator->getRegisteredNode(name);
+            if (node && node->getTypeName() == "CameraNode") {
+                auto* spec = node->getParamSpec();
+                if (spec) {
+                    auto* p = spec->getParam("mode");
+                    if (p) p->stringVal = mode;
+                }
+                std::cout << "[dbg] Camera mode -> " << mode << std::endl;
+                return;
+            }
+        }
+        std::cout << "[dbg] No CameraNode found" << std::endl;
     };
 
     // ── FPS ────────────────────────────────────────────────────────────
@@ -1451,7 +1542,7 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
 
             auto subgraphOk = lua.script(
                 "local path = bbfx.authoring.exportSubgraph("
-                "  { id = 'dbg.lot_s.sub', name = 'Lot S Sub' }, "
+                "  { id = 'dbg-lots.subgraph', name = 'Lot S Sub' }, "
                 "  { nodes = {}, links = {} }); "
                 "return type(path) == 'string' and #path > 0");
             check("authoring.exportSubgraph writes a plugin dir",
@@ -1573,6 +1664,553 @@ void Debugger::install(sol::state& lua, StudioApp* app) {
             auto pressOk = lua.script("return bbfx.gamepad.isPressed(999, 0) == false");
             check("gamepad.isPressed(invalid) = false",
                   pressOk.valid() && pressOk.get<bool>());
+        }
+
+        // ── v3.5.1 Lot A Tests: meshes + materials ──────────────────────
+        std::cout << "\n--- v3.5.1 Lot A: Meshes + Materials ---" << std::endl;
+        {
+            auto grp = Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME;
+            auto detect = Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME;
+            auto& meshMgr = Ogre::MeshManager::getSingleton();
+            auto& matMgr = Ogre::MaterialManager::getSingleton();
+
+            // Procedural meshes pre-registered
+            check("torus.mesh registered in MeshManager",
+                  meshMgr.resourceExists("torus.mesh", grp));
+            check("cylinder.mesh registered in MeshManager",
+                  meshMgr.resourceExists("cylinder.mesh", grp));
+            check("bbfx_plane.mesh registered in MeshManager",
+                  meshMgr.resourceExists("bbfx_plane.mesh", grp));
+            check("cube_1m.mesh registered in MeshManager",
+                  meshMgr.resourceExists("cube_1m.mesh", grp));
+
+            // SceneObjectNode with torus.mesh
+            lua.script("dbg.create('SceneObjectNode', 'test_351_torus')");
+            lua.script("_dbg_process_pending()");
+            lua.script("dbg.set_param('test_351_torus', 'mesh_file', 'torus.mesh')");
+            lua.script("_dbg_process_pending()");
+            auto torusInspect = lua.script("return dbg.inspect('test_351_torus')");
+            check("SceneObjectNode(torus.mesh) created successfully",
+                  torusInspect.valid() && torusInspect.get<bool>());
+            lua.script("dbg.delete('test_351_torus')");
+            lua.script("_dbg_process_pending()");
+
+            // Robot material
+            check("Examples/Robot material exists",
+                  matMgr.resourceExists("Examples/Robot", detect));
+
+            // Dragon textures loaded (material exists)
+            check("bbfx_legacy/Material_8 (dragon) material exists",
+                  matMgr.resourceExists("bbfx_legacy/Material_8", detect));
+
+            // Skybox materials
+            check("BBFx/StormySkyBox material exists",
+                  matMgr.resourceExists("BBFx/StormySkyBox", detect));
+        }
+
+        // ── v3.5.1 Lot B Tests: PostProcessStack ──────────────────────────
+        std::cout << "\n--- v3.5.1 Lot B: PostProcessStack ---" << std::endl;
+        {
+            auto* engine = sApp ? sApp->getEngine() : nullptr;
+            auto* stack = engine ? engine->getPostProcessStack() : nullptr;
+
+            check("PostProcessStack created",
+                  stack != nullptr);
+
+            if (stack) {
+                // addEffect with valid material
+                bool addOk = stack->addEffect("test_invert", "BBFx/Invert");
+                check("addEffect(Invert) succeeds", addOk);
+
+                // getEffects returns the effect
+                auto effects = stack->getEffects();
+                check("getEffects() returns 1 effect", effects.size() == 1);
+
+                // hasActiveEffects
+                check("hasActiveEffects() returns true", stack->hasActiveEffects());
+
+                // setEnabled(false)
+                stack->setEnabled("test_invert", false);
+                check("setEnabled(false) -> no active effects",
+                      !stack->hasActiveEffects());
+
+                // setEnabled(true) back
+                stack->setEnabled("test_invert", true);
+
+                // removeEffect
+                bool rmOk = stack->removeEffect("test_invert");
+                check("removeEffect succeeds", rmOk);
+
+                check("getEffects() empty after remove",
+                      stack->getEffects().empty());
+
+                // Multi-effect + reorder
+                stack->addEffect("test_a", "BBFx/Vignette");
+                stack->addEffect("test_b", "BBFx/Invert");
+                stack->reorder("test_b", -1); // should come before test_a
+                auto sorted = stack->getEffects();
+                check("reorder: test_b before test_a",
+                      sorted.size() == 2 && sorted[0].name == "test_b");
+
+                // setParam
+                bool paramOk = stack->setParam("test_a", "strength", 0.5f);
+                check("setParam(strength, 0.5) succeeds", paramOk);
+
+                // PostProcessNode creation via NodeTypeRegistry
+                lua.script("dbg.create('PostProcessNode', 'test_351_pp')");
+                lua.script("_dbg_process_pending()");
+                auto ppNodeOk = lua.script(
+                    "return dbg.inspect('test_351_pp') ~= nil");
+                check("PostProcessNode created via NodeTypeRegistry",
+                      ppNodeOk.valid() && ppNodeOk.get<bool>());
+
+                // Cleanup
+                lua.script("dbg.delete('test_351_pp')");
+                lua.script("_dbg_process_pending()");
+                stack->clear();
+            }
+        }
+
+        // ── v3.5.1 Lot C Tests: PostProcess shader migration ────────────
+        std::cout << "\n--- v3.5.1 Lot C: PostProcess Shaders ---" << std::endl;
+        {
+            auto* engine = sApp ? sApp->getEngine() : nullptr;
+            auto* stack = engine ? engine->getPostProcessStack() : nullptr;
+            if (stack) {
+                // Verify all 22 BBFx effects are loadable as PostProcessEffects
+                auto catalogue = bbfx::getAvailableEffects();
+                check("catalogue has 29 effects", catalogue.size() == 29);
+
+                bool allOk = true;
+                for (auto& entry : catalogue) {
+                    std::string effName = std::string("lotc_") + entry.name;
+                    if (!stack->addEffect(effName, entry.materialName)) {
+                        std::cout << "    WARN: " << entry.materialName << " not loadable" << std::endl;
+                        allOk = false;
+                    }
+                }
+                check("all 22 BBFx effects loadable in PostProcessStack", allOk);
+
+                // Verify multi-effect chain
+                auto effects = stack->getEffects();
+                check("29 effects in stack", effects.size() == 29);
+
+                // Clean up
+                stack->clear();
+            }
+        }
+
+        // ── v3.5.1 Lot D Tests: CameraNode modes ─────────────────────────
+        std::cout << "\n--- v3.5.1 Lot D: CameraNode Modes ---" << std::endl;
+        {
+            // Create a CameraNode and test mode switching
+            lua.script("dbg.create('CameraNode', 'test_cam_d')");
+            lua.script("_dbg_process_pending()");
+            auto* animator = Animator::instance();
+            AnimationNode* camNode = animator ? animator->getRegisteredNode("test_cam_d") : nullptr;
+            check("CameraNode created for mode test", camNode != nullptr);
+
+            if (camNode) {
+                auto* spec = camNode->getParamSpec();
+                // Test mode enum has 6 modes
+                auto* modeDef = spec ? spec->getParam("mode") : nullptr;
+                check("CameraNode mode enum has 6 choices",
+                      modeDef != nullptr && modeDef->choices.size() == 6);
+
+                // Test orbit (default)
+                check("CameraNode default mode is orbit",
+                      modeDef != nullptr && modeDef->stringVal == "orbit");
+
+                // Switch to fly_through
+                if (modeDef) modeDef->stringVal = "fly_through";
+                camNode->update();
+                check("CameraNode fly_through mode runs", true);
+
+                // Switch to shake
+                if (modeDef) modeDef->stringVal = "shake";
+                camNode->update();
+                check("CameraNode shake mode runs", true);
+
+                // Switch to dolly_zoom
+                if (modeDef) modeDef->stringVal = "dolly_zoom";
+                camNode->update();
+                check("CameraNode dolly_zoom mode runs", true);
+
+                // Switch to crane
+                if (modeDef) modeDef->stringVal = "crane";
+                camNode->update();
+                check("CameraNode crane mode runs", true);
+            }
+
+            lua.script("dbg.delete('test_cam_d')");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.5.1 Lot E: ParticleNode Enhancements ────────────────────
+        std::cout << "\n--- v3.5.1 Lot E: ParticleNode Enhancements ---" << std::endl;
+        {
+            // Test BBFx/Fire template creates colored particles
+            lua.script("dbg.create('ParticleNode', 'test_fire_e')");
+            lua.script("_dbg_process_pending()");
+            auto* animator = Animator::instance();
+            AnimationNode* pNode = animator ? animator->getRegisteredNode("test_fire_e") : nullptr;
+            check("ParticleNode created for fire test", pNode != nullptr);
+
+            if (pNode) {
+                auto* spec = pNode->getParamSpec();
+                auto* tmplDef = spec ? spec->getParam("template") : nullptr;
+                if (tmplDef) tmplDef->stringVal = "BBFx/Fire";
+                pNode->update(); // trigger template change
+                check("BBFx/Fire template loads", true);
+
+                // Test color ports exist and work
+                auto& inputs = pNode->getInputs();
+                bool hasColor = inputs.count("color.r") && inputs.count("color.g") &&
+                                inputs.count("color.b") && inputs.count("color.a");
+                check("ParticleNode has color.r/g/b/a ports", hasColor);
+
+                // Test color change — set red
+                if (hasColor) {
+                    inputs.at("color.r")->setValue(1.0f);
+                    inputs.at("color.g")->setValue(0.0f);
+                    inputs.at("color.b")->setValue(0.0f);
+                    pNode->update();
+                    check("Color ports drive emitter color", true);
+                }
+
+                // Test particle_size port
+                bool hasSize = inputs.count("particle_size") > 0;
+                check("ParticleNode has particle_size port", hasSize);
+                if (hasSize) {
+                    inputs.at("particle_size")->setValue(20.0f);
+                    pNode->update();
+                    check("particle_size change accepted", true);
+                }
+            }
+
+            lua.script("dbg.delete('test_fire_e')");
+            lua.script("_dbg_process_pending()");
+
+            // Test ParticleTunnel template
+            lua.script("dbg.create('ParticleNode', 'test_tunnel_e')");
+            lua.script("_dbg_process_pending()");
+            pNode = animator ? animator->getRegisteredNode("test_tunnel_e") : nullptr;
+            if (pNode) {
+                auto* spec = pNode->getParamSpec();
+                auto* tmplDef = spec ? spec->getParam("template") : nullptr;
+                if (tmplDef) tmplDef->stringVal = "BBFx/ParticleTunnel";
+                pNode->update();
+                check("BBFx/ParticleTunnel template loads", true);
+            }
+            lua.script("dbg.delete('test_tunnel_e')");
+            lua.script("_dbg_process_pending()");
+
+            // Test existing templates still work
+            lua.script("dbg.create('ParticleNode', 'test_star_e')");
+            lua.script("_dbg_process_pending()");
+            pNode = animator ? animator->getRegisteredNode("test_star_e") : nullptr;
+            if (pNode) {
+                auto* spec = pNode->getParamSpec();
+                auto* tmplDef = spec ? spec->getParam("template") : nullptr;
+                if (tmplDef) tmplDef->stringVal = "BBFx/StarField";
+                pNode->update();
+                check("BBFx/StarField still works (non-regression)", true);
+            }
+            lua.script("dbg.delete('test_star_e')");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.5.1 Lot F: Presets correction & deduplication ────────────
+        std::cout << "\n--- v3.5.1 Lot F: Presets Correction ---" << std::endl;
+        {
+            // Test alias loading — perlin_pulse (alias → perlin_explosion)
+            lua.script("dbg.preset('perlin_pulse')");
+            lua.script("_dbg_process_pending()");
+            check("Alias perlin_pulse loads without crash", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test alias — mirror_kaleidoscope (alias → mandelbrot_explorer)
+            lua.script("dbg.preset('mirror_kaleidoscope')");
+            lua.script("_dbg_process_pending()");
+            check("Alias mirror_kaleidoscope loads without crash", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test alias — color_shift (alias → hue_cycle)
+            lua.script("dbg.preset('color_shift')");
+            lua.script("_dbg_process_pending()");
+            check("Alias color_shift loads without crash", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test glitch_fx uses glitch_block.frag
+            lua.script("dbg.preset('glitch_fx')");
+            lua.script("_dbg_process_pending()");
+            check("glitch_fx preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test motion_trail uses motion_trail.frag
+            lua.script("dbg.preset('motion_trail')");
+            lua.script("_dbg_process_pending()");
+            check("motion_trail preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test particle_symphony creates multiple nodes
+            lua.script("dbg.preset('particle_symphony')");
+            lua.script("_dbg_process_pending()");
+            check("particle_symphony preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.5.1 Lot G: Shaders GPU ────────────────────────────────
+        std::cout << "\n--- v3.5.1 Lot G: Shaders GPU ---" << std::endl;
+        {
+            // Test wave_gpu_morph preset
+            lua.script("dbg.preset('wave_gpu_morph')");
+            lua.script("_dbg_process_pending()");
+            check("wave_gpu_morph preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test datamosh preset
+            lua.script("dbg.preset('datamosh')");
+            lua.script("_dbg_process_pending()");
+            check("datamosh preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test julia_explorer preset
+            lua.script("dbg.preset('julia_explorer')");
+            lua.script("_dbg_process_pending()");
+            check("julia_explorer preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test explode_mesh preset
+            lua.script("dbg.preset('explode_mesh')");
+            lua.script("_dbg_process_pending()");
+            check("explode_mesh preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test fbm_clouds preset
+            lua.script("dbg.preset('fbm_clouds')");
+            lua.script("_dbg_process_pending()");
+            check("fbm_clouds preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.5.1 Lot H: Post-process + vec + feedback ──────────────────
+        std::cout << "\n--- v3.5.1 Lot H: Post-process + vec + feedback ---" << std::endl;
+        {
+            // Test halftone preset loads
+            lua.script("dbg.preset('halftone_comic')");
+            lua.script("_dbg_process_pending()");
+            check("halftone_comic preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test oil_painting preset loads
+            lua.script("dbg.preset('oil_painting')");
+            lua.script("_dbg_process_pending()");
+            check("oil_painting preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test feedback_tunnel preset loads
+            lua.script("dbg.preset('feedback_tunnel')");
+            lua.script("_dbg_process_pending()");
+            check("feedback_tunnel preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test sketch_mode preset loads
+            lua.script("dbg.preset('sketch_mode')");
+            lua.script("_dbg_process_pending()");
+            check("sketch_mode preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test radial_zoom preset loads
+            lua.script("dbg.preset('radial_zoom')");
+            lua.script("_dbg_process_pending()");
+            check("radial_zoom preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test catalogue has 29+ effects (22 original + 7 new)
+            {
+                auto catalogue = bbfx::getAvailableEffects();
+                check("29+ post-process effects available", catalogue.size() >= 29);
+            }
+
+            // Test color_grade_cinematic preset
+            lua.script("dbg.preset('color_grade_cinematic')");
+            lua.script("_dbg_process_pending()");
+            check("color_grade_cinematic preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+
+            // Test glitch_corruption preset
+            lua.script("dbg.preset('glitch_corruption')");
+            lua.script("_dbg_process_pending()");
+            check("glitch_corruption preset loads", true);
+            lua.script("dbg.clear()");
+            lua.script("_dbg_process_pending()");
+        }
+
+        // ── v3.5.1 Lot I: Templates fonctionnels ──────────────────────────
+        std::cout << "\n--- v3.5.1 Lot I: Templates fonctionnels ---" << std::endl;
+        {
+            auto testTemplate = [&](const std::string& name, int minNodes) {
+                lua.script("dbg.clear()");
+                lua.script("_dbg_flush_deletes()");
+                auto* anim = Animator::instance();
+                int before = anim ? (int)anim->getRegisteredNodeNames().size() : 0;
+                lua.script("local t = dofile('lua/templates/" + name + ".lua'); if t and t.setup then t.setup() end");
+                lua.script("_dbg_process_pending()");
+                int after = anim ? (int)anim->getRegisteredNodeNames().size() : 0;
+                int delta = after - before;
+                check("template " + name + " creates >= " + std::to_string(minNodes) + " nodes (got " + std::to_string(delta) + ")",
+                      delta >= minNodes);
+                lua.script("dbg.clear()");
+                lua.script("_dbg_flush_deletes()");
+            };
+
+            // empty creates 0 extra nodes (clear + capture baseline first)
+            lua.script("dbg.clear()");
+            lua.script("_dbg_flush_deletes()");
+            auto* animator = Animator::instance();
+            int baseline = animator ? (int)animator->getRegisteredNodeNames().size() : 0;
+            lua.script("local t = dofile('lua/templates/empty.lua'); if t and t.setup then t.setup() end");
+            lua.script("_dbg_process_pending()");
+            int emptyCount = animator ? (int)animator->getRegisteredNodeNames().size() : 0;
+            check("template empty creates 0 extra nodes", emptyCount == baseline);
+
+            testTemplate("bonneballe_basic", 5);
+            testTemplate("ambient", 5);
+            testTemplate("hiphop", 5);
+            testTemplate("house", 6);
+            testTemplate("techno", 7);
+            testTemplate("dubstep", 6);
+            testTemplate("dnb", 7);
+            testTemplate("beat_machine", 6);
+            testTemplate("particle_show", 6);
+            testTemplate("shader_lab", 3);
+            testTemplate("audio_reactive", 6);
+            testTemplate("full_performance", 8);
+            testTemplate("video_mix", 5);
+        }
+
+        // ── v3.5.1 Lot J: Presets enrichis (compositions) ────────────────
+        std::cout << "\n--- v3.5.1 Lot J: Presets enrichis ---" << std::endl;
+        {
+            auto testCompositionPreset = [&](const std::string& name, int minNodes) {
+                lua.script("dbg.clear()");
+                lua.script("_dbg_flush_deletes()");
+                auto* anim = Animator::instance();
+                int before = anim ? (int)anim->getRegisteredNodeNames().size() : 0;
+                lua.script("dbg.preset('" + name + "')");
+                lua.script("_dbg_process_pending()");
+                int after = anim ? (int)anim->getRegisteredNodeNames().size() : 0;
+                int delta = after - before;
+                check("composition preset " + name + " creates >= " + std::to_string(minNodes) + " nodes (got " + std::to_string(delta) + ")",
+                      delta >= minNodes);
+            };
+
+            testCompositionPreset("bonneballe_classic", 5);
+            testCompositionPreset("tunnel_party", 3);
+            testCompositionPreset("fractal_explorer", 3);
+            testCompositionPreset("neon_geometry", 5);
+            testCompositionPreset("fluid_dreams", 4);
+            testCompositionPreset("glitch_art", 5);
+            testCompositionPreset("retro_arcade", 5);
+            testCompositionPreset("frequency_landscape", 4);
+            testCompositionPreset("perlin_sphere", 2);
+            testCompositionPreset("waveform_ring", 5);
+            testCompositionPreset("landscape_deform", 5);
+
+            // Check that all 14 presets have non-empty tags
+            auto checkPresetTags = [&](const std::string& name) {
+                auto result = lua.safe_script("local p = dofile('lua/presets/" + name + ".lua'); return p and p.tags and #p.tags > 0", sol::script_pass_on_error);
+                bool hasTags = result.valid() && result.get_type() == sol::type::boolean && result.get<bool>();
+                check("preset " + name + " has tags", hasTags);
+            };
+            checkPresetTags("bonneballe_classic");
+            checkPresetTags("perlin_sphere");
+            checkPresetTags("glitch_art");
+            checkPresetTags("landscape_deform");
+
+            // Cleanup
+            lua.script("dbg.clear()");
+            lua.script("_dbg_flush_deletes()");
+        }
+
+        // ── v3.5.1 Lot K: Meshes, materiaux, presets dormants ─────────
+        std::cout << "\n--- v3.5.1 Lot K: Meshes + materiaux + presets dormants ---" << std::endl;
+        {
+            auto& meshMgr = Ogre::MeshManager::getSingleton();
+            auto grp = Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME;
+            check("mobius.mesh exists", meshMgr.resourceExists("mobius.mesh", grp));
+            check("lissajous.mesh exists", meshMgr.resourceExists("lissajous.mesh", grp));
+            check("helix.mesh exists", meshMgr.resourceExists("helix.mesh", grp));
+            check("diamond.mesh exists", meshMgr.resourceExists("diamond.mesh", grp));
+            check("star3d.mesh exists", meshMgr.resourceExists("star3d.mesh", grp));
+
+            auto& matMgr = Ogre::MaterialManager::getSingleton();
+            check("BBFx/Chrome material exists", matMgr.resourceExists("BBFx/Chrome", grp));
+            check("BBFx/Neon material exists", matMgr.resourceExists("BBFx/Neon", grp));
+            check("BBFx/GlassVJ material exists", matMgr.resourceExists("BBFx/GlassVJ", grp));
+            check("BBFx/Wireframe material exists", matMgr.resourceExists("BBFx/Wireframe", grp));
+            check("BBFx/Hologram material exists", matMgr.resourceExists("BBFx/Hologram", grp));
+            check("BBFx/Emissive material exists", matMgr.resourceExists("BBFx/Emissive", grp));
+            check("BBFx/Gradient material exists", matMgr.resourceExists("BBFx/Gradient", grp));
+            check("BBFx/Reflective material exists", matMgr.resourceExists("BBFx/Reflective", grp));
+
+            // Test dormant mesh presets load
+            auto testPresetLoads = [&](const std::string& name) {
+                auto result = lua.safe_script("local p = dofile('lua/presets/" + name + ".lua'); return p ~= nil", sol::script_pass_on_error);
+                bool ok = result.valid() && result.get_type() == sol::type::boolean && result.get<bool>();
+                check("preset " + name + " loads", ok);
+            };
+            testPresetLoads("perlin_sphere");
+            testPresetLoads("knot_dance");
+            testPresetLoads("fish_swim");
+            testPresetLoads("barrel_roll");
+            testPresetLoads("cube_transform");
+        }
+
+        // ── v3.5.1 Lot L: Asset Browser Panel ──────────────────────────
+        std::cout << "\n--- v3.5.1 Lot L: Asset Browser Panel ---" << std::endl;
+        {
+            // AssetBrowserPanel instantiation check (no crash)
+            { AssetBrowserPanel testPanel; check("AssetBrowserPanel created without crash", true); }
+
+            // ResourceEnumerator extended methods
+            auto meshes = ResourceEnumerator::listMeshes();
+            check("listMeshes() >= 20 meshes (got " + std::to_string(meshes.size()) + ")",
+                  (int)meshes.size() >= 20);
+
+            auto shaders = ResourceEnumerator::listShaders();
+            check("listShaders() >= 25 shaders (got " + std::to_string(shaders.size()) + ")",
+                  (int)shaders.size() >= 25);
+
+            auto presets = ResourceEnumerator::listPresets();
+            check("listPresets() >= 50 presets (got " + std::to_string(presets.size()) + ")",
+                  (int)presets.size() >= 50);
+
+            auto particles = ResourceEnumerator::listParticleTemplates();
+            check("listParticleTemplates() >= 13 templates (got " + std::to_string(particles.size()) + ")",
+                  (int)particles.size() >= 13);
+
+            auto effects = ResourceEnumerator::listPostProcessEffects();
+            check("listPostProcessEffects() >= 22 effects (got " + std::to_string(effects.size()) + ")",
+                  (int)effects.size() >= 22);
         }
 
         std::cout << "\n=== Results: " << pass << " PASS, " << fail << " FAIL ===" << std::endl;

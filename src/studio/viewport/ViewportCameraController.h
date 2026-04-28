@@ -58,6 +58,18 @@ public:
     /// Force the orbit center to a specific world position (e.g. ground plane hit).
     void setLockOnCenter(const Ogre::Vector3& pt) { mOrbitCenter = pt; }
 
+    /// Camera state accessors for project save/load.
+    struct OrbitState {
+        float yaw, pitch, distance;
+        Ogre::Vector3 center;
+    };
+    OrbitState getOrbitState() const { return {mOrbitYaw, mOrbitPitch, mOrbitDistance, mOrbitCenter}; }
+    void setOrbitState(const OrbitState& s) {
+        mOrbitYaw = s.yaw; mOrbitPitch = s.pitch;
+        mOrbitDistance = s.distance; mOrbitCenter = s.center;
+        applyOrbit();
+    }
+
 private:
     Ogre::Camera* mCamera;
     Ogre::SceneNode* mCamNode;

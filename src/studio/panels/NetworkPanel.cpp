@@ -100,12 +100,16 @@ void NetworkPanel::renderToolbar(SyncManager* sync) {
         ImGui::TextDisabled("  Clock offset: %.1f ms", sync->getClockOffset());
     }
 
-    // Auto-discovery
+    // Auto-discovery (not yet implemented — SyncManager has no discovery API)
     ImGui::SeparatorText("Discovery");
+    ImGui::BeginDisabled(true);
     ImGui::Checkbox("Auto-discovery (UDP broadcast)", &mAutoDiscovery);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Not yet implemented — use manual IP connection below");
 
-    // Manual connect (greyed out when auto-discovery on)
-    ImGui::BeginDisabled(mAutoDiscovery);
+    // Manual connect
+    ImGui::BeginDisabled(false);
     ImGui::SetNextItemWidth(160.f);
     ImGui::InputText("IP##manual", mManualIpBuf, sizeof(mManualIpBuf));
     ImGui::SameLine();

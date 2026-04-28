@@ -92,3 +92,61 @@ material Examples/Aureola
     }
 }
 
+// BBFx Particle Sprite Materials (I-1588)
+// Circular glow — additive, soft edges
+material BBFx/ParticleGlow
+{
+    technique
+    {
+        pass
+        {
+            lighting off
+            scene_blend add
+            depth_write off
+
+            texture_unit
+            {
+                texture flare.png
+            }
+        }
+    }
+}
+
+// Star sprite — alpha blend for opaque confetti/solid particles
+material BBFx/ParticleSolid
+{
+    technique
+    {
+        pass
+        {
+            lighting off
+            scene_blend alpha_blend
+            depth_write off
+
+            texture_unit
+            {
+                texture flare.png
+            }
+        }
+    }
+}
+
+// Oriented trail — additive streak for lasers/trails
+material BBFx/ParticleTrail
+{
+    technique
+    {
+        pass
+        {
+            lighting off
+            scene_blend add
+            depth_write off
+
+            texture_unit
+            {
+                texture flaretrail.png
+            }
+        }
+    }
+}
+

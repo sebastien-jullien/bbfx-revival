@@ -241,7 +241,7 @@ particle_system Examples/Aureola
     }
 }
 
-// Exudes aureola particles which around the model float upwards
+// Aureola tweak — Z-oriented halo variant, recalibrated for camera at 50 units
 particle_system Examples/Aureola_tweak
 {
     material        Examples/Aureola
@@ -253,39 +253,37 @@ particle_system Examples/Aureola_tweak
     common_direction 0 0 1
     common_up_vector 0 1 0
 
-    // Area emitter
+    // Area emitter — positioned near origin for visibility
     emitter Box
     {
         angle           20
         emission_rate   7
         time_to_live    10
-        position        0 -100 0
+        position        0 -30 0
         direction       0 1 0
         velocity_min  	0
         velocity_max  	30
-//        colour_range_start  0.3 0.3 0.3 0.0
-//        colour_range_end    0.8 0.8 0.8 0.0
-	colour_range_start		0.2 0.2 0.2 0.2
-	colour_range_end		0.6 0.6 0.6 0.6
+        colour_range_start  0.4 0.4 0.4 0.4
+        colour_range_end    0.9 0.9 0.9 0.8
         width           10
         height          10
         depth           30
     }
 
-    // Make em float upwards
+    // Float upwards (Y) with slight Z drift — keeps Z-orientation theme
     affector LinearForce
     {
-        force_vector      0 0 70
+        force_vector      0 50 20
         force_application add
     }
 
-    // Fader
+    // Fader — stronger fade-in for visibility
     affector ColourFader
     {
-        red +0.1
-        green +0.1
-        blue +0.1
-        alpha +0.1
+        red +0.15
+        green +0.15
+        blue +0.15
+        alpha +0.15
     }
 
     // Rotater

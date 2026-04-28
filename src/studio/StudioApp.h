@@ -21,6 +21,7 @@
 #include "panels/SurfaceEditorPanel.h"
 #include "panels/NetworkPanel.h"
 #include "panels/MasterViewPanel.h"
+#include "panels/AssetBrowserPanel.h"
 #include "ShaderPreviewRenderer.h"
 #include "WarpWizard.h"
 #include "SurfaceMap.h"
@@ -91,11 +92,11 @@ private:
     void renderFrame();
     void renderMenuBar();
     void renderPanels();
-    void renderStatusBar();
     void renderAboutDialog();
     void renderShortcutsDialog();
     void renderRecoveryDialog();
     void renderSettingsDialog();
+    void newProject();
 
     // ── Node type registration ──────────────────────────────────────────────
     void initNodeTypeRegistry();
@@ -142,11 +143,13 @@ private:
     std::unique_ptr<UndoHistoryPanel>      mUndoHistoryPanel;
     std::unique_ptr<MidiActivityPanel>     mMidiActivityPanel;
     std::unique_ptr<MidiMappingPanel>      mMidiMappingPanel;
+    std::unique_ptr<class EffectRackPanel> mEffectRackPanel;
     std::unique_ptr<OutputManagerPanel>    mOutputManagerPanel;
     std::unique_ptr<OscBrowserPanel>       mOscBrowserPanel;
     std::unique_ptr<SurfaceEditorPanel>    mSurfaceEditorPanel;
     std::unique_ptr<NetworkPanel>          mNetworkPanel;
     std::unique_ptr<MasterViewPanel>      mMasterViewPanel;
+    std::unique_ptr<AssetBrowserPanel>    mAssetBrowserPanel;  // v3.5.1 Lot L
 
     // ── Surface Map (v3.4 Lot E) ───────────────────────────────────────────────
     std::unique_ptr<SurfaceMap>            mSurfaceMap;
@@ -172,11 +175,13 @@ private:
     bool mShowUndoHistory    = false;
     bool mShowMidiActivity   = false;
     bool mShowMidiMapping    = false;
+    bool mShowEffectRack     = false;
     bool mShowOutputManager  = false;
     bool mShowOscBrowser     = false;
     bool mShowSurfaceEditor  = false;
     bool mShowNetworkPanel   = false;
     bool mShowMasterView     = false;
+    bool mShowAssetBrowser   = true;   // v3.5.1 Lot L — open by default
     bool mShowPluginManager    = false;  // v3.5 Lot D (placeholder) / Lot G (full)
     bool mShowPluginErrors     = false;  // v3.5 Lot G
     bool mShowCommunityBrowser = false;  // v3.5 Lot H
@@ -193,7 +198,6 @@ private:
     bool mShowShortcuts     = false;
     bool mShowSettings      = false;
     bool mProjectDirty      = false;
-    bool mShowSplash        = false;  // splash screen on startup (v3.2.5)
     bool mShowRecoveryDialog = false; // autosave recovery after crash
     std::string mRecoveryAutosavePath;
 
@@ -205,7 +209,6 @@ public:
 private:
     std::string mLockFilePath;         // crash recovery lock file (v3.2.5)
 
-    void renderSplashScreen();
     void createLockFile();
     void removeLockFile();
 };

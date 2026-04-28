@@ -5,6 +5,7 @@
 #include "../nodes/LightNode.h"
 #include "../nodes/ParticleNode.h"
 #include <OgreEntity.h>
+#include <OgreAny.h>
 #include <OgreMesh.h>
 #include <OgreSubEntity.h>
 #include <OgreSceneNode.h>
@@ -123,6 +124,15 @@ void ViewportPicker::deselect()
 std::string ViewportPicker::findDAGNodeForEntity(Ogre::MovableObject* obj) const
 {
     if (!obj) return "";
+
+    // Fast path: check if the object carries a target DAG name tag
+    // (set by FX nodes like PerlinFxNode on their clone entities)
+    try {
+        const auto& any = obj->getUserObjectBindings().getUserAny("bbfx_target_dag");
+        if (any.has_value())
+            return Ogre::any_cast<std::string>(any);
+    } catch (...) {}
+
     auto* animator = Animator::instance();
     if (!animator) return "";
 

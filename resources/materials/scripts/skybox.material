@@ -1,0 +1,92 @@
+// BBFx Skybox Materials — extracted from original OGRE media packs
+// All textures in resources/materials/textures/skybox/
+
+material BBFx/StormySkyBox
+{
+	technique
+	{
+		pass
+		{
+			lighting off
+			depth_write off
+
+			texture_unit
+			{
+				cubic_texture stormy_FR.jpg stormy_BK.jpg stormy_UP.jpg stormy_DN.jpg stormy_LF.jpg stormy_RT.jpg separateUV
+				tex_address_mode clamp
+			}
+		}
+	}
+}
+
+material BBFx/MorningSkyBox
+{
+	technique
+	{
+		pass
+		{
+			lighting off
+			depth_write off
+
+			texture_unit
+			{
+				cubic_texture morning_FR.jpg morning_BK.jpg morning_UP.jpg morning_DN.jpg morning_LF.jpg morning_RT.jpg separateUV
+				tex_address_mode clamp
+			}
+		}
+	}
+}
+
+material BBFx/EveningSkyBox
+{
+	technique
+	{
+		pass
+		{
+			lighting off
+			depth_write off
+
+			texture_unit
+			{
+				cubic_texture evening_FR.jpg evening_BK.jpg evening_UP.jpg evening_DN.jpg evening_LF.jpg evening_RT.jpg separateUV
+				tex_address_mode clamp
+			}
+		}
+	}
+}
+
+material BBFx/EarlyMorningSkyBox
+{
+	technique
+	{
+		pass
+		{
+			lighting off
+			depth_write off
+
+			texture_unit
+			{
+				cubic_texture early_morning_FR.jpg early_morning_BK.jpg early_morning_UP.jpg early_morning_DN.jpg early_morning_LF.jpg early_morning_RT.jpg separateUV
+				tex_address_mode clamp
+			}
+		}
+	}
+}
+
+material BBFx/CloudyNoonSkyBox
+{
+	technique
+	{
+		pass
+		{
+			lighting off
+			depth_write off
+
+			texture_unit
+			{
+				cubic_texture cloudy_noon_FR.jpg cloudy_noon_BK.jpg cloudy_noon_UP.jpg cloudy_noon_DN.jpg cloudy_noon_LF.jpg cloudy_noon_RT.jpg separateUV
+				tex_address_mode clamp
+			}
+		}
+	}
+}

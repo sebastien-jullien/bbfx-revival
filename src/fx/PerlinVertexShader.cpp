@@ -56,6 +56,35 @@ void PerlinVertexShader::_applyNoise(VertexData* data, const CpuMeshData& cpuDat
         norms[i] = n.x; norms[i+1] = n.y; norms[i+2] = n.z;
     }
 
+    // One-shot diagnostic: log first 3 normals and indices
+    static bool sNormDiagDone = false;
+    if (!sNormDiagDone && nVerts > 0) {
+        sNormDiagDone = true;
+        size_t numFaces = cpuData.indexCount / 3;
+        std::cout << "[PerlinVS DIAG] nVerts=" << nVerts << " nFaces=" << numFaces
+                  << " indexCount=" << cpuData.indexCount << std::endl;
+        // First 3 vertices: positions & normals
+        for (size_t v = 0; v < std::min(nVerts, (size_t)3); v++) {
+            std::cout << "[PerlinVS DIAG]   v[" << v << "] pos=("
+                      << dstPos[v*3] << "," << dstPos[v*3+1] << "," << dstPos[v*3+2]
+                      << ") norm=(" << norms[v*3] << "," << norms[v*3+1] << "," << norms[v*3+2] << ")"
+                      << std::endl;
+        }
+        // First 3 faces: indices
+        for (size_t f = 0; f < std::min(numFaces, (size_t)3); f++) {
+            std::cout << "[PerlinVS DIAG]   face[" << f << "] idx=("
+                      << cpuData.indices[f*3] << "," << cpuData.indices[f*3+1] << "," << cpuData.indices[f*3+2]
+                      << ")" << std::endl;
+        }
+        // Check for any zero normals in first 100
+        int zeroCount = 0;
+        for (size_t v = 0; v < std::min(nVerts, (size_t)100); v++) {
+            float len = std::sqrt(norms[v*3]*norms[v*3] + norms[v*3+1]*norms[v*3+1] + norms[v*3+2]*norms[v*3+2]);
+            if (len < 0.001f) zeroCount++;
+        }
+        std::cout << "[PerlinVS DIAG]   zero normals in first 100: " << zeroCount << std::endl;
+    }
+
     // 3. Write back into the clone buffer using lock (clone is HBU_CPU_TO_GPU)
     const auto* posElem = data->vertexDeclaration->findElementBySemantic(VES_POSITION);
     const auto* normElem = data->vertexDeclaration->findElementBySemantic(VES_NORMAL);
@@ -65,7 +94,8 @@ void PerlinVertexShader::_applyNoise(VertexData* data, const CpuMeshData& cpuDat
     size_t vertexSize = posBuf->getVertexSize();
     size_t posOffset = posElem->getOffset();
 
-    uint8_t* raw = static_cast<uint8_t*>(posBuf->lock(HardwareBuffer::HBL_DISCARD));
+    // Use HBL_NORMAL (not HBL_DISCARD) to preserve UV/tangent data in interleaved buffers
+    uint8_t* raw = static_cast<uint8_t*>(posBuf->lock(HardwareBuffer::HBL_NORMAL));
 
     for (size_t v = 0; v < nVerts; v++) {
         float* dst = reinterpret_cast<float*>(raw + v * vertexSize + posOffset);
@@ -97,7 +127,8 @@ void PerlinVertexShader::_applyNoise(VertexData* data, const CpuMeshData& cpuDat
 }
 
 void PerlinVertexShader::renderOneFrame(Real dt) {
-    if (!clonedMesh) return; // not yet initialized (deferred clone)
+    if (!clonedMesh) return;
+
     for (unsigned m = 0; m < clonedMesh->getNumSubMeshes(); m++) {
         auto* subMesh = clonedMesh->getSubMesh(m);
         VertexData* vdata = subMesh->useSharedVertices

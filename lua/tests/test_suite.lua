@@ -276,17 +276,18 @@ check("D-015", "Detach entity links", true)
 dbg.clear(); WL()
 
 -- ── D-020..D-024: Presets ───────────────────────────────────────────────────
-print("\n--- Cat.2: Presets (41) ---")
+print("\n--- Cat.2: Presets (37) ---")
 
 local presets = {
-    "audio_reactive_sphere", "aureola", "auto_track", "bloom_dream",
+    "aureola", "auto_track", "bloom_dream",
     "bw_high_contrast", "color_shift", "depth_of_field", "dolly_zoom",
     "elastic_bounce", "fireflies", "flash_strobe", "fly_through",
-    "fractal_growth", "geosphere_explode", "glitch_fx", "gradient_pulse",
-    "heat_distort", "jet_exhaust", "material_cycle", "mesh_morph_cycle",
+    "geosphere_explode", "glitch_fx", "gradient_pulse",
+    "heat_distort", "jet_exhaust", "material_cycle",
     "mirror_kaleidoscope", "monochrome_fade", "motion_trail", "old_film",
     "orbit_slow", "particle_symphony", "perlin_breath", "perlin_pulse",
-    "rain_drops", "rainbow_cycle", "shake_beat", "smoke_rise",
+    "perlin_sphere",
+    "rain_drops", "shake_beat", "smoke_rise",
     "snowfall", "spark_burst", "star_field", "starwars_tribute",
     "texture_sweep", "texture_vjing", "tunnel_infinite", "vertex_noise",
     "wave_morph"
@@ -300,7 +301,7 @@ for _, name in ipairs(presets) do
     if ok then p_ok = p_ok + 1
     else p_fail = p_fail + 1; print("    FAIL preset: " .. name .. (err and (" — " .. tostring(err)) or "")) end
 end
-check("D-020", "41 presets load without crash (" .. p_ok .. "/41)", p_fail == 0)
+check("D-020", p_ok .. " presets load without crash (" .. p_ok .. "/" .. #presets .. ")", p_fail == 0)
 dbg.clear(); WL()
 
 -- D-021: Delete preset (cascade)

@@ -49,6 +49,12 @@ void ViewportPanel::updateOgreRender() {
 
     mEngine->updateRenderTarget();
 
+    // Apply PostProcessStack after scene render (v3.5.1)
+    auto* ppStack = mEngine->getPostProcessStack();
+    if (ppStack && ppStack->hasActiveEffects()) {
+        ppStack->apply(rt);
+    }
+
     root->_fireFrameEnded(evt);
 }
 
@@ -91,7 +97,15 @@ void ViewportPanel::render() {
     mPendingW = static_cast<uint32_t>(panelSize.x);
     mPendingH = static_cast<uint32_t>(panelSize.y);
 
-    ImTextureID texId = mEngine->getRenderTextureID();
+    // Use PostProcessStack output if active, otherwise raw scene RT
+    ImTextureID texId = 0;
+    auto* ppStack = mEngine->getPostProcessStack();
+    if (ppStack && ppStack->hasActiveEffects()) {
+        texId = static_cast<ImTextureID>(ppStack->getOutputGLID());
+    }
+    if (!texId) {
+        texId = mEngine->getRenderTextureID();
+    }
     if (texId) {
         // Cover mode: fill the panel without distortion, cropping edges that overflow.
         // Like CSS background-size:cover — no bars, no stretch.
@@ -363,6 +377,9 @@ void ViewportPanel::render() {
             // Pick at drop position to find the object under the cursor
             std::string targetName;
             if (mPicker) {
+                // Save current selection as fallback (e.g. when Perlin clone is picked
+                // instead of original entity — clone can't be mapped to a DAG node)
+                std::string prevSelected = mPicker->getSelectedNodeName();
                 ImVec2 mousePos = ImGui::GetMousePos();
                 float imgW = mImgRectMax.x - mImgRectMin.x;
                 float imgH = mImgRectMax.y - mImgRectMin.y;
@@ -371,10 +388,14 @@ void ViewportPanel::render() {
                     float ny = (mousePos.y - mImgRectMin.y) / imgH;
                     if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) {
                         auto* hit = mPicker->pick(nx, ny);
-                        if (hit) mPicker->select(hit); // update selected node name
+                        if (hit) mPicker->select(hit);
                     }
                 }
                 targetName = mPicker->getSelectedNodeName();
+                // Fallback: if pick hit an unmappable object (e.g. FX clone),
+                // use the previously selected node
+                if (targetName.empty() && !prevSelected.empty())
+                    targetName = prevSelected;
             }
             if (mCreateNodeFn) {
                 mCreateNodeFn("TextureNode", texName, targetName);
@@ -385,6 +406,7 @@ void ViewportPanel::render() {
             std::string matName(static_cast<const char*>(payload->Data));
             std::string matTarget;
             if (mPicker) {
+                std::string prevSelected = mPicker->getSelectedNodeName();
                 ImVec2 mp = ImGui::GetMousePos();
                 float imgW = mImgRectMax.x - mImgRectMin.x;
                 float imgH = mImgRectMax.y - mImgRectMin.y;
@@ -397,6 +419,8 @@ void ViewportPanel::render() {
                     }
                 }
                 matTarget = mPicker->getSelectedNodeName();
+                if (matTarget.empty() && !prevSelected.empty())
+                    matTarget = prevSelected;
             }
             if (mCreateNodeFn) {
                 mCreateNodeFn("MaterialNode", matName, matTarget);
@@ -536,8 +560,8 @@ void ViewportPanel::render() {
         if (ImGui::IsKeyPressed(ImGuiKey_R)) mToolbar.setTool(ViewportToolbar::Tool::Scale);
     }
 
-    // ── Overlay ───────────────────────────────────────────────────────────────
-    if (mShowOverlay) {
+    // ── Overlay (tied to toolbar overlays toggle) ───────────────────────────
+    if (mToolbar.areOverlaysOn()) {
         ImVec2 overlayPos = ImGui::GetItemRectMin();
         overlayPos.x += 8.0f;
         overlayPos.y += 8.0f;

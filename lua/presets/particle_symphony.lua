@@ -1,14 +1,21 @@
 local ParamSpec = require "paramspec"
 return {
     name = "particle_symphony", version = 2, category = "Composition",
-    description = "4 particles driven by freq bands",
-    tags = {"particles", "audio"},
-    params = ParamSpec.declare({
-        ParamSpec.particle("template", "Examples/PurpleFountain", {label="Template"}),
-        ParamSpec.float("sensitivity",1.0,{min=0.1,max=5,label="Sensitivity"}),
-        ParamSpec.color("bass_color",{1,0.2,0.1},{label="Bass"}),
-        ParamSpec.color("mid_color",{0.2,1,0.3},{label="Mid"}),
-        ParamSpec.color("high_color",{0.3,0.5,1},{label="High"}),
-    }),
-    build = function(params) return {type="ParticleNode", params=params} end
+    description = "4 particle systems: fire, electric arc, sparks, magic dust",
+    tags = {"particle", "composition", "symphony", "multi"},
+    params = ParamSpec.declare({}),
+    build = function(params)
+        return {
+            type = "CompositionNode",
+            primary = "bass_particles",
+            nodes = {
+                {name="bass_particles", type="ParticleNode", params={template="BBFx/Fire"}},
+                {name="mid_particles", type="ParticleNode", params={template="BBFx/ElectricArc"}},
+                {name="high_particles", type="ParticleNode", params={template="BBFx/SparkBurst"}},
+                {name="treble_particles", type="ParticleNode", params={template="BBFx/MagicDust"}},
+            },
+            links = {},
+            params = params,
+        }
+    end
 }

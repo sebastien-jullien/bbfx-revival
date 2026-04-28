@@ -98,6 +98,12 @@ StudioEngine::StudioEngine(sol::state& lua)
     mOutputManager = std::make_unique<OutputManager>(mGLContext, mWindow);
     mOutputManager->setSourceTexture(mRenderTex);
 
+    // Create PostProcessStack (v3.5.1 — replaces OGRE CompositorManager in Studio).
+    if (mSceneManager) {
+        mPostProcessStack = std::make_unique<PostProcessStack>(mSceneManager);
+        mPostProcessStack->init(mRTWidth, mRTHeight);
+    }
+
     // Set window title and resize to a comfortable default for the Studio.
     SDL_SetWindowTitle(mWindow, "BBFx Studio v3.4");
     SDL_SetWindowSize(mWindow, 1400, 900);
@@ -108,6 +114,9 @@ StudioEngine::StudioEngine(sol::state& lua)
 }
 
 StudioEngine::~StudioEngine() {
+    // Destroy PostProcessStack before scene manager is destroyed.
+    mPostProcessStack.reset();
+
     // Destroy output windows before GL context is destroyed.
     mOutputManager.reset();
 
@@ -171,6 +180,10 @@ void StudioEngine::initRenderTexture(uint32_t width, uint32_t height) {
     // Update OutputManager's source texture reference (it blits this to output windows).
     if (mOutputManager)
         mOutputManager->setSourceTexture(mRenderTex);
+
+    // Resize PostProcessStack RTTs.
+    if (mPostProcessStack)
+        mPostProcessStack->resize(width, height);
 
     std::cout << "[StudioEngine] initRenderTexture " << width << "x" << height
               << std::endl;

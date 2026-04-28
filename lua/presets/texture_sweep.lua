@@ -1,8 +1,8 @@
 local ParamSpec = require "paramspec"
 return {
-    name = "texture_sweep", version = 2, category = "Color",
-    description = "Progressive texture transition",
-    tags = {"texture", "sweep"},
+    name = "texture_sweep", version = 2, category = "Shader",
+    description = "Sphere tracing shader with morphing geometry",
+    tags = {"shader", "sphere_trace", "morph", "gpu"},
     params = ParamSpec.declare({
         ParamSpec.shader("vert_shader", "passthrough.vert"),
         ParamSpec.shader("frag_shader", "sphere_trace.frag"),
@@ -11,7 +11,7 @@ return {
     }),
     build = function(params)
         return {
-            type = "ShaderFxNode",
+            type = "CompositionNode",
             primary = "fx",
             nodes = {
                 {name="mesh", type="SceneObjectNode"},

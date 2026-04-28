@@ -12,7 +12,7 @@ return {
     }),
     build = function(params)
         return {
-            type = "ShaderFxNode",
+            type = "CompositionNode",
             primary = "fx",
             nodes = {
                 {name="mesh", type="SceneObjectNode"},

@@ -308,14 +308,16 @@ void PluginManagerPanel::renderInstalledTab() {
 }
 
 void PluginManagerPanel::renderCommunityTab() {
-    ImGui::TextDisabled("Community Browser");
-    ImGui::Separator();
     ImGui::TextWrapped(
-        "The full VS Code Marketplace-style community browser lands in Lot H "
-        "(I-1357..I-1374). For now you can install plugins by:");
+        "Use the dedicated Community Browser for browsing and installing community plugins.");
+    ImGui::Spacing();
+    if (ImGui::Button("Open Community Browser")) {
+        if (mOpenCommunityBrowser) mOpenCommunityBrowser();
+    }
+    ImGui::Spacing();
+    ImGui::TextDisabled("You can also install plugins by:");
     ImGui::Bullet(); ImGui::Text("Dropping a .zip onto the Studio window");
     ImGui::Bullet(); ImGui::Text("Calling bbfx.plugin.install(path) from the Console");
-    ImGui::Bullet(); ImGui::Text("Calling bbfx.plugin.installFromUrl(url, sha256?) from Lua");
 }
 
 void PluginManagerPanel::renderUninstallConfirm() {
