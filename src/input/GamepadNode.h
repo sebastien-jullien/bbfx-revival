@@ -31,6 +31,8 @@ public:
 private:
     ParamSpec mSpec;   // single param: gamepad_index (INT)
     int       mIndex = 0;
+    bool      mDbgFirstUpdate = true;   // v3.5.2 Lot AU.9 — one-time diagnostic log
+    bool      mDbgWasActive   = false;  // edge-detect "anything pressed" for the diag log
 };
 
 } // namespace bbfx

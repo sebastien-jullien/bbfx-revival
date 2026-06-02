@@ -12,6 +12,11 @@
 #  endif
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
+#else
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <unistd.h>
 #endif
 
 namespace bbfx {
@@ -36,7 +41,8 @@ public:
     void quickAssignAudio();
 
     static constexpr int ARTNET_PORT = 6454;
-    static constexpr double ARTNET_INTERVAL_MS = 22.7; // ~44 Hz
+    static constexpr double ARTNET_INTERVAL_MS  = 22.7;   // ~44 Hz : cadence MAX d'envoi sur changement
+    static constexpr double ARTNET_KEEPALIVE_MS = 1000.0; // refresh périodique même sans changement (spec Art-Net)
 
     /// Build a raw Art-Net DMX packet (public for testing/debugging).
     static std::vector<uint8_t> buildPacket(int universe, const std::vector<uint8_t>& data,
@@ -58,9 +64,11 @@ private:
 #ifdef _WIN32
     SOCKET mSocket = INVALID_SOCKET;
     static bool sWsaInit;
+#else
+    int mSocket = -1;   // M14 — socket UDP POSIX (Linux/macOS)
+#endif
     void ensureSocket();
     void closeSocket();
-#endif
 };
 
 } // namespace bbfx

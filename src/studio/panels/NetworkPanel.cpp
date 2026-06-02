@@ -1,7 +1,10 @@
 #include "NetworkPanel.h"
+#include "../DagSnapshot.h"
+#include "../../core/Animator.h"
 #include <imgui.h>
 #include <iostream>
 #include <numeric>
+#include <nlohmann/json.hpp>
 
 namespace bbfx {
 
@@ -142,8 +145,15 @@ void NetworkPanel::renderToolbar(SyncManager* sync) {
 
         ImGui::SameLine();
         if (ImGui::Button("Sync All")) {
-            sync->sendSnapshot("{}");
-            pushLog("Snapshot sent to all slaves.");
+            // D20 — sérialiser le VRAI snapshot du DAG (avant : "{}" codé en dur →
+            // les slaves recevaient un état vide). Format attendu par le récepteur :
+            // { "nodeName.portName": floatValue, ... } (cf. StudioApp::setOnSnapshot).
+            DagSnapshot snap;
+            if (auto* anim = Animator::instance()) snap.capture(*anim);
+            nlohmann::json j = nlohmann::json::object();
+            for (auto& [k, v] : snap.getData()) j[k] = v;
+            sync->sendSnapshot(j.dump());
+            pushLog("Snapshot sent to all slaves (" + std::to_string(snap.getData().size()) + " ports).");
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Send current DAG snapshot to all slaves");
     }

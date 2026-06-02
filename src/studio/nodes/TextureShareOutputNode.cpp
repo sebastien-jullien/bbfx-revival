@@ -15,7 +15,13 @@ TextureShareOutputNode::TextureShareOutputNode(const std::string& name)
       d.intVal = 1080; d.minVal = 64.f; d.maxVal = 4320.f; mSpec.addParam(d); }
     setParamSpec(&mSpec);
 
-    addInput(new AnimationPort("enabled", 0.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port provided by AnimationNode base
+    // (default 1.0). This output node is off-by-default: override to 0.0 so it
+    // doesn't broadcast until the user enables it.
+    if (auto it = getInputs().find("enabled"); it != getInputs().end()) {
+        it->second->setValue(0.0f);
+    }
+    setEnabled(false);   // node frozen until enabled
 
     // Create platform-appropriate sender via factory.
     mSender = createTextureSender();

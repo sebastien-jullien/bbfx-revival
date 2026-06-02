@@ -1,5 +1,6 @@
 #include "MaterialNode.h"
 #include "TextureNode.h"
+#include "MaterialBridgeNode.h"
 #include "SceneObjectNode.h"
 #include <OgreEntity.h>
 #include <OgreSubEntity.h>
@@ -24,6 +25,8 @@ MaterialNode::MaterialNode(const std::string& name)
     tgtDef.label = "Target Entity";
     tgtDef.type = ParamType::STRING;
     tgtDef.stringVal = "";
+    tgtDef.readOnly = true; // N1 — mirror read-only de la cible résolue via le port `entity`
+    tgtDef.tooltip = "Cible(s) résolue(s) via le port entity-link (read-only).";
     mSpec.addParam(tgtDef);
 
     setParamSpec(&mSpec);
@@ -43,15 +46,39 @@ void MaterialNode::resolveTargets() {
         if (src) newTargets.push_back(src->getName());
     }
 
+    // Detach targets no longer linked + drop their cascade seq.
     for (auto& old : mCurrentTargets) {
         bool stillLinked = false;
         for (auto& n : newTargets) { if (n == old) { stillLinked = true; break; } }
-        if (!stillLinked) detachFromEntity(old);
+        if (!stillLinked) {
+            detachFromEntity(old);
+            mApplySeq.erase(old);
+        }
+    }
+
+    if (mEnabled) {
+        // Apply new targets (mApplySeq incrementing) — Sprint S8 Lot AD Pattern 4.
+        for (auto& t : newTargets) {
+            bool isNew = true;
+            for (auto& old : mCurrentTargets) { if (old == t) { isNew = false; break; } }
+            if (isNew) {
+                if (!mReenabling) mApplySeq[t] = nextCascadeApplySeq();    // Lot AU.24 — shared cascade counter
+                applyToEntity(t);
+            } else {
+                // Already-known target — still re-apply to refresh material if param changed.
+                applyToEntity(t);
+            }
+        }
     }
 
     mCurrentTargets = newTargets;
-    if (mEnabled) {
-        for (auto& t : mCurrentTargets) applyToEntity(t);
+    mReenabling = false;
+
+    // N1 — peuple le mirror read-only target_entity avec la liste résolue.
+    if (auto* mir = mSpec.getParam("target_entity")) {
+        std::string joined;
+        for (auto& t : mCurrentTargets) { if (!joined.empty()) joined += ", "; joined += t; }
+        mir->stringVal = joined;
     }
 }
 
@@ -118,41 +145,71 @@ void MaterialNode::detachFromEntity(const std::string& targetName) {
 
     auto* entity = soNode->getEntity();
 
-    // Check if another ACTIVE MaterialNode/TextureNode is linked
-    bool otherActive = false;
+    // Lot AU.24 — Pattern 4 cross-class cascade, full hand-back (symmetric
+    // with TextureNode + MaterialBridgeNode). Pick the enabled peer with the
+    // highest seq targeting the same entity ; if it's a successor (seq>mySeq)
+    // leave the entity alone, if it's a predecessor (seq<mySeq) hand the
+    // entity back to it explicitly (peer's update() won't re-fire on its
+    // own — it gates on a param change). No enabled peer → restore originals.
+    AnimationNode* winner = nullptr;
+    unsigned winnerSeq = 0;
+    unsigned mySeq = mApplySeq.count(targetName) ? mApplySeq[targetName] : 0;
     for (auto& nn : animator->getRegisteredNodeNames()) {
         auto* on = animator->getRegisteredNode(nn);
-        if (on && on != this && on->isEnabled() &&
-            (on->getTypeName() == "MaterialNode" || on->getTypeName() == "TextureNode")) {
-            // Check if it targets the same entity
-            auto& oInputs = on->getInputs();
-            auto oIt = oInputs.find("entity");
-            if (oIt != oInputs.end()) {
-                auto oSources = animator->getSourceNodes(oIt->second);
-                for (auto* os : oSources) {
-                    if (os && os->getName() == targetName) { otherActive = true; break; }
-                }
-            }
+        if (!on || on == this || !on->isEnabled()) continue;
+        const auto& tn = on->getTypeName();
+        if (tn != "MaterialNode" && tn != "TextureNode" && tn != "MaterialBridgeNode") continue;
+
+        auto& oInputs = on->getInputs();
+        auto oIt = oInputs.find("entity");
+        if (oIt == oInputs.end()) continue;
+        auto oSources = animator->getSourceNodes(oIt->second);
+        bool targetsSame = false;
+        for (auto* os : oSources) if (os && os->getName() == targetName) { targetsSame = true; break; }
+        if (!targetsSame) continue;
+
+        unsigned otherSeq = 0;
+        if (auto* m = dynamic_cast<MaterialNode*>(on))             otherSeq = m->getApplySeq(targetName);
+        else if (auto* tx = dynamic_cast<TextureNode*>(on))        otherSeq = tx->getApplySeq(targetName);
+        else if (auto* mb = dynamic_cast<MaterialBridgeNode*>(on)) otherSeq = mb->getApplySeq(targetName);
+        if (otherSeq > winnerSeq) {
+            winnerSeq = otherSeq;
+            winner = on;
         }
-        if (otherActive) break;
     }
 
     auto origIt = mOriginalMaterials.find(targetName);
-    if (origIt != mOriginalMaterials.end()) {
-        if (!otherActive) {
+    if (!winner) {
+        if (origIt != mOriginalMaterials.end()) {
             auto& origMats = origIt->second;
             for (unsigned s = 0; s < entity->getNumSubEntities() && s < origMats.size(); ++s) {
                 entity->getSubEntity(s)->setMaterialName(origMats[s]);
             }
         }
-        mOriginalMaterials.erase(origIt);
+    } else if (winnerSeq > mySeq) {
+        // Successor already master — no-op.
+    } else {
+        if (auto* tx = dynamic_cast<TextureNode*>(winner))             tx->applyToEntity(targetName);
+        else if (auto* m  = dynamic_cast<MaterialNode*>(winner))       m->applyToEntity(targetName);
+        else if (auto* mb = dynamic_cast<MaterialBridgeNode*>(winner)) mb->applyToEntity(targetName);
     }
+    if (origIt != mOriginalMaterials.end()) mOriginalMaterials.erase(origIt);
 }
 
 void MaterialNode::setEnabled(bool en) {
     AnimationNode::setEnabled(en);
     if (!en) {
+        // Disable : detach all targets (Pattern 4 cascade-aware) puis vider la
+        // liste des cibles actives — l'attachement logique doit refléter le détach
+        // réel. mApplySeq est conservé pour préserver la priorité de cascade au
+        // ré-enable (resolveTargets ré-applique sans re-bumper le seq, mReenabling).
         for (auto& t : mCurrentTargets) detachFromEntity(t);
+        mCurrentTargets.clear();
+    } else {
+        // Re-enable : trigger resolveTargets WITHOUT bumping the seq (we want
+        // the original seq to be preserved so cascade priority is stable).
+        mReenabling = true;
+        resolveTargets();
     }
 }
 

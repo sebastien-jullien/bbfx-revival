@@ -1,4 +1,5 @@
 #include "MappingProfile.h"
+#include "../core/Version.h"   // v3.5.2 Sprint S8 Lot AU — BBFX_VERSION_STRING
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
@@ -52,7 +53,8 @@ void MappingProfile::captureFromManager() {
 json MappingProfile::toJson() const {
     json j;
     j["name"] = name;
-    j["version"] = "3.4";
+    // v3.5.2 Sprint S8 Lot AU — pulled from central BBFX_VERSION_STRING.
+    j["version"] = BBFX_VERSION_STRING;
 
     // MIDI bindings — serialize from this profile's data, not the manager
     json midiArr = json::array();

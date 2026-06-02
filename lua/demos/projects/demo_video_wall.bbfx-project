@@ -1,0 +1,1176 @@
+{
+  "automation": {
+    "cueMarkers": [],
+    "lanes": [],
+    "loopRegion": {
+      "active": false,
+      "endBeat": 8.0,
+      "startBeat": 0.0
+    },
+    "triggerEvents": []
+  },
+  "chords": [],
+  "created": "2026-05-12T11:41:05Z",
+  "extra": {
+    "camera": {
+      "centerX": 0.0,
+      "centerY": 0.0,
+      "centerZ": 0.0,
+      "distance": 150.0,
+      "pitch": 15.0,
+      "yaw": 0.0
+    },
+    "effectRack": {
+      "gamepadBindings": {},
+      "keyBindings": {}
+    },
+    "midiBindings": [],
+    "network": {
+      "knownPeers": [],
+      "role": "standalone"
+    },
+    "surfaceMap": {
+      "backgroundImage": "",
+      "canvasHeight": 3.0,
+      "canvasWidth": 10.0,
+      "zones": []
+    }
+  },
+  "graph": {
+    "links": [
+      {
+        "from_node": "time",
+        "from_port": "beat",
+        "to_node": "col_l",
+        "to_port": "rotation.y"
+      },
+      {
+        "from_node": "time",
+        "from_port": "beat",
+        "to_node": "col_r",
+        "to_port": "rotation.y"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "clip_a",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "clip_b",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "clip_bg",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "xfade",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "cam",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "perlin_orb",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "clip_a",
+        "from_port": "playing",
+        "to_node": "xfade",
+        "to_port": "clip_a"
+      },
+      {
+        "from_node": "clip_b",
+        "from_port": "playing",
+        "to_node": "xfade",
+        "to_port": "clip_b"
+      },
+      {
+        "from_node": "clip_bg",
+        "from_port": "material_ready",
+        "to_node": "bridge_bg",
+        "to_port": "material_source"
+      },
+      {
+        "from_node": "clip_bg",
+        "from_port": "material_ready",
+        "to_node": "backdrop",
+        "to_port": "material_source"
+      },
+      {
+        "from_node": "xfade",
+        "from_port": "material_ready",
+        "to_node": "bridge_cube",
+        "to_port": "material_source"
+      },
+      {
+        "from_node": "screen_cube",
+        "from_port": "entity",
+        "to_node": "bridge_cube",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "backdrop",
+        "from_port": "entity",
+        "to_node": "bridge_bg",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "orb",
+        "from_port": "entity",
+        "to_node": "perlin_orb",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "buttonA",
+        "to_node": "rt_play",
+        "to_port": "gamepad"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "buttonA",
+        "to_node": "rt_hide",
+        "to_port": "gamepad"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "buttonA",
+        "to_node": "rt_bd",
+        "to_port": "gamepad"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "rightTrigger",
+        "to_node": "ff_speed",
+        "to_port": "t"
+      },
+      {
+        "from_node": "rt_play",
+        "from_port": "toggled",
+        "to_node": "inv_play",
+        "to_port": "b"
+      },
+      {
+        "from_node": "rt_hide",
+        "from_port": "toggled",
+        "to_node": "inv_hide",
+        "to_port": "b"
+      },
+      {
+        "from_node": "rt_bd",
+        "from_port": "toggled",
+        "to_node": "backdrop",
+        "to_port": "enabled"
+      },
+      {
+        "from_node": "inv_play",
+        "from_port": "out",
+        "to_node": "clip_a",
+        "to_port": "play"
+      },
+      {
+        "from_node": "inv_play",
+        "from_port": "out",
+        "to_node": "clip_b",
+        "to_port": "play"
+      },
+      {
+        "from_node": "inv_hide",
+        "from_port": "out",
+        "to_node": "screen_cube",
+        "to_port": "visible"
+      },
+      {
+        "from_node": "ff_speed",
+        "from_port": "out",
+        "to_node": "clip_a",
+        "to_port": "speed"
+      },
+      {
+        "from_node": "ff_speed",
+        "from_port": "out",
+        "to_node": "clip_b",
+        "to_port": "speed"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "backdrop",
+        "inputNames": [
+          "alpha",
+          "camera_target",
+          "enabled",
+          "material_source",
+          "visible",
+          "z_offset"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "theora_resources_video_bombe_ogg_clip_bg_mat",
+          "mode": "camera_locked",
+          "z_offset": 0.5
+        },
+        "ports": {
+          "alpha": 1.0,
+          "camera_target": 0.0,
+          "enabled": 1.0,
+          "material_source": 0.0,
+          "visible": 1.0,
+          "z_offset": 0.009999999776482582
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "FullscreenOverlayNode"
+      },
+      {
+        "id": "bridge_bg",
+        "inputNames": [
+          "enabled",
+          "entity",
+          "material_source"
+        ],
+        "outputNames": [],
+        "params": {
+          "lighting_mode": "unlit",
+          "material_in": "",
+          "target_entity": "backdrop"
+        },
+        "ports": {
+          "enabled": 1.0,
+          "entity": 0.0,
+          "material_source": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MaterialBridgeNode"
+      },
+      {
+        "id": "bridge_cube",
+        "inputNames": [
+          "enabled",
+          "entity",
+          "material_source"
+        ],
+        "outputNames": [],
+        "params": {
+          "lighting_mode": "lit",
+          "material_in": "",
+          "target_entity": "screen_cube"
+        },
+        "ports": {
+          "enabled": 1.0,
+          "entity": 0.0,
+          "material_source": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MaterialBridgeNode"
+      },
+      {
+        "id": "cam",
+        "inputNames": [
+          "crane_amplitude",
+          "crane_speed",
+          "damping",
+          "dolly_speed",
+          "dt",
+          "enabled",
+          "fly_speed",
+          "fov",
+          "orbit_height",
+          "orbit_radius",
+          "orbit_speed",
+          "shake_intensity"
+        ],
+        "outputNames": [],
+        "params": {
+          "crane_amplitude": 10.0,
+          "crane_speed": 0.30000001192092896,
+          "damping": 0.10000000149011612,
+          "dolly_speed": 2.0,
+          "fly_axis": 2,
+          "fly_speed": 5.0,
+          "fov": 45.0,
+          "mode": "dolly_zoom",
+          "orbit_height": 5.0,
+          "orbit_radius": 20.0,
+          "orbit_speed": 0.5,
+          "shake_intensity": 0.0,
+          "target_distance": 15.0,
+          "transition_time": 1.0
+        },
+        "ports": {
+          "crane_amplitude": 10.0,
+          "crane_speed": 0.30000001192092896,
+          "damping": 0.10000000149011612,
+          "dolly_speed": 3.0,
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "fly_speed": 5.0,
+          "fov": 45.0,
+          "orbit_height": 5.0,
+          "orbit_radius": 20.0,
+          "orbit_speed": 0.5,
+          "shake_intensity": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "CameraNode"
+      },
+      {
+        "id": "clip_a",
+        "inputNames": [
+          "dt",
+          "enabled",
+          "loop",
+          "play",
+          "speed",
+          "time_control"
+        ],
+        "outputNames": [
+          "frame_ready",
+          "material_ready",
+          "playing"
+        ],
+        "params": {
+          "material_out": "theora_resources_video_bombe_ogg_clip_a_mat"
+        },
+        "ports": {
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "loop": 1.0,
+          "play": 1.0,
+          "speed": 1.0,
+          "time_control": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TheoraClipNode"
+      },
+      {
+        "id": "clip_b",
+        "inputNames": [
+          "dt",
+          "enabled",
+          "loop",
+          "play",
+          "speed",
+          "time_control"
+        ],
+        "outputNames": [
+          "frame_ready",
+          "material_ready",
+          "playing"
+        ],
+        "params": {
+          "material_out": "theora_resources_video_bombe_ogg_clip_b_mat"
+        },
+        "ports": {
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "loop": 1.0,
+          "play": 1.0,
+          "speed": 1.0,
+          "time_control": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TheoraClipNode"
+      },
+      {
+        "id": "clip_bg",
+        "inputNames": [
+          "dt",
+          "enabled",
+          "loop",
+          "play",
+          "speed",
+          "time_control"
+        ],
+        "outputNames": [
+          "frame_ready",
+          "material_ready",
+          "playing"
+        ],
+        "params": {
+          "material_out": "theora_resources_video_bombe_ogg_clip_bg_mat"
+        },
+        "ports": {
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "loop": 1.0,
+          "play": 1.0,
+          "speed": 1.0,
+          "time_control": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TheoraClipNode"
+      },
+      {
+        "id": "col_l",
+        "inputNames": [
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "rotation.x",
+          "rotation.y",
+          "rotation.z",
+          "scale.x",
+          "scale.y",
+          "scale.z",
+          "visible"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "Examples/EnvMappedRustySteel",
+          "mesh_file": "column.mesh",
+          "parent_node": "",
+          "visible": true
+        },
+        "ports": {
+          "enabled": 1.0,
+          "position.x": -35.0,
+          "position.y": 0.0,
+          "position.z": 5.0,
+          "rotation.x": 0.0,
+          "rotation.y": 0.0,
+          "rotation.z": 0.0,
+          "scale.x": 0.11999999731779099,
+          "scale.y": 0.11999999731779099,
+          "scale.z": 0.11999999731779099,
+          "visible": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SceneObjectNode"
+      },
+      {
+        "id": "col_r",
+        "inputNames": [
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "rotation.x",
+          "rotation.y",
+          "rotation.z",
+          "scale.x",
+          "scale.y",
+          "scale.z",
+          "visible"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "Examples/EnvMappedRustySteel",
+          "mesh_file": "column.mesh",
+          "parent_node": "",
+          "visible": true
+        },
+        "ports": {
+          "enabled": 1.0,
+          "position.x": 35.0,
+          "position.y": 0.0,
+          "position.z": 5.0,
+          "rotation.x": 0.0,
+          "rotation.y": 0.0,
+          "rotation.z": 0.0,
+          "scale.x": 0.11999999731779099,
+          "scale.y": 0.11999999731779099,
+          "scale.z": 0.11999999731779099,
+          "visible": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SceneObjectNode"
+      },
+      {
+        "id": "ff_speed",
+        "inputNames": [
+          "a",
+          "b",
+          "enabled",
+          "operation",
+          "t"
+        ],
+        "outputNames": [
+          "out"
+        ],
+        "params": {
+          "operation": "add"
+        },
+        "ports": {
+          "a": 1.0,
+          "b": 4.0,
+          "enabled": 1.0,
+          "operation": 10.0,
+          "t": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MathNode"
+      },
+      {
+        "id": "gamepad",
+        "inputNames": [
+          "enabled"
+        ],
+        "outputNames": [
+          "accelX",
+          "accelY",
+          "accelZ",
+          "back",
+          "batteryPercent",
+          "buttonA",
+          "buttonB",
+          "buttonX",
+          "buttonY",
+          "dpadDown",
+          "dpadLeft",
+          "dpadRight",
+          "dpadUp",
+          "gyroX",
+          "gyroY",
+          "gyroZ",
+          "leftBumper",
+          "leftStickBtn",
+          "leftStickX",
+          "leftStickY",
+          "leftTrigger",
+          "rightBumper",
+          "rightStickBtn",
+          "rightStickX",
+          "rightStickY",
+          "rightTrigger",
+          "start",
+          "touchpad0Down",
+          "touchpad0X",
+          "touchpad0Y",
+          "touchpad1Down",
+          "touchpad1X",
+          "touchpad1Y"
+        ],
+        "params": {
+          "gamepad_index": 0
+        },
+        "ports": {
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "GamepadNode"
+      },
+      {
+        "id": "inv_hide",
+        "inputNames": [
+          "a",
+          "b",
+          "enabled",
+          "operation",
+          "t"
+        ],
+        "outputNames": [
+          "out"
+        ],
+        "params": {
+          "operation": "add"
+        },
+        "ports": {
+          "a": 1.0,
+          "b": 0.0,
+          "enabled": 1.0,
+          "operation": 1.0,
+          "t": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MathNode"
+      },
+      {
+        "id": "inv_play",
+        "inputNames": [
+          "a",
+          "b",
+          "enabled",
+          "operation",
+          "t"
+        ],
+        "outputNames": [
+          "out"
+        ],
+        "params": {
+          "operation": "add"
+        },
+        "ports": {
+          "a": 1.0,
+          "b": 0.0,
+          "enabled": 1.0,
+          "operation": 1.0,
+          "t": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MathNode"
+      },
+      {
+        "id": "light",
+        "inputNames": [
+          "diffuse.b",
+          "diffuse.g",
+          "diffuse.r",
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "power"
+        ],
+        "outputNames": [],
+        "params": {
+          "diffuse": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "light_type": "point",
+          "power": 1.0
+        },
+        "ports": {
+          "diffuse.b": 1.0,
+          "diffuse.g": 1.0,
+          "diffuse.r": 1.0,
+          "enabled": 1.0,
+          "position.x": 60.0,
+          "position.y": 80.0,
+          "position.z": 90.0,
+          "power": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "LightNode"
+      },
+      {
+        "id": "orb",
+        "inputNames": [
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "rotation.x",
+          "rotation.y",
+          "rotation.z",
+          "scale.x",
+          "scale.y",
+          "scale.z",
+          "visible"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "BaseWhiteNoLighting",
+          "mesh_file": "geosphere4500.mesh",
+          "parent_node": "",
+          "visible": true
+        },
+        "ports": {
+          "enabled": 1.0,
+          "position.x": 0.0,
+          "position.y": -2.0,
+          "position.z": 0.0,
+          "rotation.x": 0.0,
+          "rotation.y": 0.0,
+          "rotation.z": 0.0,
+          "scale.x": 0.006000000052154064,
+          "scale.y": 0.006000000052154064,
+          "scale.z": 0.006000000052154064,
+          "visible": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SceneObjectNode"
+      },
+      {
+        "id": "perlin_orb",
+        "inputNames": [
+          "density",
+          "displacement",
+          "dt",
+          "enabled",
+          "entity",
+          "timeDensity"
+        ],
+        "outputNames": [
+          "mesh_dirty"
+        ],
+        "params": {
+          "target_entity": ""
+        },
+        "ports": {
+          "density": 4.0,
+          "displacement": 0.15000000596046448,
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "entity": 0.0,
+          "timeDensity": 5.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "PerlinFxNode"
+      },
+      {
+        "id": "rt_bd",
+        "inputNames": [
+          "axis",
+          "button",
+          "enabled",
+          "gamepad"
+        ],
+        "outputNames": [
+          "gated_value",
+          "toggled",
+          "trigger"
+        ],
+        "params": {
+          "axis_index": 0,
+          "button_index": 3,
+          "mode": "toggle"
+        },
+        "ports": {
+          "axis": 0.0,
+          "button": 0.0,
+          "enabled": 1.0,
+          "gamepad": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "JoystickRouterNode"
+      },
+      {
+        "id": "rt_hide",
+        "inputNames": [
+          "axis",
+          "button",
+          "enabled",
+          "gamepad"
+        ],
+        "outputNames": [
+          "gated_value",
+          "toggled",
+          "trigger"
+        ],
+        "params": {
+          "axis_index": 0,
+          "button_index": 2,
+          "mode": "toggle"
+        },
+        "ports": {
+          "axis": 0.0,
+          "button": 0.0,
+          "enabled": 1.0,
+          "gamepad": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "JoystickRouterNode"
+      },
+      {
+        "id": "rt_play",
+        "inputNames": [
+          "axis",
+          "button",
+          "enabled",
+          "gamepad"
+        ],
+        "outputNames": [
+          "gated_value",
+          "toggled",
+          "trigger"
+        ],
+        "params": {
+          "axis_index": 0,
+          "button_index": 0,
+          "mode": "toggle"
+        },
+        "ports": {
+          "axis": 0.0,
+          "button": 0.0,
+          "enabled": 1.0,
+          "gamepad": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "JoystickRouterNode"
+      },
+      {
+        "id": "screen_cube",
+        "inputNames": [
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "rotation.x",
+          "rotation.y",
+          "rotation.z",
+          "scale.x",
+          "scale.y",
+          "scale.z",
+          "visible"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "Examples/Chrome",
+          "mesh_file": "cube.mesh",
+          "parent_node": "",
+          "visible": true
+        },
+        "ports": {
+          "enabled": 1.0,
+          "position.x": 0.0,
+          "position.y": 18.0,
+          "position.z": 0.0,
+          "rotation.x": 0.0,
+          "rotation.y": 0.0,
+          "rotation.z": 0.0,
+          "scale.x": 0.3499999940395355,
+          "scale.y": 0.25999999046325684,
+          "scale.z": 0.019999999552965164,
+          "visible": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SceneObjectNode"
+      },
+      {
+        "id": "time",
+        "inputNames": [
+          "bpm",
+          "enabled"
+        ],
+        "outputNames": [
+          "beat",
+          "beatFrac",
+          "dt",
+          "total"
+        ],
+        "ports": {
+          "bpm": 120.0,
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "RootTimeNode"
+      },
+      {
+        "id": "xfade",
+        "inputNames": [
+          "auto_crossfade_bpm",
+          "beta",
+          "clip_a",
+          "clip_b",
+          "dt",
+          "enabled"
+        ],
+        "outputNames": [
+          "material_ready"
+        ],
+        "params": {
+          "material_out": ""
+        },
+        "ports": {
+          "auto_crossfade_bpm": 1.0,
+          "beta": 0.0,
+          "clip_a": 0.0,
+          "clip_b": 0.0,
+          "dt": 0.01666666753590107,
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "VideoCrossfadeNode"
+      }
+    ]
+  },
+  "media": {
+    "shaders": [],
+    "videos": []
+  },
+  "midi_mappings": [],
+  "outputs": [],
+  "performance": {
+    "faders": [
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      }
+    ],
+    "quickAccess": [
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      }
+    ],
+    "triggerPages": [
+      [
+        {
+          "action": "chord:Intro",
+          "hue": 0.0,
+          "label": "Intro",
+          "momentary": false
+        },
+        {
+          "action": "chord:Verse",
+          "hue": 0.25,
+          "label": "Verse",
+          "momentary": false
+        },
+        {
+          "action": "chord:Chorus",
+          "hue": 0.5,
+          "label": "Chorus",
+          "momentary": false
+        },
+        {
+          "action": "chord:Bridge",
+          "hue": 0.75,
+          "label": "Bridge",
+          "momentary": false
+        },
+        {
+          "action": "chord:Drop",
+          "hue": 0.0,
+          "label": "Drop",
+          "momentary": false
+        },
+        {
+          "action": "chord:Build",
+          "hue": 0.25,
+          "label": "Build",
+          "momentary": false
+        },
+        {
+          "action": "chord:Break",
+          "hue": 0.5,
+          "label": "Break",
+          "momentary": false
+        },
+        {
+          "action": "chord:Outro",
+          "hue": 0.75,
+          "label": "Outro",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX1",
+          "hue": 0.0,
+          "label": "FX1",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX2",
+          "hue": 0.25,
+          "label": "FX2",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX3",
+          "hue": 0.5,
+          "label": "FX3",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX4",
+          "hue": 0.75,
+          "label": "FX4",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig1",
+          "hue": 0.0,
+          "label": "Trig1",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig2",
+          "hue": 0.25,
+          "label": "Trig2",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig3",
+          "hue": 0.5,
+          "label": "Trig3",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig4",
+          "hue": 0.75,
+          "label": "Trig4",
+          "momentary": false
+        }
+      ]
+    ],
+    "triggers": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "timeline": {
+    "bpm": 120.0,
+    "time_signature": "4/4"
+  },
+  "version": "3.5.2"
+}

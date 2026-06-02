@@ -2,8 +2,13 @@
 
 #include "GamepadManager.h"
 #include "InputManager.h"
+#include "../core/DebugLog.h"
 
 #include <SDL3/SDL.h>
+#include <iostream>
+#include <algorithm>
+#include <map>
+#include <string>
 
 namespace bbfx {
 
@@ -65,6 +70,13 @@ GamepadNode::GamepadNode(const std::string& name) : AnimationNode(name) {
 
 void GamepadNode::update() {
     auto* im = InputManager::instance();
+    if (mDbgFirstUpdate) {
+        BBFX_DLOG("[GP-DEBUG] '" << getName() << "' first update — InputManager="
+                  << (im ? "OK" : "NULL")
+                  << " gamepadCount=" << (im ? im->getJoystick().getCount() : -1)
+                  << " gamepad_index=" << (mSpec.getParam("gamepad_index") ? mSpec.getParam("gamepad_index")->intVal : -99));
+        mDbgFirstUpdate = false;
+    }
     if (!im) return;
     auto& mgr = im->getJoystick();
 
@@ -128,6 +140,38 @@ void GamepadNode::update() {
 
     int pct = mgr.getBatteryPercent(idx);
     set("batteryPercent", pct < 0 ? -0.01f : (pct / 100.0f));
+
+    // I-2053 diag (Lot AV.3 round 2) — log EVERY button state change (rising and
+    // falling edges) + analog triggers (Lot AV.4 round 5 : log L2/R2 par paliers
+    // de 0.1 pour qu'on voie quand l'utilisateur tire la gachette).
+    {
+        static std::map<std::string, float> sPrev;
+        for (const char* k : {"buttonA","buttonB","buttonX","buttonY","leftBumper","rightBumper",
+                              "start","back","dpadUp","dpadDown","dpadLeft","dpadRight",
+                              "leftStickBtn","rightStickBtn"}) {
+            float v = out.at(k)->getValue();
+            std::string key = std::string(getName()) + "." + k;
+            auto it = sPrev.find(key);
+            float prevV = (it != sPrev.end()) ? it->second : 0.0f;
+            if (v != prevV) {
+                BBFX_DLOG("[GP-EDGE] '" << getName() << "' " << k << ": "
+                          << prevV << " -> " << v << " (gamepad idx=" << idx << ")");
+            }
+            sPrev[key] = v;
+        }
+        // Triggers analogiques : log à chaque variation > 0.1 (sinon spam).
+        for (const char* k : {"leftTrigger", "rightTrigger"}) {
+            float v = out.at(k)->getValue();
+            std::string key = std::string(getName()) + ".trig." + k;
+            auto it = sPrev.find(key);
+            float prevV = (it != sPrev.end()) ? it->second : 0.0f;
+            if (std::abs(v - prevV) > 0.1f) {
+                BBFX_DLOG("[GP-AXIS] '" << getName() << "' " << k << ": "
+                          << prevV << " -> " << v);
+                sPrev[key] = v;
+            }
+        }
+    }
 
     fireUpdate();
 }

@@ -140,6 +140,25 @@ void CameraNode::update() {
     auto* mp = mSpec.getParam("mode");
     if (mp && !mp->stringVal.empty()) mode = mp->stringVal;
 
+    // D12 — armement d'une transition au changement de mode. Le sous-système
+    // updateTransition() existait mais n'était jamais déclenché (`mTransitioning`
+    // jamais mis à true) → `transition_time` était un contrôle mort. On capture la
+    // pose courante comme point de départ et on blende vers la pose live du nouveau
+    // mode pendant `transition_time` secondes.
+    if (!mPrevMode.empty() && mode != mPrevMode) {
+        auto* ttDef = mSpec.getParam("transition_time");
+        float tt = ttDef ? ttDef->floatVal : 0.0f;
+        if (tt > 0.001f) {
+            mTransitioning = true;
+            mTransitionElapsed = 0.0f;
+            mTransitionDuration = tt;
+            mTransitionStartPos = mOwnNode->getPosition();
+            mTransitionStartOri = mOwnNode->getOrientation();
+            mTransitionStartFov = fov;
+        }
+    }
+    mPrevMode = mode;
+
     // Dispatch to mode-specific update
     if (mode == "orbit") {
         updateOrbit(dt, in.at("orbit_radius")->getValue(),
@@ -171,8 +190,13 @@ void CameraNode::update() {
                     in.at("orbit_height")->getValue(), fov);
     }
 
-    // Handle active transition (overrides position/orientation)
+    // Handle active transition (overrides position/orientation). Le mode vient de
+    // poser mOwnNode sur la cible LIVE → on la capture comme point d'arrivée (elle
+    // peut bouger, ex. orbit), puis updateTransition() blende depuis la pose figée.
     if (mTransitioning) {
+        mTransitionEndPos = mOwnNode->getPosition();
+        mTransitionEndOri = mOwnNode->getOrientation();
+        mTransitionEndFov = fov;
         updateTransition(dt);
     }
 

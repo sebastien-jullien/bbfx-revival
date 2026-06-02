@@ -1,4 +1,5 @@
 #include "StudioApp.h"
+#include "../core/Version.h"   // v3.5.2 Sprint S8 Lot AU — BBFX_VERSION_STRING
 #include "DagSnapshot.h"
 #include "ZoneSnapshot.h"
 #include "commands/NodeCommands.h"
@@ -18,6 +19,7 @@
 #include "panels/GamepadPanel.h"
 #include "panels/EffectRackPanel.h"
 #include "panels/PluginAuthoringDialog.h"
+#include "panels/LearnPanel.h"
 #include "bbfx_imgui_bindings.h"
 #include "ScriptPanelRegistry.h"
 #include "panels/CommunityBrowserPanel.h"
@@ -30,6 +32,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include "../core/Animator.h"
+#include "../core/AssetManifest.h"
 #include "../core/PrimitiveNodes.h"
 #include "../fx/PerlinFxNode.h"
 #include "../fx/ShaderFxNode.h"
@@ -61,10 +64,27 @@
 #include "../midi/MidiDeviceManager.h"
 #include "../midi/MidiLearnManager.h"
 #include "nodes/LightNode.h"
+#include "nodes/FullscreenOverlayNode.h"
+#include "nodes/TextureCycleNode.h"
+#include "nodes/TextureSetNode.h"
+#include "../fx/TextureBlendNode.h"
+#include "../fx/TextureFeedbackNode.h"
+#include "nodes/VideoCrossfadeNode.h"
+#include "nodes/MaterialAnimNode.h"
+#include "nodes/VideoLibraryNode.h"
+#include "nodes/BillboardLayerNode.h"
+#include "nodes/JoystickRouterNode.h"
+#include "nodes/VideoSlicerNode.h"
+#include "nodes/MultiTextureBankNode.h"
+#include "../fx/NoiseTextureNode.h"
+#include "../fx/SpectrogramTextureNode.h"
+#include "../fx/GrayscaleNode.h"
+#include "nodes/ArtnetVideoMapperNode.h"
 #include "nodes/ParticleNode.h"
 #include "nodes/CompositorNode.h"
 #include "nodes/PostProcessNode.h"
 #include "nodes/TextureNode.h"
+#include "nodes/MaterialBridgeNode.h"
 #include "nodes/MaterialNode.h"
 #include "nodes/CameraNode.h"
 #include "nodes/SkyboxNode.h"
@@ -158,8 +178,10 @@ static std::string saveFileDialog(SDL_Window*, const char*, const char*, const c
 
 // ── Construction ─────────────────────────────────────────────────────────────
 
-StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool forceDefault, bool forceReset)
-    : mLua(lua), mInitialScript(initialScript), mForceDefault(forceDefault), mForceReset(forceReset),
+StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool forceDefault, bool forceReset,
+                     const std::string& initialDemo)
+    : mLua(lua), mInitialScript(initialScript), mInitialDemo(initialDemo),
+      mForceDefault(forceDefault), mForceReset(forceReset),
       mLastAutoSave(std::chrono::steady_clock::now())
 {
     // Engine creates SDL3 window + GL context + OGRE
@@ -228,6 +250,7 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     mOscBrowserPanel = std::make_unique<OscBrowserPanel>();
     mNetworkPanel    = std::make_unique<NetworkPanel>();
     mMasterViewPanel = std::make_unique<MasterViewPanel>();
+    mLearnPanel      = std::make_unique<LearnPanel>();   // v3.5.2 Sprint S7 Lot Y
     mAssetBrowserPanel = std::make_unique<AssetBrowserPanel>();
     mAssetBrowserPanel->setThumbCache(mThumbCache.get());
     mAssetBrowserPanel->setDropCallback([this](const std::string& type, const std::string& name) {
@@ -339,24 +362,23 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
         mShowCommunityBrowser = true;
         if (mCommunityBrowserPanel) mCommunityBrowserPanel->focusOnEntry(id);
     };
-    DeepLinkHandler::instance().onEnable = [](const std::string& id) {
-        if (!PluginManager::instance().enable(id)) {
-            ToastSystem::instance().toast(
-                "Enable failed for " + id, ToastSeverity::Error, 5.0f);
-        } else {
-            ToastSystem::instance().toast(
-                "Enabled " + id, ToastSeverity::Info, 3.0f);
-        }
+    // Sécurité — enable/run via deep-link externe exécute du code plugin tiers :
+    // on NE l'exécute jamais directement, on demande confirmation à l'utilisateur.
+    DeepLinkHandler::instance().onEnable = [this](const std::string& id) {
+        mDeepLinkAction = "enable";
+        mDeepLinkPluginId = id;
+        mDeepLinkNodeType.clear();
+        mShowDeepLinkConfirm = true;
     };
     DeepLinkHandler::instance().onDisable = [](const std::string& id) {
+        // disable est non-dangereux (arrête du code, n'en lance pas) → direct.
         PluginManager::instance().disable(id);
     };
-    DeepLinkHandler::instance().onRun = [](const std::string& id, const std::string& type) {
-        PluginManager::instance().enable(id);
-        ToastSystem::instance().toast(
-            "Run deep-link received: " + id + " / " + type +
-            " — auto node-instantiation arrives in Lot W.",
-            ToastSeverity::Info, 5.0f);
+    DeepLinkHandler::instance().onRun = [this](const std::string& id, const std::string& type) {
+        mDeepLinkAction = "run";
+        mDeepLinkPluginId = id;
+        mDeepLinkNodeType = type;
+        mShowDeepLinkConfirm = true;
     };
 
     // v3.5 Lot H: wire the static command palette entries into actual
@@ -485,6 +507,19 @@ StudioApp::StudioApp(sol::state& lua, const std::string& initialScript, bool for
     initNodeTypeRegistry();
     MeshGenerator::registerDefaults();
     SettingsManager::instance().load();
+
+    // v3.5.2 — Restore window geometry from settings
+    {
+        const auto& ws = SettingsManager::instance().get();
+        if (ws.windowWidth > 0 && ws.windowHeight > 0) {
+            SDL_SetWindowSize(mEngine->getSDLWindow(), ws.windowWidth, ws.windowHeight);
+            if (ws.windowX >= 0 && ws.windowY >= 0) {
+                SDL_SetWindowPosition(mEngine->getSDLWindow(), ws.windowX, ws.windowY);
+            } else {
+                SDL_SetWindowPosition(mEngine->getSDLWindow(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+            }
+        }
+    }
 
     // Load studio chord system (provides ChordSystem global for triggers/quick access)
     mLua.safe_script("require 'studio_chord'", sol::script_pass_on_error);
@@ -857,6 +892,24 @@ void StudioApp::run() {
     auto* time     = RootTimeNode::instance();
     if (time) time->reset();
 
+    // Load asset manifests produced by tools/asset_pipeline.py. Missing files
+    // are silently skipped (pipeline may not have been run yet — runtime falls
+    // back to v3.5.1 textures via filename resolution).
+    {
+        auto& mf = AssetManifest::instance();
+        const char* manifests[] = {
+            "lua/assets/heritage_pack.lua",
+            "lua/assets/video_library.lua",
+        };
+        size_t total = 0;
+        for (const char* p : manifests) {
+            total += mf.loadFromLuaFile(mLua, p);
+        }
+        if (total > 0) {
+            std::cout << "[AssetManifest] loaded " << total << " entries" << std::endl;
+        }
+    }
+
     // Load scene setup script — always needed to create camera, lights, mesh
     {
         std::string sceneScript = mInitialScript.empty()
@@ -887,6 +940,35 @@ void StudioApp::run() {
         )", sol::script_pass_on_error);
     }
 
+    // v3.5.2 Sprint S8 Lot AV.5 — CLI --demo <name> : short-circuit le chargement
+    // de projet par défaut, charge directement le builder de la démo demandée.
+    // Évite la phase "load demo_studio_base puis open Open Demo" qui consommait
+    // ~5s. Usage : ./bbfx-studio.exe --demo demo_video_wall
+    if (!mInitialDemo.empty()) {
+        std::string builderPath = "lua/demos/projects/" + mInitialDemo + "_builder.lua";
+        if (!std::filesystem::exists(builderPath)) {
+            std::cerr << "[Studio] --demo: builder not found: " << builderPath << std::endl;
+        } else {
+            std::cout << "[Studio] --demo: loading " << builderPath << std::endl;
+            // Clear user graph (équivalent du handler File → Open Demo).
+            if (auto* anim = Animator::instance()) {
+                auto names = anim->getRegisteredNodeNames();
+                for (auto& n : names) {
+                    if (n == "time") continue;
+                    if (n.rfind("shell/", 0) == 0 || n.rfind("_dbg_", 0) == 0 || n.rfind("_test_", 0) == 0) continue;
+                    if (auto* nd = anim->getRegisteredNode(n)) { anim->removeNode(nd); nd->cleanup(); delete nd; }
+                }
+            }
+            // Run builder.setup().
+            mLua.safe_script("local _b = dofile('" + builderPath + "'); if type(_b)=='table' and type(_b.setup)=='function' then _b.setup() end",
+                             sol::script_pass_on_error);
+            { sol::optional<sol::function> fn = mLua["_dbg_process_pending"]; if (fn) (*fn)(); }
+            mProjectPath.clear();
+            mProjectDirty = false;
+            SDL_SetWindowTitle(mEngine->getSDLWindow(),
+                ("BBFx Studio — demo: " + mInitialDemo).c_str());
+        }
+    } else
     // Load project: --default/--reset → template, else last saved project, else template
     {
         auto& settings = SettingsManager::instance();
@@ -897,12 +979,19 @@ void StudioApp::run() {
             std::cout << "[Studio] Loading last project: " << lastPath << std::endl;
             loadProject(lastPath);
         } else {
-            std::string templatePath = "data/templates/default.bbfx-project";
-            if (std::filesystem::exists(templatePath)) {
-                std::cout << "[Studio] Loading default template" << std::endl;
-                loadProject(templatePath);
+            // v3.5.2 Sprint S8 Lot AU — fresh-start fallback = the cleaned
+            // reference scene (demo_studio_base). The legacy
+            // data/templates/default.bbfx-project is kept only as a last resort
+            // (it has a pre-existing startup hang on some setups — see Lot AU.3).
+            std::string startupScene = "lua/demos/projects/demo_studio_base.bbfx-project";
+            if (!std::filesystem::exists(startupScene))
+                startupScene = "data/templates/default.bbfx-project";
+            if (std::filesystem::exists(startupScene)) {
+                std::cout << "[Studio] Loading startup scene: " << startupScene << std::endl;
+                loadProject(startupScene);
                 mProjectPath.clear();
-                SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.5.1");
+                SDL_SetWindowTitle(mEngine->getSDLWindow(),
+                                   ("BBFx Studio v" + std::string(BBFX_VERSION_STRING) + " — " + BBFX_VERSION_NAME).c_str());
             }
         }
         if (mRecentProjects.empty() && !settings.get().recentProjects.empty()) {
@@ -911,6 +1000,9 @@ void StudioApp::run() {
     }
 
     while (mRunning) {
+      // (Major fix) Filet par frame : un throw d'un node/panel/Lua/OGRE ne doit pas
+      // tuer toute la session VJ. On log et on continue (skip-frame) au lieu de crasher.
+      try {
         // ── Process deferred debugger ops (between frames, before DAG evaluation) ──
         {
             sol::optional<sol::function> fn = mLua["_dbg_process_pending"];
@@ -923,6 +1015,12 @@ void StudioApp::run() {
 
         // ── Events ───────────────────────────────────────────────────────────
         handleEvents();
+
+        // v3.5.2 Sprint S8 Lot AU.8 — refresh the input devices once per frame
+        // (rumble timers, gyro/accel, and — importantly — so GamepadNode reads
+        // a live device state). Without this the headless render loop captures
+        // input but the Studio main loop didn't → joystick/gamepad nodes inert.
+        if (auto* im = mEngine ? mEngine->getInputManager() : nullptr) im->capture();
 
         // ── Animation DAG ─────────────────────────────────────────────────────
         if (time && !mTimelinePanel->isPaused()) time->update();
@@ -1011,11 +1109,15 @@ void StudioApp::run() {
         if (animator) animator->renderOneFrame();
 
         // ── Update all registered nodes (DAG only updates connected ones) ────
+        // v3.5.2 Sprint S8 Lot AT — call tick() (not update()) on EVERY node,
+        // even disabled ones, so the universal `enabled` DAG port can re-enable
+        // a node from an upstream signal (joystick toggle, beat trigger, …).
+        // tick() = syncEnabledFromPort() + (mEnabled ? update() : nothing).
         if (animator) {
             for (auto& name : animator->getRegisteredNodeNames()) {
                 auto* node = animator->getRegisteredNode(name);
-                if (node && node->isEnabled() && node->getTypeName() != "RootTimeNode") {
-                    node->update();
+                if (node && node->getTypeName() != "RootTimeNode") {
+                    node->tick();
                 }
             }
         }
@@ -1038,12 +1140,48 @@ void StudioApp::run() {
         // ── Network sync poll (v3.4 Lot F) ────────────────────────────────────
         if (mSyncManager) mSyncManager->poll();
 
+        // ── MIDI learn capture hors Performance Mode (D17/D18) ────────────────
+        // La capture du MIDI learn ne tournait que dans PerformanceModePanel (actif
+        // uniquement en perf mode) → Learn impossible à compléter en session normale
+        // (MidiMappingPanel / EffectRackPanel). On poll + processMessages ICI, mais
+        // SEULEMENT pendant un learn actif et hors perf mode : éviter de drainer la
+        // queue MIDI quand d'autres consommateurs (MidiInputNode, MidiActivityPanel)
+        // en ont besoin, et éviter le double-drain avec PerformanceModePanel.
+        if (!mPerformanceMode) {
+            auto& mlm = MidiLearnManager::instance();
+            if (mlm.isLearning()) {
+                if (auto* midiMgr = MidiDeviceManager::instance()) {
+                    mlm.processMessages(midiMgr->poll());
+                }
+            }
+        }
+
         // ── HTTP client main-thread callback drain (v3.5 Lot E) ───────────────
         HttpClient::instance().pumpMainThread();
 
         // ── OSC bus + Art-Net input pump (v3.5 Lot M) ─────────────────────────
         OscBus::instance().tick();
         ArtnetInput::instance().tick();
+
+        // ── N4 — drain des demandes de preset OSC (/bbfx/preset/load/<name>) ──
+        // Le chargement touche le graphe → main-thread uniquement. On appelle le
+        // loader Lua dbg.preset(name) pour chaque demande empilée par OscInputNode.
+        if (!gPendingOscPresetLoads.empty()) {
+            auto pending = std::move(gPendingOscPresetLoads);
+            gPendingOscPresetLoads.clear();
+            sol::object dbgObj = mLua["dbg"];
+            if (dbgObj.is<sol::table>()) {
+                sol::function presetFn = dbgObj.as<sol::table>()["preset"];
+                for (auto& nm : pending) {
+                    if (presetFn.valid()) {
+                        try { presetFn(nm); }
+                        catch (const std::exception& e) {
+                            std::cerr << "[OSC] preset load '" << nm << "' failed: " << e.what() << std::endl;
+                        }
+                    }
+                }
+            }
+        }
 
         // ── Tempo callback dispatch (v3.5 Lot N) ──────────────────────────────
         TempoManager::instance().update();
@@ -1056,6 +1194,28 @@ void StudioApp::run() {
 
         // ── ImGui frame ───────────────────────────────────────────────────────
         renderFrame();
+      } catch (const std::exception& e) {
+        std::cerr << "[StudioApp] Exception interceptée pendant la frame (skip-frame, "
+                     "session préservée) : " << e.what() << std::endl;
+      } catch (...) {
+        std::cerr << "[StudioApp] Exception non-standard interceptée pendant la frame "
+                     "(skip-frame, session préservée)." << std::endl;
+      }
+    }
+
+    // v3.5.2 — Persist window geometry on exit (even without explicit save)
+    {
+        auto& settings = SettingsManager::instance();
+        auto s = settings.get();
+        int wx, wy, ww, wh;
+        SDL_GetWindowPosition(mEngine->getSDLWindow(), &wx, &wy);
+        SDL_GetWindowSize(mEngine->getSDLWindow(), &ww, &wh);
+        s.windowX = wx;
+        s.windowY = wy;
+        s.windowWidth = ww;
+        s.windowHeight = wh;
+        settings.set(s);
+        settings.save();
     }
 }
 
@@ -1238,6 +1398,12 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
             mShowAssetBrowser = !mShowAssetBrowser;
             return;
         }
+        // v3.5.2 Sprint S7 Lot Y: Ctrl+Shift+L toggles the Learn Panel.
+        if (ctrl && shift && evt.key.key == SDLK_L) {
+            mShowLearnPanel = !mShowLearnPanel;
+            if (mLearnPanel) mLearnPanel->setVisible(mShowLearnPanel);
+            return;
+        }
 
         if (ctrl && evt.key.key == SDLK_S) {
             if (mProjectPath.empty()) {
@@ -1407,9 +1573,17 @@ void StudioApp::handleEvent(const SDL_Event& evt) {
         // Resize handled by ViewportPanel when it detects size change
     }
 
-    // Forward to REPL/input only if ImGui is not capturing keyboard/mouse
-    if (!io.WantCaptureKeyboard && !io.WantCaptureMouse) {
-        if (auto* im = mEngine->getInputManager()) {
+    // Forward to REPL/input:
+    //  - gamepad / joystick events: ALWAYS (they don't conflict with ImGui text
+    //    input — and without this, SDL_EVENT_GAMEPAD_ADDED is dropped whenever
+    //    ImGui is capturing the keyboard/mouse, so the controller never gets
+    //    SDL_OpenGamepad'd → GamepadNode reads getCount()==0 → controls nothing);
+    //  - keyboard / mouse: only when ImGui isn't capturing them (no hotkeys
+    //    while typing in a field). — v3.5.2 Sprint S8 Lot AU.8.
+    if (auto* im = mEngine ? mEngine->getInputManager() : nullptr) {
+        const bool isPadEvt = (evt.type >= SDL_EVENT_JOYSTICK_AXIS_MOTION &&
+                               evt.type <= SDL_EVENT_GAMEPAD_UPDATE_COMPLETE);
+        if (isPadEvt || (!io.WantCaptureKeyboard && !io.WantCaptureMouse)) {
             im->handleSDLEvent(evt);
         }
     }
@@ -1566,6 +1740,57 @@ void StudioApp::renderMenuBar() {
             auto path = openFileDialog(mEngine->getSDLWindow(), filter, "Open BBFx Project");
             if (!path.empty()) loadProject(path);
         }
+        // v3.5.2 Sprint S8 Lot AU — Demo Showcase Pack. Opening a demo RUNS its
+        // Lua builder (clear user graph + dofile + setup) rather than loading the
+        // baked .bbfx-project via loadProject(): loadProject() also re-applies the
+        // outputs/surface-zone/FBO config mid-frame which freezes the live render
+        // on a runtime project switch. Running the builder is the same path used
+        // by bake_demos.lua / inspect_demos.lua — it switches cleanly without
+        // killing the animation. (The baked .bbfx-project files remain available
+        // via File → Open Project for the standard workflow.)
+        if (ImGui::BeginMenu("Open Demo")) {
+            namespace fs = std::filesystem;
+            const std::string demoDir = "lua/demos/projects";
+            bool any = false;
+            std::error_code ec;
+            if (fs::exists(demoDir, ec) && fs::is_directory(demoDir, ec)) {
+                std::vector<std::string> demos;   // demo names (stems), with a *_builder.lua
+                for (auto& e : fs::directory_iterator(demoDir, ec)) {
+                    if (!e.is_regular_file()) continue;
+                    std::string fn = e.path().filename().string();
+                    const std::string suf = "_builder.lua";
+                    if (fn.size() > suf.size() && fn.compare(fn.size() - suf.size(), suf.size(), suf) == 0)
+                        demos.push_back(fn.substr(0, fn.size() - suf.size()));   // "demo_mesh_morph"
+                }
+                std::sort(demos.begin(), demos.end());
+                for (auto& name : demos) {
+                    any = true;
+                    if (ImGui::MenuItem(name.c_str())) {
+                        std::string builderPath = demoDir + "/" + name + "_builder.lua";
+                        // 1. Clear the user graph (keep time/shell/_dbg/_test) — synchronous, destroys entities.
+                        if (auto* anim = Animator::instance()) {
+                            auto names = anim->getRegisteredNodeNames();
+                            for (auto& n : names) {
+                                if (n == "time") continue;
+                                if (n.rfind("shell/", 0) == 0 || n.rfind("_dbg_", 0) == 0 || n.rfind("_test_", 0) == 0) continue;
+                                if (auto* nd = anim->getRegisteredNode(n)) { anim->removeNode(nd); nd->cleanup(); delete nd; }
+                            }
+                        }
+                        // 2. Run the builder's setup().
+                        mLua.safe_script("local _b = dofile('" + builderPath + "'); if type(_b)=='table' and type(_b.setup)=='function' then _b.setup() end",
+                                         sol::script_pass_on_error);
+                        // 3. Flush deferred dbg.create ops so the nodes exist this frame.
+                        { sol::optional<sol::function> fn = mLua["_dbg_process_pending"]; if (fn) (*fn)(); }
+                        mProjectPath.clear();   // a demo isn't "the" project — don't Save over the builder
+                        mProjectDirty = false;
+                        SDL_SetWindowTitle(mEngine->getSDLWindow(), ("BBFx Studio — demo: " + name).c_str());
+                        std::cout << "[Studio] Opened demo (builder): " << name << std::endl;
+                    }
+                }
+            }
+            if (!any) ImGui::TextDisabled("(no demo builders in lua/demos/projects/)");
+            ImGui::EndMenu();
+        }
         if (ImGui::MenuItem("Save", "Ctrl+S")) {
             if (mProjectPath.empty()) {
                 static const char* filter = "BBFx Project (*.bbfx-project)\0*.bbfx-project\0";
@@ -1597,15 +1822,52 @@ void StudioApp::renderMenuBar() {
         }
         // v3.5 Lot S — plugin authoring exports.
         if (ImGui::BeginMenu("Export Plugin")) {
+            // C1 — capture du VRAI graphe courant (nodes + links) à exporter.
+            // Avant, le dialog exportait des specs vides → plugins coquilles.
+            // Parité ProjectSerializer : on saute les nodes runtime `shell/<n>`.
+            auto captureGraph = []() -> nlohmann::json {
+                nlohmann::json nodes = nlohmann::json::array();
+                nlohmann::json links = nlohmann::json::array();
+                if (auto* anim = Animator::instance()) {
+                    for (auto& name : anim->getRegisteredNodeNames()) {
+                        if (name.rfind("shell/", 0) == 0) continue;
+                        auto* node = anim->getRegisteredNode(name);
+                        if (!node) continue;
+                        nlohmann::json n;
+                        n["type"] = node->getTypeName();
+                        n["name"] = name;
+                        if (node->getParamSpec() && !node->getParamSpec()->empty())
+                            n["params"] = node->getParamSpec()->toJson();
+                        nodes.push_back(std::move(n));
+                    }
+                    for (auto& l : anim->getLinks()) {
+                        if (l.fromNode.rfind("shell/", 0) == 0 || l.toNode.rfind("shell/", 0) == 0) continue;
+                        links.push_back({ {"fromNode", l.fromNode}, {"fromPort", l.fromPort},
+                                          {"toNode", l.toNode},     {"toPort", l.toPort} });
+                    }
+                }
+                return { {"nodes", nodes}, {"links", links} };
+            };
+
             if (ImGui::MenuItem("Subgraph as Plugin...")) {
+                mPluginAuthoringDialog->setSubgraphSpec(captureGraph());
                 mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::Subgraph);
                 mShowPluginAuthoringDialog = true;
             }
             if (ImGui::MenuItem("Scene Preset Plugin...")) {
+                // Une scène = le graphe courant (+ outputs pour contexte).
+                nlohmann::json scene = captureGraph();
+                if (mEngine && mEngine->getOutputManager())
+                    scene["outputs"] = mEngine->getOutputManager()->toJson();
+                mPluginAuthoringDialog->setSceneJson(scene);
                 mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::Scene);
                 mShowPluginAuthoringDialog = true;
             }
             if (ImGui::MenuItem("Output Template Plugin...")) {
+                nlohmann::json outputs = nlohmann::json::array();
+                if (mEngine && mEngine->getOutputManager())
+                    outputs = mEngine->getOutputManager()->toJson();
+                mPluginAuthoringDialog->setOutputsJson(outputs);
                 mPluginAuthoringDialog->open(PluginAuthoringDialog::Mode::OutputTemplate);
                 mShowPluginAuthoringDialog = true;
             }
@@ -1644,6 +1906,9 @@ void StudioApp::renderMenuBar() {
         ImGui::MenuItem("Material Editor", nullptr, &mShowMaterialEditor);
         ImGui::MenuItem("Undo History",   nullptr, &mShowUndoHistory);
         ImGui::MenuItem("Asset Browser",  "Ctrl+Shift+A", &mShowAssetBrowser);
+        if (ImGui::MenuItem("Learn Panel", "Ctrl+Shift+L", &mShowLearnPanel)) {
+            if (mLearnPanel) mLearnPanel->setVisible(mShowLearnPanel);  // v3.5.2 Sprint S7 Lot Y
+        }
         if (mTestEngine && ImGui::MenuItem("Test Engine UI")) {
             ImGuiTestEngine_ShowTestEngineWindows(mTestEngine, nullptr);
         }
@@ -1821,6 +2086,17 @@ void StudioApp::renderPanels() {
     if (mShowMaterialEditor && mMaterialEditorPanel) mMaterialEditorPanel->render();
     if (mShowUndoHistory && mUndoHistoryPanel) mUndoHistoryPanel->render();
     if (mShowAssetBrowser && mAssetBrowserPanel) mAssetBrowserPanel->render();
+    // v3.5.2 Sprint S7 Lot Y — LearnPanel always update() (binds bound even
+    // when panel hidden), render only if visible.
+    if (mLearnPanel) {
+        mLearnPanel->update();
+        if (mShowLearnPanel) {
+            mLearnPanel->setVisible(true);
+            mLearnPanel->render();
+            // Sync mShowLearnPanel back from panel's own state (panel can close itself via X).
+            mShowLearnPanel = mLearnPanel->isVisible();
+        }
+    }
     if (mShowMidiActivity && mMidiActivityPanel) mMidiActivityPanel->render();
     if (mShowMidiMapping && mMidiMappingPanel) mMidiMappingPanel->render();
     if (mShowEffectRack && mEffectRackPanel) mEffectRackPanel->render();
@@ -2106,7 +2382,7 @@ void StudioApp::renderPanels() {
 
         ImGui::SameLine();
         // Version
-        ImGui::TextDisabled("v3.5.1");
+        ImGui::TextDisabled("v3.5.2");
 
         ImGui::End();
         ImGui::PopStyleVar();
@@ -2123,28 +2399,69 @@ void StudioApp::renderPanels() {
     renderShortcutsDialog();
     renderSettingsDialog();
     renderRecoveryDialog();
+    renderDeepLinkConfirmDialog();
 }
 
 // ── Project save / load / auto-save ──────────────────────────────────────────
 
-void StudioApp::newProject() {
+void StudioApp::clearUserGraph() {
     auto* animator = Animator::instance();
-    if (animator) {
-        auto names = animator->getRegisteredNodeNames();
-        for (auto& n : names) {
-            if (n == "time") continue; // keep RootTimeNode
-            auto* nd = animator->getRegisteredNode(n);
-            if (nd) {
-                animator->removeNode(nd);
-                nd->cleanup();
-                delete nd;
+    if (!animator) return;
+    // Snapshot the names first — the map mutates as we delete.
+    auto names = animator->getRegisteredNodeNames();
+    for (auto& n : names) {
+        if (n == "time") continue;                                  // keep RootTimeNode
+        if (n.rfind("shell/", 0) == 0 ||                            // REPL client nodes
+            n.rfind("_dbg_", 0)  == 0 ||                            // debugger helper nodes
+            n.rfind("_test_", 0) == 0) continue;                    // test-suite helper nodes
+        auto* node = animator->getRegisteredNode(n);
+        if (!node) continue;                                        // already gone (cascade)
+
+        // Drop any viewport-side references to this node BEFORE destroying it,
+        // so the gizmo / picker / camera-lock / Lua `_sceneNodes` table never
+        // dereference a freed SceneNode. (Mirrors the deferred-delete path.)
+        if (mViewportPanel) {
+            auto* picker = mViewportPanel->getPicker();
+            if (picker && picker->getSelectedNodeName() == n) picker->deselect();
+
+            if (auto* soNode = dynamic_cast<SceneObjectNode*>(node)) {
+                auto* gizmo = mViewportPanel->getGizmo();
+                if (gizmo && gizmo->getTargetSceneNode() == soNode->getSceneNode())
+                    gizmo->clearTarget();
+                auto* camCtrl = mViewportPanel->getCameraController();
+                if (camCtrl && camCtrl->getLockTarget() == soNode->getSceneNode())
+                    camCtrl->setOrbitLockTarget(nullptr);
+                if (mLua["_sceneNodes"].valid()) {
+                    sol::object sn = mLua["_sceneNodes"][n];
+                    mLua["_sceneNodes"][n] = sol::nil;
+                    if (sn.valid() && mLua["_rotateTarget"].valid() && sn == mLua["_rotateTarget"])
+                        mLua["_rotateTarget"] = sol::nil;
+                }
             }
         }
+
+        animator->removeNode(node);
+        // A node's cleanup() may touch one of its peers (e.g. PerlinFxNode → its
+        // target SceneObjectNode). If that peer was already deleted earlier in this
+        // loop the call can throw — swallow it so the remaining nodes (and their
+        // OGRE entities) still get destroyed. Without this guard the loop would
+        // abort mid-way and leave stale geometry in the viewport.
+        try { node->cleanup(); }
+        catch (const std::exception& e) { std::cerr << "[clearUserGraph] cleanup('" << n << "') threw: " << e.what() << std::endl; }
+        catch (...) { std::cerr << "[clearUserGraph] cleanup('" << n << "') threw" << std::endl; }
+        delete node;
     }
+    if (mNodeEditorPanel) mNodeEditorPanel->syncFromDAG();
+}
+
+void StudioApp::newProject() {
+    clearUserGraph();                       // DAG + 3D scene entities
+    if (mSurfaceMap) mSurfaceMap->clear();  // projection zones rendered in the viewport
     mProjectPath.clear();
     mProjectDirty = false;
-    SDL_SetWindowTitle(mEngine->getSDLWindow(), "BBFx Studio v3.5.1");
-    std::cout << "[Studio] New project — DAG cleared" << std::endl;
+    SDL_SetWindowTitle(mEngine->getSDLWindow(),
+                       ("BBFx Studio v" + std::string(BBFX_VERSION_STRING) + " — " + BBFX_VERSION_NAME).c_str());
+    std::cout << "[Studio] New project — scene cleared" << std::endl;
 }
 
 void StudioApp::panicAll() {
@@ -2309,12 +2626,23 @@ void StudioApp::saveProject(const std::string& path) {
             mRecentProjects.end());
         mRecentProjects.insert(mRecentProjects.begin(), path);
         if (mRecentProjects.size() > 10) mRecentProjects.resize(10);
-        // Persist in settings for auto-load on next startup (skip test files)
-        if (path.find("output/test_") == std::string::npos) {
+        // Persist in settings for auto-load on next startup (skip test files,
+        // and skip the demo showcase pack — re-baking demos must not clobber the
+        // user's working project as "last opened" — v3.5.2 Sprint S8 Lot AU).
+        if (path.find("output/test_") == std::string::npos &&
+            path.find("lua/demos/projects/") == std::string::npos) {
             auto& settings = SettingsManager::instance();
             auto s = settings.get();
             s.lastProjectPath = path;
             s.recentProjects = mRecentProjects;
+            // v3.5.2 — Persist window geometry
+            int wx, wy, ww, wh;
+            SDL_GetWindowPosition(mEngine->getSDLWindow(), &wx, &wy);
+            SDL_GetWindowSize(mEngine->getSDLWindow(), &ww, &wh);
+            s.windowX = wx;
+            s.windowY = wy;
+            s.windowWidth = ww;
+            s.windowHeight = wh;
             settings.set(s);
             settings.save();
         }
@@ -2403,6 +2731,11 @@ void StudioApp::promptInstallZip(const std::string& zipPath) {
 
 void StudioApp::loadProject(const std::string& path) {
     if (path.empty()) return;
+    // Opening a project REPLACES the current scene — wipe the user graph (and the
+    // 3D entities it owns) first, otherwise the loaded nodes would be merged on top
+    // of whatever is already there. (`mSerializer.load()` recreates the project's
+    // own nodes, surface zones and outputs below.)
+    clearUserGraph();
     ProjectSerializer::ProjectState state;
     if (mSerializer.load(path, mLua, &state)) {
         mProjectPath = path;
@@ -2891,9 +3224,21 @@ void StudioApp::initNodeTypeRegistry() {
 
     // Video
     reg.registerType({"TheoraClipNode", "Video", {0.9f, 0.8f, 0.2f, 1.0f},
-        [](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
-            // TheoraClipNode will be dormant if the video file doesn't exist
-            auto* node = new TheoraClipNode("video/bombe.ogg");
+        [](const std::string& name, sol::state& lua) -> AnimationNode* {
+            // v3.5.2 Sprint S7 Lot AA — accept a 'filename' (or 'video_path')
+            // override via _preset_params, same pattern as ShaderFxNode. Falls
+            // back to the bundled bombe.ogg sample when no override is present.
+            std::string videoPath = "resources/video/bombe.ogg";
+            sol::optional<sol::table> pp = lua["_preset_params"];
+            if (pp) {
+                sol::optional<std::string> fn = (*pp)["filename"];
+                if (!fn) {
+                    sol::optional<std::string> alt = (*pp)["video_path"];
+                    if (alt) fn = alt;
+                }
+                if (fn && !fn->empty()) videoPath = *fn;
+            }
+            auto* node = new TheoraClipNode(name, videoPath);
             auto* animator = Animator::instance();
             if (animator) {
                 for (auto& [pname, port] : node->getInputs()) animator->add(port);
@@ -2908,11 +3253,8 @@ void StudioApp::initNodeTypeRegistry() {
             return node;
         }});
 
-    // Animation
-    // AnimationStateNode disabled — ninja.mesh skeleton triggers OGRE crash
-    // (SceneManager::getAnimation "Attack1" not found). Will be re-enabled
-    // when a proper animated mesh pipeline is implemented.
-    // reg.registerType({"AnimationStateNode", ...});
+    // Animation — AnimationStateNode est enregistré plus bas (après la lambda
+    // `registerInAnimator`, près des nodes Scene). v3.5.2 Lot AZ.
 
     // Signal — Lua-only temporal nodes (created via LuaAnimationNode with specific scripts)
     auto luaTemporalFactory = [](const std::string& luaType, const std::string& name,
@@ -3009,6 +3351,154 @@ void StudioApp::initNodeTypeRegistry() {
             return node;
         }});
 
+    reg.registerType({"FullscreenOverlayNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new FullscreenOverlayNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"TextureCycleNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TextureCycleNode(name);
+            registerInAnimator(node);
+            // Wire dt port from RootTimeNode for transition + bpm_synced timing.
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    // Lot AV — TextureSetNode (repro 2006 du couple {gray, color, factor}).
+    reg.registerType({"TextureSetNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TextureSetNode(name);
+            registerInAnimator(node);
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"TextureBlendNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TextureBlendNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"TextureFeedbackNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new TextureFeedbackNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"VideoCrossfadeNode", "Video", {0.9f, 0.8f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new VideoCrossfadeNode(name);
+            registerInAnimator(node);
+            // Wire dt port from RootTimeNode for auto_crossfade_bpm timing.
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"MaterialAnimNode", "Scene", {0.2f, 0.8f, 0.6f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MaterialAnimNode(name);
+            registerInAnimator(node);
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"VideoLibraryNode", "Video", {0.9f, 0.8f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new VideoLibraryNode(name);
+            registerInAnimator(node);
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"BillboardLayerNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new BillboardLayerNode(name, scene);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"JoystickRouterNode", "Input", {0.35f, 0.65f, 0.95f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new JoystickRouterNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"VideoSlicerNode", "Video", {0.9f, 0.8f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new VideoSlicerNode(name);
+            registerInAnimator(node);
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"MultiTextureBankNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MultiTextureBankNode(name);
+            registerInAnimator(node);
+            auto* root = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (root && animator && node->getInputs().count("dt"))
+                animator->link(root->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    reg.registerType({"NoiseTextureNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new NoiseTextureNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"SpectrogramTextureNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new SpectrogramTextureNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // v3.5.2 Lot U — GrayscaleNode (BT.709 runtime desat)
+    reg.registerType({"GrayscaleNode", "FX", {1.0f, 0.5f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new GrayscaleNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    reg.registerType({"ArtnetVideoMapperNode", "Output", {0.9f, 0.5f, 0.9f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new ArtnetVideoMapperNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
     reg.registerType({"ParticleNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
         [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             auto* scene = Engine::instance()->getSceneManager();
@@ -3024,6 +3514,25 @@ void StudioApp::initNodeTypeRegistry() {
             if (!scene) return nullptr;
             auto* node = new CameraNode(name, scene);
             registerInAnimator(node);
+            auto* rootTime = RootTimeNode::instance();
+            auto* animator = Animator::instance();
+            if (rootTime && animator && node->getInputs().count("dt"))
+                animator->link(rootTime->getOutputs().at("dt"), node->getInputs().at("dt"));
+            return node;
+        }});
+
+    // Animation — v3.5.2 Lot AZ : pipeline mesh animé. Le node lit l'AnimationState
+    // de l'entité d'un SceneObjectNode amont (mesh riggé : ninja/robot/fish) via le
+    // port entity-link, et la pilote par `time` (scrub) ou auto-advance `dt`*`speed`.
+    // (L'ancien crash venait de SceneManager::getAnimation ; on utilise désormais
+    //  entity->getAnimationState, l'API correcte pour les anims squelettiques.)
+    reg.registerType({"AnimationStateNode", "Animation", {0.9f, 0.6f, 0.2f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* scene = Engine::instance()->getSceneManager();
+            if (!scene) return nullptr;
+            auto* node = new AnimationStateNode(name, scene);
+            registerInAnimator(node);
+            // Auto-link RootTime.dt → node.dt pour l'auto-advance « out of the box ».
             auto* rootTime = RootTimeNode::instance();
             auto* animator = Animator::instance();
             if (rootTime && animator && node->getInputs().count("dt"))
@@ -3085,6 +3594,14 @@ void StudioApp::initNodeTypeRegistry() {
     reg.registerType({"MaterialNode", "Scene", {0.6f, 0.2f, 0.8f, 1.0f},
         [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
             auto* node = new MaterialNode(name);
+            registerInAnimator(node);
+            return node;
+        }});
+
+    // v3.5.2 Lot T — MaterialBridgeNode (universal mat → mesh router)
+    reg.registerType({"MaterialBridgeNode", "Scene", {0.0f, 0.7f, 0.7f, 1.0f},
+        [registerInAnimator](const std::string& name, sol::state& /*lua*/) -> AnimationNode* {
+            auto* node = new MaterialBridgeNode(name);
             registerInAnimator(node);
             return node;
         }});
@@ -3273,7 +3790,8 @@ void StudioApp::renderAboutDialog() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
     if (ImGui::BeginPopupModal("About BBFx Studio", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("BBFx Studio v3.5.1");
+        // v3.5.2 Sprint S8 Lot AU — pull from BBFX_VERSION_STRING constant.
+        ImGui::Text("BBFx Studio v%s — %s", BBFX_VERSION_STRING, BBFX_VERSION_NAME);
         ImGui::Separator();
         ImGui::Text("Real-time 3D animation and effects engine");
         ImGui::Spacing();
@@ -3415,6 +3933,59 @@ void StudioApp::renderRecoveryDialog() {
                 std::filesystem::remove(mRecoveryAutosavePath);
                 std::cout << "[Studio] Autosave deleted: " << mRecoveryAutosavePath << std::endl;
             } catch (...) {}
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void StudioApp::renderDeepLinkConfirmDialog() {
+    if (mShowDeepLinkConfirm) {
+        ImGui::OpenPopup("Deep-link Confirmation");
+        mShowDeepLinkConfirm = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
+    if (ImGui::BeginPopupModal("Deep-link Confirmation", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored({1.0f, 0.8f, 0.0f, 1.0f},
+            "An external link is requesting to %s a plugin.",
+            mDeepLinkAction == "run" ? "RUN" : "ENABLE");
+        ImGui::Spacing();
+        ImGui::Text("Plugin: %s", mDeepLinkPluginId.c_str());
+        if (mDeepLinkAction == "run" && !mDeepLinkNodeType.empty())
+            ImGui::Text("Node type: %s", mDeepLinkNodeType.c_str());
+        ImGui::Spacing();
+        ImGui::TextWrapped("Enabling a plugin executes its code. Only proceed if you trust the source of this link.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button(mDeepLinkAction == "run" ? "Run" : "Enable", {120, 0})) {
+            const std::string id = mDeepLinkPluginId;
+            const std::string type = mDeepLinkNodeType;
+            if (mDeepLinkAction == "run") {
+                PluginManager::instance().enable(id);
+                ToastSystem::instance().toast(
+                    "Run deep-link confirmed: " + id + " / " + type +
+                    " — auto node-instantiation arrives in Lot W.",
+                    ToastSeverity::Info, 5.0f);
+            } else {
+                if (!PluginManager::instance().enable(id)) {
+                    ToastSystem::instance().toast(
+                        "Enable failed for " + id, ToastSeverity::Error, 5.0f);
+                } else {
+                    ToastSystem::instance().toast(
+                        "Enabled " + id, ToastSeverity::Info, 3.0f);
+                }
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", {120, 0})) {
+            ToastSystem::instance().toast(
+                "Deep-link declined for " + mDeepLinkPluginId, ToastSeverity::Info, 3.0f);
             ImGui::CloseCurrentPopup();
         }
 

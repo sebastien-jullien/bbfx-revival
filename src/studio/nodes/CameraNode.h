@@ -15,6 +15,10 @@ public:
     /// modify the camera position/orientation (but still computes values).
     static bool sEditorCameraActive;
 
+    /// Access the underlying OGRE camera (used by FullscreenOverlayNode for
+    /// camera-locked attach in v3.5.2).
+    Ogre::Camera* getCamera() const { return mCamera; }
+
 private:
     Ogre::SceneManager* mScene;
     Ogre::Camera* mCamera = nullptr;
@@ -35,6 +39,7 @@ private:
     float mDollyDist = 0.0f;
 
     // Transition state
+    std::string mPrevMode;        // D12 — détection de changement de mode pour armer une transition
     bool mTransitioning = false;
     float mTransitionElapsed = 0.0f;
     float mTransitionDuration = 1.0f;

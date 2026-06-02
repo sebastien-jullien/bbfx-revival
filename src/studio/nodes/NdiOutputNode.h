@@ -41,6 +41,7 @@ private:
     // PBO double-buffering (async readback)
     unsigned int mPBO[2]  = {0, 0};
     int          mPBOIdx  = 0;      // index of PBO being read this frame
+    int          mPBOReadbacks = 0; // nb de readbacks émis depuis initPBOs (anti 1ère frame garbage)
     int          mPBOSize = 0;      // allocated size in bytes
     int          mPBOWidth  = 0;
     int          mPBOHeight = 0;

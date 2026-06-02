@@ -36,6 +36,11 @@ public:
     using DropCallback = std::function<void(const std::string& type, const std::string& name)>;
     void setDropCallback(DropCallback cb) { mDropCallback = std::move(cb); }
 
+    /// v3.5.2 Sprint S7 Lot Z — Heritage section visibility (for ABH-001 assertion).
+    bool isHeritageSectionVisible() const { return mHeritageVisible; }
+    /// Last frame rendered count of Heritage entries (post-filter). Used by ABH-001.
+    size_t heritageRenderedCount() const { return mHeritageRenderedCount; }
+
 private:
     // ── Data ────────────────────────────────────────────────────────────
     void refreshAssets();
@@ -74,6 +79,12 @@ private:
     void renderTooltip(const AssetInfo& a);
     void renderContextMenu(const AssetInfo& a);
     void applyFilters();
+
+    // ── v3.5.2 Sprint S7 Lot Z — Heritage Pack section ──────────────────
+    void renderHeritageSection();
+    char mHeritageCategoryFilter[64] = "all";
+    bool mHeritageVisible = true; // tracked for ABH-001 assertion
+    size_t mHeritageRenderedCount = 0; // updated each render of the section
 
     // ── Drag & drop ─────────────────────────────────────────────────────
     void beginDragDrop(const AssetInfo& a);

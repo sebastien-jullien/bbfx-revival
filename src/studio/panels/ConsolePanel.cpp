@@ -1,19 +1,26 @@
 #include "ConsolePanel.h"
 #include "../../core/Animator.h"
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <imgui.h>
+#include <regex>
 #include <sstream>
 #ifdef _WIN32
 #  ifndef NOMINMAX
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#  include <shlobj.h>
 #endif
 
 namespace bbfx {
 
 ConsolePanel::ConsolePanel(sol::state& lua) : mLua(lua) {
-    addLog("BBFx Studio Console v3.1");
-    addLog("Type Lua expressions. Tab for autocompletion. help() for commands.");
+    addLog("BBFx Studio Console v3.5.2 — Lua REPL");
+    addLog("Type Lua expressions. Tab=complete, Up/Down=history, [M]=multi-line block.");
+    loadPersistentHistory();
 
     // Register global console commands in Lua
     mLua.set_function("graph", [this]() {
@@ -95,6 +102,10 @@ void ConsolePanel::render() {
         return;
     }
 
+    // Mode toggle (single-line / multi-line)
+    ImGui::Checkbox("Multi-line", &mMultiMode);
+    ImGui::SameLine();
+
     // Copy button + Clear button in toolbar
     if (ImGui::SmallButton("Copy All")) {
         std::string all;
@@ -134,9 +145,37 @@ void ConsolePanel::render() {
     }
     ImGui::EndChild();
 
-    // Input field
+    // ── Input area ───────────────────────────────────────────────────────
     ImGui::Separator();
     bool reclaim = false;
+
+    if (mMultiMode) {
+        // Multi-line REPL (do...end blocks etc.)
+        ImGui::InputTextMultiline("##console_input_multi", mMultiBuf, sizeof(mMultiBuf),
+                                  ImVec2(-1, 100));
+        if (ImGui::Button("Execute") || (ImGui::IsKeyDown(ImGuiMod_Shift)
+                                        && ImGui::IsKeyPressed(ImGuiKey_Enter))) {
+            std::string cmd(mMultiBuf);
+            // Trim trailing whitespace
+            while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == ' ' || cmd.back() == '\t')) {
+                cmd.pop_back();
+            }
+            if (!cmd.empty()) {
+                addLog("bbfx> " + cmd);
+                executeCommand(cmd);
+                mInputHistory.push_back(cmd);
+                if (mInputHistory.size() > kMaxHistory) mInputHistory.pop_front();
+                mHistoryPos = -1;
+                if (!containsSecret(cmd)) appendPersistentHistory(cmd);
+            }
+            mMultiBuf[0] = '\0';
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(Shift+Enter to execute)");
+        ImGui::End();
+        return;
+    }
+
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue |
                                 ImGuiInputTextFlags_EscapeClearsAll |
                                 ImGuiInputTextFlags_CallbackHistory;
@@ -175,6 +214,7 @@ void ConsolePanel::render() {
             mInputHistory.push_back(cmd);
             if (mInputHistory.size() > kMaxHistory) mInputHistory.pop_front();
             mHistoryPos = -1;
+            if (!containsSecret(cmd)) appendPersistentHistory(cmd);
         }
         mInputBuf[0] = '\0';
         reclaim = true;
@@ -244,5 +284,55 @@ std::vector<std::string> ConsolePanel::getCompletions(const std::string& prefix)
     }
     return matches;
 }
+
+// ── v3.5.2: persistent REPL history (~/.bbfx/repl_history.lua) ──────────
+std::string ConsolePanel::getHistoryPath() {
+    std::string home;
+#ifdef _WIN32
+    char path[MAX_PATH];
+    if (SHGetFolderPathA(nullptr, CSIDL_PROFILE, nullptr, 0, path) == S_OK) {
+        home = path;
+    } else if (const char* up = std::getenv("USERPROFILE")) {
+        home = up;
+    }
+#else
+    if (const char* h = std::getenv("HOME")) home = h;
+#endif
+    if (home.empty()) home = ".";
+    std::string dir = home + "/.bbfx";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    return dir + "/repl_history.lua";
+}
+
+bool ConsolePanel::containsSecret(const std::string& cmd) {
+    static const std::regex re(
+        "password|secret|token|api_key|api-key|apikey",
+        std::regex_constants::icase);
+    return std::regex_search(cmd, re);
+}
+
+void ConsolePanel::loadPersistentHistory() {
+    std::ifstream f(getHistoryPath());
+    if (!f.is_open()) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        mInputHistory.push_back(line);
+        if (mInputHistory.size() > kMaxHistory) mInputHistory.pop_front();
+    }
+}
+
+void ConsolePanel::appendPersistentHistory(const std::string& cmd) {
+    std::ofstream f(getHistoryPath(), std::ios::app);
+    if (!f.is_open()) return;
+    // Single-line storage: replace newlines with spaces for portability.
+    std::string flat = cmd;
+    std::replace(flat.begin(), flat.end(), '\n', ' ');
+    std::replace(flat.begin(), flat.end(), '\r', ' ');
+    f << flat << '\n';
+}
+
+ConsolePanel::~ConsolePanel() = default;
 
 } // namespace bbfx

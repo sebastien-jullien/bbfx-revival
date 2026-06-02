@@ -18,8 +18,11 @@ public:
     /// Initialize with OGRE root. Creates dedicated SceneManager + camera + light.
     void initialize(Ogre::Root* root);
 
-    /// Get preview ImTextureID for a BBFx shader (creates RTT on first access).
-    ImTextureID getShaderPreview(const std::string& shaderName);
+    /// Get preview ImTextureID for a BBFx shader. Builds a GLSL material on the fly
+    /// from the given fragment (+ vertex) shader file and renders it on a plane.
+    /// Creates the RTT + material on first access; subsequent calls are cached.
+    ImTextureID getShaderPreview(const std::string& fragFile,
+                                 const std::string& vertFile = "passthrough.vert");
 
     /// Get preview ImTextureID for an OGRE material (sphere mesh).
     ImTextureID getMaterialPreview(const std::string& materialName);
@@ -44,6 +47,11 @@ private:
     };
 
     void createPreviewRTT(const std::string& name, const std::string& materialName, bool isSphere);
+
+    /// Build (or fetch from cache) an Ogre material wrapping the given GLSL shader pair.
+    /// Returns the material name, or "" if compilation/loading failed.
+    std::string buildShaderMaterial(const std::string& fragFile, const std::string& vertFile);
+    std::map<std::string, std::string> mShaderMaterials;  // fragFile -> built material name ("" = failed)
 
     Ogre::Root* mRoot = nullptr;
     Ogre::SceneManager* mSceneMgr = nullptr;

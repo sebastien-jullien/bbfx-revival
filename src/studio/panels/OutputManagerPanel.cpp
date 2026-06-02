@@ -82,8 +82,15 @@ void OutputManagerPanel::render(StudioEngine* engine, StudioApp* app) {
                 }
             }
         }
+        // N12 — feedback utilisateur (avant : branche vide, aucun retour).
         if (suggestions.empty()) {
-            // No adjacent outputs detected (single monitor setup)
+            ToastSystem::instance().toast(
+                "Auto-Blend : aucun output adjacent détecté (configuration mono-écran ?)",
+                ToastSeverity::Warning, 3.0f);
+        } else {
+            ToastSystem::instance().toast(
+                "Auto-Blend appliqué sur " + std::to_string(suggestions.size()) + " paire(s) d'outputs",
+                ToastSeverity::Info, 3.0f);
         }
     }
     if (ImGui::IsItemHovered())

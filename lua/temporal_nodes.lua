@@ -42,22 +42,25 @@ function LFONode:new(params)
         local wf   = math.floor(wfPort:getValue() + 0.5)
         local ph   = phPort:getValue()
 
-        -- v3.2: beat sync mode
+        -- v3.2: beat sync mode (D6 — corrigé : l'ancien code calculait un `tp`
+        -- local à la branche beat-sync puis l'écrasait inconditionnellement ligne
+        -- suivante → beat_sync/beatFrac n'avaient AUCUN effet).
         local bsPort = self:getInput("beat_sync")
         local bfPort = self:getInput("beatFrac")
         local beatSync = bsPort and bsPort:getValue() >= 0.5
 
+        local tp
         if beatSync and bfPort then
-            -- In beat sync mode, frequency is in beats and phase uses beatFrac
+            -- Beat-sync : phase verrouillée sur la position DANS le beat.
+            -- freq = cycles par beat (1 ⇒ un cycle complet par beat), beatFrac ∈ [0,1).
             local beatFrac = bfPort:getValue()
-            t = t + dt  -- still accumulate for multi-beat periods
-            local tp_raw = t * freq + ph
-            -- Use beatFrac for sub-beat precision
-            local tp = (tp_raw + beatFrac * freq) % 1.0
+            t = t + dt  -- on continue d'accumuler (lecture externe cohérente)
+            tp = (beatFrac * freq + ph) % 1.0
         else
+            -- Mode libre : phase en fonction du temps accumulé (Hz).
             t = t + dt
+            tp = (t * freq + ph) % 1.0
         end
-        local tp = (t * freq + ph) % 1.0  -- normalized phase 0..1
 
         local v
         if wf == LFONode.TRI then
@@ -123,6 +126,15 @@ function RampNode:new(params)
         local dt     = dtPort:getValue()
         local target = targetPort:getValue()
         local rate   = ratePort:getValue()
+
+        -- D7 — beat_sync : si actif, `rate` est exprimé en unités/BEAT (au lieu
+        -- d'unités/seconde) → on le scale par le tempo courant (beats/seconde).
+        local bsPort = self:getInput("beat_sync")
+        if bsPort and bsPort:getValue() >= 0.5 then
+            local root = bbfx.RootTimeNode.instance()
+            local bpm  = root and root:getBPM() or 120.0
+            rate = rate * (bpm / 60.0)
+        end
 
         local diff = target - current
         local step = rate * dt

@@ -1,6 +1,7 @@
 #include "StudioEngine.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
+#include "../core/Version.h"   // v3.5.2 Sprint S8 Lot AU — BBFX_VERSION_STRING
 
 #include <OgreTextureManager.h>
 #include <OgreHardwarePixelBuffer.h>
@@ -105,7 +106,9 @@ StudioEngine::StudioEngine(sol::state& lua)
     }
 
     // Set window title and resize to a comfortable default for the Studio.
-    SDL_SetWindowTitle(mWindow, "BBFx Studio v3.4");
+    // v3.5.2 Sprint S8 Lot AU — pull version from BBFX_VERSION_STRING (was "v3.4" hardcoded).
+    std::string title = std::string("BBFx Studio v") + BBFX_VERSION_STRING;
+    SDL_SetWindowTitle(mWindow, title.c_str());
     SDL_SetWindowSize(mWindow, 1400, 900);
     SDL_SetWindowPosition(mWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 

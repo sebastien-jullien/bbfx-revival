@@ -1,6 +1,6 @@
 # BBFx Demos
 
-## BBFx Studio v3.2.4 (GUI Application)
+## BBFx Studio v3.5.2 "VJ Reference Edition" (GUI Application)
 
 Launch the graphical studio interface:
 ```
@@ -21,11 +21,13 @@ bbfx-studio.exe lua/demos/demo_studio.lua
 - **Node Editor** — Interactive DAG: drag pins to create links, Delete to remove, color by type, real-time port values, flow animation on links
 - **Inspector** — Auto-generated widgets from ParamSpec: float sliders, int spinners, bool checkboxes, enum dropdowns, color pickers, vec3 editors, mesh/texture/material/shader/particle/compositor selectors. Rename/delete nodes.
 - **Timeline** — Beat/bar markers, chord state blocks, BPM, transport, 8-band audio spectrum
-- **Preset Browser** — 41 presets in 6 categories, 7 asset sections (Meshes, Textures, Particles, Compositors, Shaders, Materials), texture thumbnail grid, search bar, drag-drop to viewport/node editor
+- **Preset Browser** — 100 presets grouped by category (Camera, Color, Composition, Geometry, Particle, PostProcess, Shader, VJ), search bar, drag-drop to viewport/node editor. (Assets — Meshes, Textures, Particles, Compositors, Shaders, Materials — live in the separate **Asset Browser**, Ctrl+Shift+A.)
 - **Console** — Lua REPL + debugger commands (`dbg.help()`, `dbg.list()`, `dbg.inspect()`, etc.)
 - **Set Editor** — Hidden by default (F4)
 - **Compositor Stack** — List of active CompositorNodes, drag-reorder, inline params, solo/bypass
 - **Performance Mode** — F5 toggle, fullscreen viewport with compositors active, 4x4 trigger grid (7 action types, pages, colors, momentary/toggle), 8 faders (learn mode, range, labels), VU meters, BPM overlay, beat flash, PANIC button
+
+There are ~30 dockable panels/windows in all. In addition to the above: **Asset Browser** (Ctrl+Shift+A), **Scene Hierarchy**, **Material Editor**, **Effect Rack**, **Shader Gallery**, **Output Manager** (Ctrl+Shift+O, multi-output/zone routing), **Master View**, **Surface Editor** (Ctrl+Shift+S, projection mapping/warp), **Network Sync** (Ctrl+Shift+N), **MIDI Mapping** & **MIDI Activity**, **OSC Browser**, **Gamepad** (Ctrl+Shift+G), **Learn Panel** (Ctrl+Shift+L), **Plugin Manager** (Ctrl+Shift+X), **Plugin Errors** (Ctrl+Shift+E), **Community Browser** (Ctrl+Shift+C), **Author Profile**, **Undo History**, and the **Command Palette** (Ctrl+Shift+P).
 
 **Keyboard shortcuts:**
 - **F1** — Toggle Node Editor
@@ -48,11 +50,19 @@ bbfx-studio.exe lua/demos/demo_studio.lua
 - **1-9** — Restore bookmark
 - **ESC** — Quit (Design) / Return to Design (Performance)
 
-**Node types (30+):**
-- **Core:** RootTimeNode, LuaAnimationNode, AnimationStateNode, AccumulatorNode
+**Node types (64 registered):**
+
+The full, authoritative list is the registry in `src/studio/StudioApp.cpp::initNodeTypeRegistry()`. Grouped highlights:
+
+- **Core:** RootTimeNode, LuaAnimationNode, AccumulatorNode, SubgraphNode
+- **Animation:** AnimationStateNode (joue une anim squelettique/vertex d'un mesh riggé amont — ninja/robot/fish)
 - **Temporal:** LFONode, RampNode, DelayNode, EnvelopeFollowerNode
-- **FX:** PerlinFxNode, ShaderFxNode, WaveVertexShader, ColorShiftNode, TextureBlitterNode
-- **Studio (v3.2):** SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, TriggerNode, BeatTriggerNode
+- **FX:** PerlinFxNode, ShaderFxNode, WaveVertexShader, ColorShiftNode, TextureBlitterNode, PostProcessNode
+- **Scene/Studio:** SceneObjectNode, LightNode, ParticleNode, CameraNode, CompositorNode, SkyboxNode, FogNode, MathNode, MapperNode, MixerNode, SplitterNode, BandSplitNode, TriggerNode, BeatTriggerNode
+- **Audio:** AudioCaptureNode, AudioAnalyzerNode, BeatDetectorNode
+- **Texture/Material:** TextureNode, MaterialNode, TextureSetNode
+- **I/O & Control (v3.3+):** MidiInputNode, MidiOutputNode, OscInputNode, OscOutputNode, ArtnetOutputNode, ArtnetInputNode, NdiOutputNode, SpoutOutputNode, TextureShareOutputNode, GamepadNode, JoystickRouterNode, WarpNode, BlendNode
+- **VJ / Video / Texture compositing (v3.5.2):** FullscreenOverlayNode, TextureCycleNode, TextureBlendNode, VideoCrossfadeNode, VideoLibraryNode, TheoraClipNode, BillboardLayerNode, MaterialAnimNode, TextureFeedbackNode, VideoSlicerNode, MultiTextureBankNode, NoiseTextureNode, SpectrogramTextureNode, ArtnetVideoMapperNode, MaterialBridgeNode, GrayscaleNode
 
 **Debugger commands (Console panel):**
 ```

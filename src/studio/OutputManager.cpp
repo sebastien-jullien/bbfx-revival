@@ -392,6 +392,16 @@ OutputManager::~OutputManager() {
     if (mTestPatternProg && sDeleteProgram)       sDeleteProgram(mTestPatternProg);
     if (mTestPatternVBO  && sDeleteBuffers)       sDeleteBuffers(1, &mTestPatternVBO);
     if (mTestPatternVAO  && sDeleteVertexArrays)  sDeleteVertexArrays(1, &mTestPatternVAO);
+#ifdef _WIN32
+    // Libère le HDC du main window mis en cache au ctor (GetDC sans ReleaseDC = fuite GDI).
+    if (mMainDC) {
+        HWND hwnd = mMainWindow ? static_cast<HWND>(SDL_GetPointerProperty(
+            SDL_GetWindowProperties(mMainWindow), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)) : nullptr;
+        if (!hwnd) hwnd = WindowFromDC(static_cast<HDC>(mMainDC));
+        if (hwnd) ReleaseDC(hwnd, static_cast<HDC>(mMainDC));
+        mMainDC = nullptr;
+    }
+#endif
 }
 
 int OutputManager::addOutput(int width, int height, Ogre::SceneManager* sceneMgr) {

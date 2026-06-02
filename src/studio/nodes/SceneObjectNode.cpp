@@ -148,10 +148,15 @@ void SceneObjectNode::update() {
 
     // Position & Scale: always set ABSOLUTE values (DAG + offset).
     // These don't compound because we set, not add.
-    mSceneNode->setPosition(
-        in.at("position.x")->getValue() + effPos.x,
-        in.at("position.y")->getValue() + effPos.y,
-        in.at("position.z")->getValue() + effPos.z);
+    // Garde NaN/inf : une valeur de port non-finie (div/0 amont, feedback) corromprait
+    // le transform et le culling OGRE — on ignore alors la composante fautive.
+    {
+        float px = in.at("position.x")->getValue() + effPos.x;
+        float py = in.at("position.y")->getValue() + effPos.y;
+        float pz = in.at("position.z")->getValue() + effPos.z;
+        if (std::isfinite(px) && std::isfinite(py) && std::isfinite(pz))
+            mSceneNode->setPosition(px, py, pz);
+    }
 
     {
         float sx = in.at("scale.x")->getValue() * effScl.x;
@@ -168,7 +173,7 @@ void SceneObjectNode::update() {
     bool rotFromDAG = mLinkedRotX || mLinkedRotY || mLinkedRotZ ||
         std::abs(dagRx) > 0.001f || std::abs(dagRy) > 0.001f || std::abs(dagRz) > 0.001f;
 
-    if (rotFromDAG) {
+    if (rotFromDAG && std::isfinite(dagRx) && std::isfinite(dagRy) && std::isfinite(dagRz)) {
         // DAG ports drive rotation — set absolute orientation from DAG + offset
         float rx = dagRx + effRot.x, ry = dagRy + effRot.y, rz = dagRz + effRot.z;
         Ogre::Quaternion qx(Ogre::Degree(rx), Ogre::Vector3::UNIT_X);

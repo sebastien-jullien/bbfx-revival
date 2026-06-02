@@ -1,5 +1,7 @@
 #include "TextureNode.h"
 #include "SceneObjectNode.h"
+#include "MaterialNode.h"
+#include "MaterialBridgeNode.h"
 #include "../SettingsManager.h"
 #include <OgreEntity.h>
 #include <OgreSubEntity.h>
@@ -10,8 +12,6 @@
 #include <OgreTextureUnitState.h>
 
 namespace bbfx {
-
-unsigned TextureNode::sApplySeqCounter = 0;
 
 TextureNode::TextureNode(const std::string& name)
     : AnimationNode(name)
@@ -42,6 +42,8 @@ TextureNode::TextureNode(const std::string& name)
     tgtDef.label = "Target Entity";
     tgtDef.type = ParamType::STRING;
     tgtDef.stringVal = "";
+    tgtDef.readOnly = true; // N1 — mirror read-only de la (des) cible(s) résolue(s) via le port `entity`
+    tgtDef.tooltip = "Cible(s) résolue(s) via le port entity-link (read-only).";
     mSpec.addParam(tgtDef);
 
     setParamSpec(&mSpec);
@@ -102,7 +104,7 @@ void TextureNode::resolveTargets() {
                 if (laterActive) continue;
             } else {
                 // New connection: assign a sequence number
-                mApplySeq[t] = ++sApplySeqCounter;
+                mApplySeq[t] = nextCascadeApplySeq();    // Lot AU.24 — shared with Material/MaterialBridge
             }
 
             applyToEntity(t);
@@ -111,6 +113,13 @@ void TextureNode::resolveTargets() {
 
     mCurrentTargets = newTargets;
     mReenabling = false;
+
+    // N1 — peuple le mirror read-only target_entity avec la liste résolue.
+    if (auto* mir = mSpec.getParam("target_entity")) {
+        std::string joined;
+        for (auto& t : mCurrentTargets) { if (!joined.empty()) joined += ", "; joined += t; }
+        mir->stringVal = joined;
+    }
 }
 
 void TextureNode::applyToEntity(const std::string& targetName) {
@@ -170,6 +179,7 @@ void TextureNode::applyToEntity(const std::string& targetName) {
     auto& matMgr = Ogre::MaterialManager::getSingleton();
     auto mat = matMgr.getByName(matName);
     if (!mat) {
+        mCreatedMaterials.insert(matName); // N7 — pour remove() au cleanup
         mat = matMgr.create(matName, Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
         auto* pass = mat->getTechnique(0)->getPass(0);
         pass->createTextureUnitState(mTextureName);
@@ -205,38 +215,61 @@ void TextureNode::detachFromEntity(const std::string& targetName) {
 
     auto* entity = soNode->getEntity();
 
-    // Check if another ACTIVE TextureNode is also linked to this target
-    // If so, tell it to re-apply its texture immediately
-    TextureNode* otherActiveTex = nullptr;
+    // v3.5.2 Lot AU.24 — Pattern 4 cross-class cascade, full hand-back :
+    // pick the ENABLED peer (Texture/Material/MaterialBridge) with the highest
+    // mApplySeq targeting the same entity. Disabled peers are skipped (so we
+    // never fall back onto a disabled node's material). Then :
+    //   - winner.seq > mySeq → successor already master, leave the entity alone.
+    //   - winner.seq < mySeq → predecessor : re-apply its material explicitly
+    //                          (MaterialNode/MaterialBridgeNode update() does NOT
+    //                          re-fire on its own unless their param changes).
+    //   - no winner           → restore the real originals saved on first apply.
+    AnimationNode* winner = nullptr;
+    unsigned winnerSeq = 0;
+    unsigned mySeq = mApplySeq.count(targetName) ? mApplySeq[targetName] : 0;
     for (auto& nodeName : animator->getRegisteredNodeNames()) {
         auto* otherNode = animator->getRegisteredNode(nodeName);
-        if (otherNode && otherNode != this && otherNode->getTypeName() == "TextureNode"
-            && otherNode->isEnabled()) {
-            auto* otherTex = dynamic_cast<TextureNode*>(otherNode);
-            if (otherTex) {
-                for (auto& t : otherTex->getCurrentTargets()) {
-                    if (t == targetName) { otherActiveTex = otherTex; break; }
-                }
-            }
+        if (!otherNode || otherNode == this || !otherNode->isEnabled()) continue;
+        const auto& tn = otherNode->getTypeName();
+        if (tn != "TextureNode" && tn != "MaterialNode" && tn != "MaterialBridgeNode") continue;
+
+        // Does this peer target the same entity ?
+        auto& oInputs = otherNode->getInputs();
+        auto eIt = oInputs.find("entity");
+        if (eIt == oInputs.end()) continue;
+        auto oSources = animator->getSourceNodes(eIt->second);
+        bool targetsSame = false;
+        for (auto* s : oSources) if (s && s->getName() == targetName) { targetsSame = true; break; }
+        if (!targetsSame) continue;
+
+        unsigned otherSeq = 0;
+        if (auto* tx = dynamic_cast<TextureNode*>(otherNode))         otherSeq = tx->getApplySeq(targetName);
+        else if (auto* m  = dynamic_cast<MaterialNode*>(otherNode))   otherSeq = m->getApplySeq(targetName);
+        else if (auto* mb = dynamic_cast<MaterialBridgeNode*>(otherNode)) otherSeq = mb->getApplySeq(targetName);
+        if (otherSeq > winnerSeq) {
+            winnerSeq = otherSeq;
+            winner = otherNode;
         }
-        if (otherActiveTex) break;
     }
 
-    // Restore original materials per sub-entity
     auto origIt = mOriginalMaterials.find(targetName);
-    if (origIt != mOriginalMaterials.end()) {
-        if (!otherActiveTex) {
-            // No other active TextureNode → restore the REAL originals
+    if (!winner) {
+        // No enabled peer → restore the REAL originals saved on first apply.
+        if (origIt != mOriginalMaterials.end()) {
             auto& origMats = origIt->second;
             for (unsigned s = 0; s < entity->getNumSubEntities() && s < origMats.size(); ++s) {
                 entity->getSubEntity(s)->setMaterialName(origMats[s]);
             }
-        } else {
-            // Another active TextureNode exists — re-apply its texture now
-            otherActiveTex->applyToEntity(targetName);
         }
-        mOriginalMaterials.erase(origIt);
+    } else if (winnerSeq > mySeq) {
+        // Successor already master — leave the entity alone (no-op).
+    } else {
+        // Predecessor : hand the entity back to it by re-applying its material.
+        if (auto* tx = dynamic_cast<TextureNode*>(winner))                tx->applyToEntity(targetName);
+        else if (auto* m  = dynamic_cast<MaterialNode*>(winner))          m->applyToEntity(targetName);
+        else if (auto* mb = dynamic_cast<MaterialBridgeNode*>(winner))    mb->applyToEntity(targetName);
     }
+    if (origIt != mOriginalMaterials.end()) mOriginalMaterials.erase(origIt);
 }
 
 void TextureNode::setEnabled(bool en) {
@@ -284,6 +317,13 @@ void TextureNode::cleanup() {
     mCurrentTargets.clear();
     mOriginalMaterials.clear();
     mApplySeq.clear();
+    // N7 — libère les matériaux TexNode_* créés (avant : fuite jusqu'à la fin de
+    // vie du resource manager).
+    auto& matMgr = Ogre::MaterialManager::getSingleton();
+    for (auto& m : mCreatedMaterials) {
+        if (matMgr.getByName(m)) matMgr.remove(m);
+    }
+    mCreatedMaterials.clear();
 }
 
 } // namespace bbfx

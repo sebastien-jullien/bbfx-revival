@@ -2,6 +2,176 @@
 
 All notable changes to BBFx Revival are documented in this file.
 
+## [3.5.2] - 2026-05-11 — VJ Reference Edition
+
+### Added
+- **14 new DAG nodes** (FullscreenOverlay, TextureCycle, TextureBlend, VideoCrossfade, VideoLibrary, BillboardLayer, JoystickRouter, MaterialAnim, TextureFeedback, VideoSlicer, MultiTextureBank, NoiseTexture, SpectrogramTexture, ArtnetVideoMapper, MaterialBridge, Grayscale) — **64 registered node types** total (Syphon SKIP: Apple IOSurface only)
+- **Fanions parity** preset `fanions_dans_la_plaine.lua` reproducing the historical 2006 `setFanions.textures.lua` (screen-aligned FullscreenOverlay + gray/color TextureCycle + vertical mask sweep TextureBlend + Theora VideoCrossfade, joystick-routed)
+- **LearnPanel** unified MIDI/Gamepad/Keyboard learn (LearnBindingManager + live poller)
+- **AssetManifest** with SHA-256 asset/video resolution from CDN cache (Heritage Pack gray/color textures + VJ video loops)
+- Live Lua REPL
+- 100 presets + 17 scene templates
+- DAG patterns: `material_out`/`texture_out` ParamSpec mirrors, entity-link `material_source` ports, cross-class `mApplySeq` cascade, universal `enabled` DAG port on every node
+
+### Removed
+- FullscreenOverlay `camera_locked` mode (never rendered — circular billboard↔camera reference) — see Lot AW
+- VideoLibrary `volume` param (TheoraClip decodes video only, no audio) — see Lot AW
+
+#### Lot AW (post-release functional audit) - 2026-05-30
+
+##### Fixed
+- **59/59 dead controls/stubs wired**: Mixer `weighted` mode + weight ports, Splitter dynamic outputs, Accumulator min/max/wrap/reset, NoiseTexture real Gustavson simplex + lacunarity/persistence, BeatTrigger subdivision + attack ramp, Math `noise` op, Skybox real skybox/color/gradient, Camera transitions armed, TextureBlitter RGBA + 6 patterns, LFO/Ramp `beat_sync`
+- **TextureFeedback** real CPU feedback loop (256² accumulator with decay/zoom/rotation trails)
+- **ArtnetVideoMapper** real RTT readback + `readback_rate_hz`
+- LearnPanel live MIDI/gamepad/keyboard poller, MIDI learn outside Performance Mode
+- CompositorStack real delete, NodeEditor "Save as Preset" serializes real params, undoable ParamSpec edits (EditParamCommand), Art-Net POSIX send path
+
+##### Added
+- **+68 anti-regression tests** (`dbg.test()` 378 → **446 PASS / 0 FAIL**); studio + headless build, 0 warnings
+
+### Statistics
+- 14 new DAG nodes (64 types total), 100 presets + 17 templates, **446 tests PASS / 0 FAIL**, build studio + headless exit 0 / 0 warnings
+- 250 iterations, 36 lots (A-AJ), 8 sprints — RELEASED FINAL 2026-05-11
+
+## [3.5.1] - 2026-04-28 — Asset Library & Polish
+
+### Added
+- **Professional asset library**: 32 procedural meshes (≥25 req), 58 shaders (≥30), 29 PostProcess effects (≥22), 23 particle templates, 8 VJ materials + 5 skybox, 14 scene templates, 6 camera modes + transitions
+- **PostProcessStack**: ping-pong RTT pipeline independent of OGRE Compositor (Rectangle2D + direct `_render()`, bypasses CompositorManager / avoids ImGui FBO corruption), feedback `prevFrame` RTT auto-detection
+- **AssetBrowserPanel** (~450 lines): 9 sidebar categories, 64x64 grid + list view, instant search, multi-select tags, favorites, drag&drop with 8 typed payloads + double-click (Ctrl+Shift+A)
+- **EffectRackPanel** (standalone, ~420 lines): MIDI/Gamepad/Keyboard learn per row + LED feedback, undoable bypass, serialization (F9)
+- **CameraNode** 6-mode dispatch (orbit/fly_through/shake/dolly_zoom/track/crane) with smoothstep+Slerp transitions
+- **ParticleNode** 8 DAG ports (color/size/velocity/lifetime/emission_rate), signature 2006 ParticleTunnel + 9 other BBFx templates
+- GPU shaders: 5 vertex + 8 fragment generators + 7 post-process fragments; ShaderFxNode vec2/3/4 support
+- 14 functional scene templates (by music genre + performance presets), 14 enriched composition presets, 93 presets + 6 aliases
+
+### Changed
+- MeshGenerator registers 7 canonical procedural meshes at startup; dragon textures + Robot/skybox materials extracted
+- Preset deduplication and cleanup (101 → 93 active presets + 6 backward-compat aliases)
+- 27-panel UI audit (Lot N): double status bar removed, complete auto-save, persistent docking layout, Console history, dead code removed
+
+### Fixed
+- 37 Phase-6 hotfixes: Asset Browser drag&drop audit (isolated nodes now receive `update()`), ParticleNode template-overwrite root cause, Perlin clone material transfer + spherical UVs, viewport camera persistence, mFxHidden flag
+- ShaderFxNode BPM fallback (audio-uniform auto-detection → tempo-pulsed envelope)
+
+### Statistics
+- ~232 cumulative tests PASS / 0 FAIL, build exit 0 / 0 warnings, 195 iterations (I-1540→I-1735), 15 lots (A-O), 6 phases
+
+## [3.5.0] - 2026-04-18 — BBFx Community
+
+### Added
+- **Sandboxed plugin system** (PluginManager/Manifest/Validator/Sandbox with sol::environment isolation, Lua stdlib whitelist, canonical path enforcement, 17 penetration tests PASS)
+- **Community Browser** (VS Code Marketplace-style): sidebar filters, grid cards with animated thumbnails, markdown detail panel, CommandPalette (Ctrl+Shift+P)
+- **PluginManagerPanel** (Installed/Community tabs, drag&drop ZIP install, Chrome-style permission prompt) + GitHub publish flow (OAuth device flow, fork+branch+commit+PR automation)
+- **GamepadManager** next-gen (SDL3): haptic rumble, gyro+accelerometer with Kalman filter, touchpad, LED RGB, battery, GamepadNode with 33 DAG outputs, 3 shipped profiles (PS5/Xbox/SwitchPro)
+- **Plugin API Lua 27+ namespaces** (plugin, midi, osc, artnet, textureShare, gamepad, joystick, noise, easing, tempo, timeline, http, websocket, fs, json, ui, media, images, sequences, models, geometry, sdf, fractals, lsystem, renderTexture, frameBuffer, compositor, …)
+- HttpClient (libcurl async, SHA256 verification), ZipExtractor (minizip-ng with path-traversal + zip-bomb protection), deep links (`bbfx://`), GitHub ratings overlay
+- Content generators: NoiseGenerator, GeometryGenerator, SDFPrimitives + Marching Cubes, fractal shaders, L-system, easing library (30 functions), TempoManager, LuaTimeline
+- MeshImporter (Assimp), FFmpegBridge, ImageLoader + SequencePlayer, HotReloader; CLI flags (--install/--uninstall/--validate-plugin/--list-plugins/--export-plugin); 3 example plugins
+
+### Statistics
+- 250 iterations (I-1290→I-1539), 23 lots (A-W), **673 automated tests, 0 FAIL**
+
+## [3.4.0] - 2026-04-16 — BBFx Stage
+
+### Added
+- **OutputManager** multi-slot architecture (up to 8 independent outputs, uber-shader GL3.3, Win32 native windows, blit-based pipeline)
+- **QuadWarp** per-output (4-corner perspective + GLSL distortion, drag handles, keyboard precision), **EdgeBlend** (soft-edge overlap, linear/gamma curves, RGB per-channel), **GridWarp** (NxM control-point mesh distortion)
+- **WarpWizard** step-by-step calibration + **SurfaceMap** multi-zone manager (WarpProfile/BlendProfile/GridWarpProfile per zone)
+- **SyncManager** network sync (UDP clock protocol, master/slave auto-detect, beat/bar/phase, latency compensation, transport lock) + NetworkPanel
+- Output integrations: Spout (TextureShareSender cross-platform), NDI (NdiOutputNode + libndi), Art-Net DMX (ArtnetOutputNode, 8 DAG channels), MIDI Clock output (24ppq, tempo-synced)
+- **MasterViewPanel** (mosaic of active outputs, live thumbnails, click-to-select) + SceneSwitcher (ZoneSnapshot capture/apply per zone, crossfade, PANIC restore)
+
+### Changed
+- Blit-based rendering pipeline (uber-shader GL3.3 fullscreen quad, Win32 native windows) — works around AMD driver `glBlitFramebuffer`/RenderTexture bug
+
+### Statistics
+- 352 iterations (I-938→I-1280 + 11 fix), 17 lots (A-Q) + 62 fix iterations, 34+ automated tests
+
+## [3.3.0] - 2026-04-11 — BBFx Connect
+
+### Added
+- **MIDI integration** (rtmidi): MidiDeviceManager (auto-detect, hot-plug, multi-device), MidiInputNode (8 CC outputs + 4 note triggers + clock sync + relative encoder mode + aftertouch), MidiOutputNode (note/CC send + LED feedback)
+- **MIDI Learn** (MidiLearnManager singleton with conflict detection, learn from faders/triggers/Inspector/NodeEditor, MidiMappingPanel)
+- **OSC control**: thread-safe UdpServer, OscInputNode (glob matching + `/bbfx/set|node|preset|bpm` dispatch), OscOutputNode (rate-limited, delta detection), OscBrowserPanel
+- **Dual Output window** (second SDL3 window for projector, 720p/1080p/4K presets, F11 fullscreen, multi-monitor) + OutputPanel preview; NDI output skeleton
+- **MappingProfile** class (MIDI+OSC bindings, save/load `.bbfx-mapping`, 3 controller presets)
+- Autosave recovery dialog (crash detection via lock file, Recover/Ignore/Delete)
+
+### Changed
+- **Performance Mode overhaul**: trigger activate/deactivate with node cleanup, rest snapshot + PANIC restore, ChordSystem ↔ DagSnapshot, trigger menus (Load Preset/Toggle Compositor/Set Param), Quick Assign faders, crossfader lerp fix
+- Serialization hardened (macroActions, chord snapshots, MIDI mappings, autosave, link deduplication)
+
+### Fixed
+- FX node naming (ColorShiftNode/PerlinFxNode/WaveVertexShader/TextureBlitterNode use instance names), FX cleanup (destroy OGRE clones on delete), ColorShiftNode factory uses existing SceneObjectNode entity
+
+### Statistics
+- 224 iterations (I-714→I-937), 14 lots (A-N) + fixes, 101+ automated tests
+
+## [3.2.5] - 2026-04-08 — Performance Pro & Final Polish
+
+### Added
+- **Multi-selection** (box select, Shift+click, CompoundCommand delete/copy-paste/align/distribute)
+- **Shader Gallery** (animated 64x64 thumbnails, double-click apply) + **Material Editor** (sphere preview, color/texture editing)
+- **Crossfader A/B** (DagSnapshot interpolation, auto-crossfade BPM sync, Bounce/Hold) + macro triggers (MacroRunner beat-gated, set_param/wait actions)
+- FX Stack in Inspector (Applied Effects: enable/disable/unlink/reorder), quick-add popup (type-ahead, Ctrl+Space), drag-link auto-create, smart wire (Ctrl+L)
+- Node comments/groups/collapsed, interactive minimap, ToastSystem, UndoHistoryPanel, preset wheel, auto-assign faders
+
+### Changed
+- Infrastructure: Dear ImGui v1.92.7-docking, imgui_test_engine integrated
+
+### Statistics
+- **95 automated tests (0 FAIL, 0 SKIP)**, 25 ImGui UI tests, multi-frame Lua coroutine test runner, 20+ dbg automation commands; 89 iterations, 8 lots (B-H)
+
+## [3.2.4] - 2026-04-07 — Asset Pipeline & Visual Application
+
+### Added
+- **Unified Asset Browser** with 6 asset types (Meshes, Textures, Particles, Compositors, Shaders, Materials), 64x64 texture thumbnails via TextureThumbnailCache, universal drag-drop with payloads
+- **TextureNode** and **MaterialNode** as DAG nodes (entity-link, per-sub-entity save/restore), **ParticleNode** entity-link
+- **CompositorStackPanel** (drag-reorder, inline params, solo/bypass)
+- Visual texture picker (grid/search/live preview), configurable triggers (chord/enable/disable/preset/reset/compositor) with pages/color/momentary
+- Fader learn mode (intelligent labels, ParamSpec range), auto-detect drop on viewport via raycast
+
+### Statistics
+- 75 iterations across 11 lots (A-K)
+
+## [3.2.3] - 2026-04-05 — Timeline Automation
+
+### Added
+- **AutomationEngine**: per-frame evaluation + DAG injection with multi-mode interpolation (Step, Linear, Smooth, EaseIn, EaseOut, Bezier)
+- Automation lanes UI (virtualized rendering), keyframe editing (create/drag/delete, popup, multi-select, quantize, bezier tangents, copy-paste)
+- Cue markers with keyboard navigation, loop region, trigger events (chord_jump, preset, enable/disable)
+- Real-time recording from faders and Inspector (overdub/replace), LFO generation (sine/square/triangle/sawtooth), chord snapshots with crossfade transitions
+- Native multi-target DAG (port multiLink, FX multi-clone from graph, target_entity migration)
+
+### Statistics
+- 58 iterations across 9 lots (A-I)
+
+## [3.2.2] - 2026-03-30 — Multi-Object Scene
+
+### Added
+- **Scene Hierarchy panel (F8)** with visibility/lock toggles, Blender-style intelligent naming (ogrehead→Ogre with auto-increment)
+- Right-click context menus for object creation and FX application, drag-drop mesh/FX from browser to viewport
+- Object duplication (Ctrl+D), parent-child hierarchy with relative transforms, cascade FX (multiple FX on one object)
+- Unified entity linking for all node types, dynamic target resolution
+
+## [3.2.1] - 2026-03-29 — Interactive Viewport
+
+### Added
+- Orbit/pan/zoom camera controller (Alt+LMB/MMB/scroll)
+- Ray-query object picking with bidirectional selection sync
+- Translation gizmo with axis constraints and undo
+- Procedural infinite grid, viewport toolbar (Select/Translate modes via Q/W)
+- Safe deletion with full OGRE cleanup, mesh-to-FX auto-linking, "Use Editor Camera" toggle
+
+## [3.2.0] - 2026-03-28 — BBFx Studio Content
+
+### Added
+- **41 presets** across 6 categories, **8 procedural fragment shaders**, **13 BBFx compositors**
+- **ParamSpec system** with auto-generated Inspector widgets
+- Enable/disable nodes with visual [OFF] feedback, preset browser organized by category
+- **13 new node types**: SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Mapper, Mixer, Splitter, Trigger, BeatTrigger
+
 ## [3.1.0] - 2026-03-28 — BBFx Studio++
 
 ### Added

@@ -16,7 +16,7 @@ CompositorNode::CompositorNode(const std::string& name, Ogre::Viewport* viewport
     mSpec.addParam(enDef);
     setParamSpec(&mSpec);
 
-    addInput(new AnimationPort("enabled", 1.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port provided by AnimationNode base.
     mCompositorName = "";
 }
 CompositorNode::~CompositorNode() { cleanup(); }

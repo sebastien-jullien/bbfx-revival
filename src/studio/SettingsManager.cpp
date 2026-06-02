@@ -51,6 +51,11 @@ void SettingsManager::load(const std::string& path) {
         if (j.contains("pluginsLastScanAt")) mSettings.pluginsLastScanAt = j["pluginsLastScanAt"];
         if (j.contains("communityCacheTTL")) mSettings.communityCacheTTL = j["communityCacheTTL"];
         if (j.contains("defaultLightingMode")) mSettings.defaultLightingMode = j["defaultLightingMode"];
+        // v3.5.2 — Window geometry
+        if (j.contains("windowX"))      mSettings.windowX = j["windowX"];
+        if (j.contains("windowY"))      mSettings.windowY = j["windowY"];
+        if (j.contains("windowWidth"))  mSettings.windowWidth = j["windowWidth"];
+        if (j.contains("windowHeight")) mSettings.windowHeight = j["windowHeight"];
         // v3.5 Lot V — GitHub publishing token (scrambled). `githubToken`
         // here is already post-XOR ; callers should go through
         // GitHubPublisher::decodeStoredToken to get the raw OAuth token.
@@ -75,6 +80,11 @@ void SettingsManager::save() const {
         j["pluginsLastScanAt"] = mSettings.pluginsLastScanAt;
         j["communityCacheTTL"] = mSettings.communityCacheTTL;
         j["defaultLightingMode"] = mSettings.defaultLightingMode;
+        // v3.5.2 — Window geometry
+        j["windowX"]      = mSettings.windowX;
+        j["windowY"]      = mSettings.windowY;
+        j["windowWidth"]  = mSettings.windowWidth;
+        j["windowHeight"] = mSettings.windowHeight;
         j["githubToken"]       = mSettings.githubToken;
         j["githubLogin"]       = mSettings.githubLogin;
         std::ofstream f(p);

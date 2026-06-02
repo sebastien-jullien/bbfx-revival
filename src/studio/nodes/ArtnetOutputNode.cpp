@@ -44,9 +44,7 @@ ArtnetOutputNode::ArtnetOutputNode(const std::string& name)
 }
 
 ArtnetOutputNode::~ArtnetOutputNode() {
-#ifdef _WIN32
-    closeSocket();
-#endif
+    closeSocket(); // M14 — défini pour Windows ET POSIX
 }
 
 // ── Port management ───────────────────────────────────────────────────────────
@@ -97,7 +95,11 @@ void ArtnetOutputNode::update() {
         if (dmxVal != mLastData[i]) changed = true;
     }
 
-    if ((changed || timeFired) && timeFired) {
+    // Envoi rate-limité à 44 Hz : sur changement de données, OU refresh périodique
+    // (keep-alive Art-Net) même si rien n'a bougé. `timeFired` garantit le cap 44 Hz ;
+    // `changed` rend l'envoi réactif au lieu d'émettre 44 paquets/s en continu.
+    bool keepAlive = mFirstSend || elapsedMs >= ARTNET_KEEPALIVE_MS;
+    if (timeFired && (changed || keepAlive)) {
         sendPacket(ip, universe, dmxData);
         mLastData   = dmxData;
         mLastSend   = now;
@@ -175,6 +177,20 @@ void ArtnetOutputNode::sendPacket(const std::string& ip, int universe,
     sendto(mSocket, reinterpret_cast<const char*>(pkt.data()),
            static_cast<int>(pkt.size()), 0,
            reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+#else
+    // M14 — envoi POSIX (avant : no-op silencieux sur non-Windows).
+    ensureSocket();
+    if (mSocket < 0) return;
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(ARTNET_PORT);
+    if (::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) {
+        std::cerr << "[Artnet] Invalid destination IP: " << ip << std::endl;
+        return;
+    }
+    ::sendto(mSocket, pkt.data(), pkt.size(), 0,
+             reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 #endif
 }
 
@@ -238,6 +254,27 @@ void ArtnetOutputNode::closeSocket() {
     if (mSocket != INVALID_SOCKET) {
         closesocket(mSocket);
         mSocket = INVALID_SOCKET;
+    }
+}
+#else
+// M14 — chemin POSIX (Linux/macOS).
+void ArtnetOutputNode::ensureSocket() {
+    if (mSocket >= 0) return;
+    mSocket = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (mSocket < 0) {
+        std::cerr << "[Artnet] Failed to create UDP socket" << std::endl;
+        return;
+    }
+    int bcast = 1;
+    if (::setsockopt(mSocket, SOL_SOCKET, SO_BROADCAST, &bcast, sizeof(bcast)) < 0) {
+        std::cerr << "[Artnet] Failed to enable SO_BROADCAST" << std::endl;
+    }
+}
+
+void ArtnetOutputNode::closeSocket() {
+    if (mSocket >= 0) {
+        ::close(mSocket);
+        mSocket = -1;
     }
 }
 #endif

@@ -70,10 +70,11 @@ ImTextureID TextureThumbnailCache::createThumbnailFromOgre(const std::string& te
             tex = texMgr.load(textureName, Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME,
                               Ogre::TEX_TYPE_2D, 0);
         }
-        if (!tex || !tex->isLoaded()) {
-            tex->load();
-        }
-        if (!tex || !tex->isLoaded()) return mPlaceholder;
+        // C9 — garde null AVANT tout déréférencement (l'ancien code testait !tex
+        // puis appelait tex->load() sur ce même tex potentiellement nul → crash).
+        if (!tex) return mPlaceholder;
+        if (!tex->isLoaded()) tex->load();
+        if (!tex->isLoaded()) return mPlaceholder;
 
         // Get the GL texture ID from OGRE
         unsigned int glId = 0;

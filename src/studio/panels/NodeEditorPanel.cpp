@@ -10,6 +10,10 @@
 #include "../commands/EditCommands.h"
 #include "../../core/ParamSpec.h"
 #include "../../midi/MidiLearnManager.h"
+#include "../nodes/MaterialBridgeNode.h"
+#include "../nodes/TextureNode.h"
+#include "../Debugger.h"
+#include "../../core/AssetManifest.h"
 
 #include <nlohmann/json.hpp>
 #include <imgui.h>
@@ -21,6 +25,8 @@
 #include <cstring>
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
+#include <functional>
 #include <set>
 
 namespace ned = ax::NodeEditor;
@@ -68,6 +74,236 @@ ImVec4 NodeEditorPanel::nodeColor(const std::string& typeName) const {
     return {0.87f, 0.87f, 0.87f, 1.0f}; // default white
 }
 
+int NodeEditorPanel::categoryColumn(const std::string& typeName) const {
+    // v3.5.2 Sprint S6 Lot X / Lot AU.5: categorical heuristic for left-to-right
+    // reading. RootTimeNode → 0 (the lone root) ; other Inputs → 1 ; FX → 2 ;
+    // Scene → 3 ; Output → 4. Critically NOTHING but RootTimeNode is column 0, so
+    // no node ever lands on top of the `time` root.
+    if (typeName == "RootTimeNode") return 0;
+    static const std::set<std::string> kInputs = {
+        "GamepadNode", "MidiInputNode", "OscInputNode", "AudioCaptureNode",
+        "BeatDetectorNode", "JoystickRouterNode",
+        "BandSplitNode", "AudioAnalyzerNode"
+    };
+    static const std::set<std::string> kScene = {
+        "SceneObjectNode", "BillboardLayerNode", "FullscreenOverlayNode",
+        "MaterialBridgeNode", "MaterialNode", "TextureNode",
+        "CameraNode", "LightNode", "SkyboxNode", "FogNode", "ParticleNode",
+        "VideoCrossfadeNode", "TheoraClipNode", "VideoLibraryNode", "VideoSlicerNode"
+    };
+    if (kInputs.count(typeName)) return 1;
+    if (kScene.count(typeName))  return 3;
+    if (typeName.find("OutputNode") != std::string::npos
+     || typeName == "ArtnetVideoMapperNode"
+     || typeName == "NdiOutputNode"
+     || typeName == "TextureShareOutputNode"
+     || typeName == "SpoutOutputNode") {
+        return 4;
+    }
+    // FX default (TextureBlend, NoiseTexture, Spectrogram, Grayscale, Feedback,
+    // ColorShift, ShaderFx, MaterialAnim, MultiTextureBank, TextureCycle, MathNode…)
+    return 2;
+}
+
+// Estimated visual height of a node (px) — used by auto-layout before the node
+// has been drawn (no cached rect yet). Matches roughly how imgui-node-editor
+// sizes a node: header + one row per port + padding.
+float NodeEditorPanel::estimatedNodeHeight(const std::string& name) const {
+    auto cit = mCachedNodeRects.find(name);
+    if (cit != mCachedNodeRects.end() && cit->second.h > 1.0f) return cit->second.h;
+    auto* anim = Animator::instance();
+    int nPorts = 0;
+    if (anim) {
+        if (auto* n = anim->getRegisteredNode(name)) {
+            int ni = static_cast<int>(n->getInputs().size());
+            int no = static_cast<int>(n->getOutputs().size());
+            nPorts = std::max(ni, no);
+        }
+    }
+    return 30.0f + static_cast<float>(nPorts) * 22.0f + 16.0f;
+}
+
+void NodeEditorPanel::autoLayoutNodes(const std::vector<std::string>& newNames, bool assumeFresh) {
+    if (newNames.empty()) return;
+    auto* anim = Animator::instance();
+    if (!anim) return;
+
+    // Filter : only nodes that exist AND are at zero-ish position (preserve user layout).
+    // A position is "zero-ish" if BOTH x and y are within [-1, 1] of zero — handles
+    // freshly created nodes that imgui-node-editor hasn't yet positioned.
+    // Also skip nodes that already have a pending position (e.g. restored from a
+    // .bbfx-project via setNodePositions) — those win over auto-layout.
+    auto isZeroish = [](float x, float y) { return std::abs(x) < 1.0f && std::abs(y) < 1.0f; };
+    std::set<std::string> targets;
+    for (auto& n : newNames) {
+        auto it = mNodes.find(n);
+        if (it == mNodes.end()) continue;
+        // Skip a node only if it has a REAL pending position (e.g. restored from a
+        // .bbfx-project) — i.e. a pending entry that isn't itself zero-ish. A
+        // pending {0,0} (which is what builder-baked demos write) is NOT a real
+        // position → let auto-layout override it (we push a new entry after, so
+        // it wins on apply).
+        bool hasRealPending = false;
+        for (auto& pp : mPendingPositions)
+            if (pp.name == n && !isZeroish(pp.x, pp.y)) { hasRealPending = true; break; }
+        if (hasRealPending) continue;
+        if (assumeFresh) {
+            // Just-created node — definitely no position. Don't probe ned (would
+            // crash: GetNodePosition() on a node id ned hasn't drawn yet).
+            targets.insert(n);
+            continue;
+        }
+        ImVec2 pos = ned::GetNodePosition(it->second.id);
+        if (isZeroish(pos.x, pos.y)) targets.insert(n);
+    }
+    if (targets.empty()) return;  // all positions already user-set / restored
+
+    // BFS topological sort across the subgraph induced by `targets`.
+    // depth[name] = max(depth[upstream]+1, categoryColumn(typeName)).
+    // Cycles are tolerated via a "visited"+"in-progress" set : back-edges contribute
+    // nothing new and stop the traversal at the cycle source.
+    std::map<std::string, int> depth;
+    std::map<std::string, int> inProgress;  // 0 = not visited, 1 = in stack, 2 = done
+
+    std::function<int(const std::string&)> visit = [&](const std::string& name) -> int {
+        auto stateIt = inProgress.find(name);
+        if (stateIt != inProgress.end()) {
+            if (stateIt->second == 1) return depth.count(name) ? depth[name] : 0;  // cycle
+            return depth[name];                                                      // memo
+        }
+        inProgress[name] = 1;
+
+        auto* node = anim->getRegisteredNode(name);
+        int categoryDepth = node ? categoryColumn(node->getTypeName()) : 1;
+        int maxUp = -1;
+
+        if (node) {
+            for (auto& [pname, port] : node->getInputs()) {
+                if (!port) continue;
+                auto sources = anim->getSourceNodes(port);
+                for (auto* src : sources) {
+                    if (!src) continue;
+                    const std::string& sn = src->getName();
+                    if (!targets.count(sn)) continue;  // ignore upstream outside our batch
+                    int d = visit(sn);
+                    if (d > maxUp) maxUp = d;
+                }
+            }
+        }
+        int finalDepth = std::max(categoryDepth, maxUp + 1);
+        depth[name] = finalDepth;
+        inProgress[name] = 2;
+        return finalDepth;
+    };
+    for (auto& n : targets) visit(n);
+
+    // ── Spatial layout (Sugiyama-style) ──────────────────────────────────────
+    // 1) group nodes by column ; 2) within each column, order by the barycenter
+    // (mean center-Y) of their upstream/downstream neighbours, in alternating
+    // forward/backward sweeps → links cross as little as possible ; 3) stack
+    // vertically using ESTIMATED node heights so tall nodes (GamepadNode ~20
+    // ports, ParticleNode ~13) don't overlap the one below. Column 0 is reserved
+    // for the RootTimeNode (categoryColumn) so nothing lands on top of `time`.
+    constexpr float kColW = 340.0f;   // horizontal pitch between columns
+    constexpr float kVGap = 50.0f;    // vertical gap between stacked nodes
+
+    // Adjacency within `targets` (upstream = source nodes; downstream = consumers).
+    std::map<std::string, std::vector<std::string>> upstreams, downstreams;
+    int maxCol = 0;
+    for (auto& n : targets) {
+        maxCol = std::max(maxCol, depth[n]);
+        auto* node = anim->getRegisteredNode(n);
+        if (!node) continue;
+        for (auto& [pname, port] : node->getInputs()) {
+            if (!port) continue;
+            for (auto* src : anim->getSourceNodes(port)) {
+                if (!src) continue;
+                const std::string& sn = src->getName();
+                if (sn == n || !targets.count(sn)) continue;
+                upstreams[n].push_back(sn);
+                downstreams[sn].push_back(n);
+            }
+        }
+    }
+
+    // Columns, initial order = alphabetical (`targets` is a std::set → sorted).
+    std::map<int, std::vector<std::string>> colNodes;
+    for (auto& n : targets) colNodes[depth[n]].push_back(n);
+
+    // Node heights + per-column Y assignment.
+    std::map<std::string, float> nodeH, nodeY;
+    for (auto& n : targets) nodeH[n] = estimatedNodeHeight(n);
+    auto assignColumnY = [&](int col) {
+        float y = 0.0f;
+        for (auto& n : colNodes[col]) { nodeY[n] = y; y += nodeH[n] + kVGap; }
+    };
+    for (int c = 0; c <= maxCol; ++c) assignColumnY(c);
+
+    auto centerOf = [&](const std::string& n) { return nodeY[n] + nodeH[n] * 0.5f; };
+    auto barycenterUsing = [&](const std::string& n,
+                               const std::map<std::string, std::vector<std::string>>& adj) -> float {
+        auto it = adj.find(n);
+        if (it == adj.end() || it->second.empty()) return centerOf(n);  // no neighbour → keep place
+        float sum = 0.0f;
+        for (auto& m : it->second) sum += centerOf(m);
+        return sum / static_cast<float>(it->second.size());
+    };
+
+    // Alternating barycenter sweeps.
+    for (int sweep = 0; sweep < 4; ++sweep) {
+        if (sweep % 2 == 0) {                          // forward: order by upstreams
+            for (int c = 1; c <= maxCol; ++c) {
+                std::map<std::string, float> bc;
+                for (auto& n : colNodes[c]) bc[n] = barycenterUsing(n, upstreams);
+                std::stable_sort(colNodes[c].begin(), colNodes[c].end(),
+                    [&](const std::string& a, const std::string& b) { return bc.at(a) < bc.at(b); });
+                assignColumnY(c);
+            }
+        } else {                                       // backward: order by downstreams
+            for (int c = maxCol - 1; c >= 0; --c) {
+                std::map<std::string, float> bc;
+                for (auto& n : colNodes[c]) bc[n] = barycenterUsing(n, downstreams);
+                std::stable_sort(colNodes[c].begin(), colNodes[c].end(),
+                    [&](const std::string& a, const std::string& b) { return bc.at(a) < bc.at(b); });
+                assignColumnY(c);
+            }
+        }
+    }
+
+    for (int c = 0; c <= maxCol; ++c)
+        for (auto& n : colNodes[c])
+            mPendingPositions.push_back({n, static_cast<float>(c) * kColW, nodeY[n]});
+}
+
+ImVec4 NodeEditorPanel::portColor(const std::string& portName) const {
+    // v3.5.2 Sprint S6 Lot W — color convention.
+    // entity-link ports (entity, *_source) → green
+    if (portName == "entity"
+     || portName.size() >= 7  && portName.compare(portName.size() - 7, 7, "_source") == 0) {
+        return {0.40f, 0.90f, 0.40f, 1.0f};
+    }
+    // material producers/consumers → orange
+    if (portName.rfind("material_", 0) == 0
+     || portName == "material_in" || portName == "material_out") {
+        return {1.00f, 0.60f, 0.20f, 1.0f};
+    }
+    // texture producers/consumers → magenta
+    if (portName.rfind("texture_", 0) == 0
+     || portName == "current_texture" || portName == "next_texture"
+     || portName.find("slot_") == 0) {
+        return {0.90f, 0.40f, 0.90f, 1.0f};
+    }
+    // trigger pulses (*_ready, frame_ready, playing) → yellow
+    if (portName.size() >= 6 && portName.compare(portName.size() - 6, 6, "_ready") == 0) {
+        return {0.95f, 0.85f, 0.20f, 1.0f};
+    }
+    if (portName == "playing" || portName == "trigger") {
+        return {0.95f, 0.85f, 0.20f, 1.0f};
+    }
+    // default
+    return {0.90f, 0.90f, 0.90f, 1.0f};
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 NodeEditorPanel::NodeEditorPanel(sol::state& lua) : mLua(lua) {
@@ -75,6 +311,12 @@ NodeEditorPanel::NodeEditorPanel(sol::state& lua) : mLua(lua) {
     cfg.SettingsFile = ""; // Don't persist to file — positions managed by .bbfx-project
     cfg.NavigateButtonIndex = 2; // Middle mouse button for canvas panning (avoid conflict with viewport right-click camera)
     mEditorContext = ned::CreateEditor(&cfg);
+
+    // v3.5.2 Sprint S6 Lot X — auto-layout fresh preset-loaded nodes.
+    Debugger::registerPresetLoadCallback(
+        [this](const std::vector<std::string>& names) {
+            this->autoLayoutNodes(names);
+        });
 }
 
 NodeEditorPanel::~NodeEditorPanel() {
@@ -111,6 +353,7 @@ void NodeEditorPanel::syncFromDAG() {
     }
 
     // Add new nodes (links are synced afterwards in syncLinksFromDAG)
+    std::vector<std::string> freshlyAdded;
     for (auto& name : names) {
         if (mNodes.count(name)) continue;
         if (name.rfind("shell/", 0) == 0) continue; // hide internal TCP shell node
@@ -133,8 +376,15 @@ void NodeEditorPanel::syncFromDAG() {
         }
 
         mNodes[name] = std::move(nd);
+        freshlyAdded.push_back(name);
     }
 
+    // v3.5.2 Sprint S8 Lot AU.4 — never stack nodes: any node that just appeared
+    // in the editor without a position (created via dbg.create / a demo builder /
+    // the console, not via a project load which restores positions) gets
+    // auto-laid-out by DAG flow. autoLayoutNodes() skips nodes that already have a
+    // pending (project-restored) position, so this doesn't fight project loads.
+    if (!freshlyAdded.empty()) autoLayoutNodes(freshlyAdded, /*assumeFresh=*/true);
 }
 
 // ── Pin lookup helper ─────────────────────────────────────────────────────────
@@ -383,6 +633,26 @@ void NodeEditorPanel::render() {
         if (!nodeEnabled) {
             col = {0.35f, 0.35f, 0.35f, 1.0f};
             ned::PushStyleColor(ned::StyleColor_NodeBg, ImVec4(0.15f, 0.15f, 0.15f, 0.8f));
+        } else if (node) {
+            // v3.5.2 Sprint S6 Lot W: active border pulse green when the node is
+            // currently producing — detected via output ports `*_ready` or `playing`
+            // > 0.5. Pulse subtle (alpha 0.7..1.0 sine) to avoid visual fatigue in
+            // long performance sessions.
+            bool isActive = false;
+            for (auto& [pname, port] : node->getOutputs()) {
+                if (!port) continue;
+                bool isReadyName = (pname.size() >= 6
+                                  && pname.compare(pname.size() - 6, 6, "_ready") == 0);
+                if ((isReadyName || pname == "playing") && port->getValue() > 0.5f) {
+                    isActive = true;
+                    break;
+                }
+            }
+            if (isActive) {
+                float t  = static_cast<float>(ImGui::GetTime());
+                float a  = 0.85f + 0.15f * std::sin(t * 2.0f);
+                col = ImVec4(0.40f, 1.00f, 0.40f, a);
+            }
         }
         ned::PushStyleColor(ned::StyleColor_NodeBorder, col);
         ned::BeginNode(nd.id);
@@ -448,10 +718,13 @@ void NodeEditorPanel::render() {
             ImGui::TextDisabled("[collapsed]");
         }
 
-        // Input pins (left)
+        // Input pins (left) — v3.5.2 Sprint S6 Lot W: per-port color via portColor()
         for (size_t i = 0; i < nd.inputPins.size(); ++i) {
             if (isCollapsed && std::find(connectedPins.begin(), connectedPins.end(), nd.inputPins[i]) == connectedPins.end())
                 continue; // skip unconnected pins when collapsed
+            const ImVec4 pcol = portColor(nd.inputNames[i]);
+            ned::PushStyleColor(ned::StyleColor_PinRect,       pcol);
+            ned::PushStyleColor(ned::StyleColor_PinRectBorder, pcol);
             ned::BeginPin(nd.inputPins[i], ned::PinKind::Input);
             ImGui::Text("> %s", nd.inputNames[i].c_str());
             if (!isCollapsed && node) {
@@ -463,12 +736,16 @@ void NodeEditorPanel::render() {
                 }
             }
             ned::EndPin();
+            ned::PopStyleColor(2);
         }
 
-        // Output pins (right)
+        // Output pins (right) — same per-port color
         for (size_t i = 0; i < nd.outputPins.size(); ++i) {
             if (isCollapsed && std::find(connectedPins.begin(), connectedPins.end(), nd.outputPins[i]) == connectedPins.end())
                 continue;
+            const ImVec4 pcol = portColor(nd.outputNames[i]);
+            ned::PushStyleColor(ned::StyleColor_PinRect,       pcol);
+            ned::PushStyleColor(ned::StyleColor_PinRectBorder, pcol);
             ned::BeginPin(nd.outputPins[i], ned::PinKind::Output);
             ImGui::Text("%s >", nd.outputNames[i].c_str());
             if (!isCollapsed && node) {
@@ -480,6 +757,7 @@ void NodeEditorPanel::render() {
                 }
             }
             ned::EndPin();
+            ned::PopStyleColor(2);
         }
 
         ned::EndNode();
@@ -488,8 +766,74 @@ void NodeEditorPanel::render() {
     }
 
     // ── Draw links ────────────────────────────────────────────────────────────
+    // v3.5.2 Sprint S6 Lot X: link cascade visualization. For links emitted by
+    // a Texture/Material/MaterialBridge node toward a SceneObjectNode, probe
+    // the source's `mApplySeq` to display a [N] badge at link midpoint and
+    // highlight the cascade winner with thicker line + saturated color.
+    auto* anim = Animator::instance();
+    // Step 1 : per-target peers map → max applySeq among Texture/Material/Bridge nodes.
+    std::map<std::string, unsigned> targetMaxSeq;
+    auto getApplySeqForLink = [&](const LinkData& lk) -> unsigned {
+        if (!anim) return 0;
+        auto* src = anim->getRegisteredNode(lk.fromNode);
+        if (!src) return 0;
+        if (auto* mb = dynamic_cast<MaterialBridgeNode*>(src)) return mb->getApplySeq(lk.toNode);
+        if (auto* tn = dynamic_cast<TextureNode*>(src))         return tn->getApplySeq(lk.toNode);
+        return 0;
+    };
+    auto isCascadeLink = [&](const LinkData& lk) -> bool {
+        if (!anim) return false;
+        auto* src = anim->getRegisteredNode(lk.fromNode);
+        if (!src) return false;
+        if (lk.toPort != "entity") return false;  // only entity-link draws the cascade badge
+        return (dynamic_cast<MaterialBridgeNode*>(src) != nullptr
+             || dynamic_cast<TextureNode*>(src) != nullptr);
+    };
     for (auto& lk : mLinks) {
-        ned::Link(lk.id, lk.startPin, lk.endPin);
+        if (isCascadeLink(lk)) {
+            unsigned seq = getApplySeqForLink(lk);
+            auto it = targetMaxSeq.find(lk.toNode);
+            if (it == targetMaxSeq.end() || seq > it->second) targetMaxSeq[lk.toNode] = seq;
+        }
+    }
+    // Step 2 : draw each link, with thickness + label for cascade links.
+    for (auto& lk : mLinks) {
+        if (isCascadeLink(lk)) {
+            unsigned seq      = getApplySeqForLink(lk);
+            unsigned maxSeq   = targetMaxSeq[lk.toNode];
+            bool     isWinner = (seq == maxSeq && seq > 0);
+            ImVec4 col = isWinner ? ImVec4(0.40f, 1.00f, 0.40f, 1.00f)
+                                   : ImVec4(0.90f, 0.90f, 0.90f, 0.40f);
+            float thick = isWinner ? 4.0f : 2.0f;
+            ned::Link(lk.id, lk.startPin, lk.endPin, col, thick);
+
+            // Midpoint label : "[N]" at the average of the 2 node positions.
+            // Pin pivot positions aren't trivially exposed by ax::NodeEditor in a
+            // canvas-stable way; using node centers gives a usable, predictable
+            // anchor that survives zoom/pan (tested on the existing layout pattern).
+            auto fromIt = mNodes.find(lk.fromNode);
+            auto toIt   = mNodes.find(lk.toNode);
+            if (seq > 0 && fromIt != mNodes.end() && toIt != mNodes.end()) {
+                ImVec2 a = ned::GetNodePosition(fromIt->second.id);
+                ImVec2 b = ned::GetNodePosition(toIt->second.id);
+                ImVec2 mid = {(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
+                ned::Suspend();
+                auto* dl = ImGui::GetWindowDrawList();
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "[%u]", seq);
+                ImVec2 ts = ImGui::CalcTextSize(buf);
+                ImVec2 r0 = {mid.x - ts.x*0.5f - 4.0f, mid.y - ts.y*0.5f - 2.0f};
+                ImVec2 r1 = {mid.x + ts.x*0.5f + 4.0f, mid.y + ts.y*0.5f + 2.0f};
+                dl->AddRectFilled(r0, r1, IM_COL32(0, 0, 0, 153), 4.0f);
+                dl->AddText({mid.x - ts.x*0.5f, mid.y - ts.y*0.5f},
+                            isWinner ? IM_COL32(102, 255, 102, 255)
+                                      : IM_COL32(220, 220, 220, 200),
+                            buf);
+                ned::Resume();
+            }
+        } else {
+            ned::Link(lk.id, lk.startPin, lk.endPin);
+        }
     }
 
     // ── Handle new link creation ──────────────────────────────────────────────
@@ -1133,32 +1477,7 @@ void NodeEditorPanel::render() {
         ImGui::Separator();
         if (ImGui::Button("Save", {100, 0})) {
             std::string presetName(mPresetNameBuf);
-            if (!presetName.empty()) {
-                std::string path = "lua/presets/" + presetName + ".lua";
-                std::ofstream ofs(path);
-                if (ofs.is_open()) {
-                    // Find the node type for the preset
-                    std::string typeName = "LuaAnimationNode";
-                    auto* animator = Animator::instance();
-                    if (animator && !mSelectedNode.empty()) {
-                        auto* node = animator->getRegisteredNode(mSelectedNode);
-                        if (node) typeName = node->getTypeName();
-                    }
-
-                    ofs << "-- " << presetName << ".lua -- BBFx Preset\n\n";
-                    ofs << "return {\n";
-                    ofs << "    name = \"" << presetName << "\",\n";
-                    ofs << "    description = \"\",\n";
-                    ofs << "    nodes = {\n";
-                    ofs << "        { type = \"" << typeName << "\", name = \"" << presetName << "\", params = {} },\n";
-                    ofs << "    }\n";
-                    ofs << "}\n";
-                    ofs.close();
-                    std::cout << "[NodeEditor] Saved preset to " << path << std::endl;
-                } else {
-                    std::cout << "[NodeEditor] Failed to write preset file: " << path << std::endl;
-                }
-            }
+            if (!presetName.empty()) savePreset(presetName, mSelectedNode);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
@@ -1309,10 +1628,110 @@ void NodeEditorPanel::render() {
             mDropScreenPos = ImGui::GetMousePos();
             mLua.script("local t = dofile('lua/templates/" + tmplName + ".lua'); if t and t.setup then t.setup() end");
         }
+        // v3.5.2 Sprint S7 Lot Z — Heritage texture drop: auto-create
+        // MaterialBridgeNode with the resolved filename, optionally linking
+        // it to the SceneObject under cursor.
+        if (auto* payload = ImGui::AcceptDragDropPayload("HERITAGE_TEXTURE")) {
+            std::string heritageName(static_cast<const char*>(payload->Data));
+            mDropScreenPos = ImGui::GetMousePos();
+            std::string linkTarget = findSceneObjUnderCursor();
+            if (linkTarget.empty() && !mSelectedNode.empty()) {
+                auto* anim = Animator::instance();
+                auto* selNode = anim ? anim->getRegisteredNode(mSelectedNode) : nullptr;
+                if (selNode && selNode->getTypeName() == "SceneObjectNode")
+                    linkTarget = mSelectedNode;
+            }
+            // Resolve heritage name → OGRE filename + force-load via AssetCache.
+            std::string filename = AssetManifest::instance().resolveAndLoad(heritageName);
+            if (!filename.empty() && mCreateNodeFn) {
+                std::string nodeName = "heritage_" + heritageName;
+                for (auto& ch : nodeName) { if (ch == '.' || ch == ' ') ch = '_'; }
+                // Reuse the TextureNode auto-link path — MaterialBridge will pick
+                // up the OGRE texture by filename via its existing auto-wrap pipeline.
+                mCreateNodeFn("TextureNode", filename, linkTarget);
+                mDropPresetName = nodeName;
+            }
+        }
         ImGui::EndDragDropTarget();
     }
 
     ImGui::End();
+}
+
+// ── M10 — Save as Preset (extrait du modal pour testabilité) ──────────────────
+bool NodeEditorPanel::savePreset(const std::string& presetName, const std::string& nodeName) {
+    if (presetName.empty()) return false;
+    // Sécurité — le nom est saisi par l'utilisateur et concaténé dans un chemin :
+    // on refuse tout séparateur, `..`, `:` (drive Windows) ou caractère de contrôle
+    // pour empêcher l'écriture hors de lua/presets/.
+    auto isUnsafe = [](const std::string& s) {
+        if (s == "." || s == "..") return true;
+        for (unsigned char c : s) {
+            if (c == '/' || c == '\\' || c == ':' || c < 0x20) return true;
+        }
+        return s.find("..") != std::string::npos;
+    };
+    if (isUnsafe(presetName)) {
+        std::cout << "[NodeEditor] Nom de preset invalide (rejeté) : " << presetName << std::endl;
+        return false;
+    }
+    std::string path = "lua/presets/" + presetName + ".lua";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) {
+        std::cout << "[NodeEditor] Failed to write preset file: " << path << std::endl;
+        return false;
+    }
+
+    std::string typeName = "LuaAnimationNode";
+    AnimationNode* node = nullptr;
+    auto* animator = Animator::instance();
+    if (animator && !nodeName.empty()) {
+        node = animator->getRegisteredNode(nodeName);
+        if (node) typeName = node->getTypeName();
+    }
+
+    // Sérialise les VRAIES valeurs de params (sauf mirrors read-only + COLOR/VEC3).
+    std::string paramsStr;
+    if (node) {
+        if (auto* spec = node->getParamSpec()) {
+            bool first = true;
+            for (auto& pd : spec->getParams()) {
+                if (pd.readOnly) continue;
+                std::string valStr;
+                switch (pd.type) {
+                    case ParamType::FLOAT: valStr = std::to_string(pd.floatVal); break;
+                    case ParamType::INT:   valStr = std::to_string(pd.intVal); break;
+                    case ParamType::BOOL:  valStr = pd.boolVal ? "true" : "false"; break;
+                    case ParamType::STRING:
+                    case ParamType::ENUM:
+                    case ParamType::MESH:
+                    case ParamType::TEXTURE:
+                    case ParamType::MATERIAL:
+                    case ParamType::SHADER:
+                    case ParamType::PARTICLE:
+                    case ParamType::COMPOSITOR:
+                        valStr = "\"" + pd.stringVal + "\""; break;
+                    default: continue; // COLOR / VEC3 : non sérialisés ici
+                }
+                if (!first) paramsStr += ", ";
+                paramsStr += pd.name + " = " + valStr;
+                first = false;
+            }
+        }
+    }
+
+    ofs << "-- " << presetName << ".lua -- BBFx Preset\n\n";
+    ofs << "return {\n";
+    ofs << "    name = \"" << presetName << "\",\n";
+    ofs << "    description = \"\",\n";
+    ofs << "    nodes = {\n";
+    ofs << "        { type = \"" << typeName << "\", name = \"" << presetName
+        << "\", params = {" << paramsStr << "} },\n";
+    ofs << "    }\n";
+    ofs << "}\n";
+    ofs.close();
+    std::cout << "[NodeEditor] Saved preset to " << path << std::endl;
+    return true;
 }
 
 // ── Link creation: drag pin → pin ─────────────────────────────────────────────

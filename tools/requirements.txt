@@ -1,0 +1,12 @@
+# Asset pipeline dependencies (Phase 1 — Lots E + J)
+# Install: pip install -r tools/requirements.txt
+
+requests>=2.31.0          # HTTP fetching from APIs and CDNs
+Pillow>=10.0.0            # Image manipulation (resize, desaturate, score)
+boto3>=1.34.0             # Cloudflare R2 / Backblaze B2 / AWS S3 uploads (S3-compatible)
+tqdm>=4.66.0              # Progress bars
+python-dotenv>=1.0.0      # Auto-load .env (CDN credentials, API keys)
+
+# Optional but recommended:
+# - ffmpeg must be installed on PATH (apt-get install ffmpeg / choco install ffmpeg / brew install ffmpeg)
+# - ImageMagick is NOT required (Pillow handles all image ops)

@@ -37,7 +37,7 @@ void TriggerNode::update() {
         case 4: triggered = !above; break;               // below (continuous)
     }
 
-    if (triggered) mHoldTimer = mSpec.getParam("hold_time")->floatVal;
+    if (triggered) { auto* pHold = mSpec.getParam("hold_time"); mHoldTimer = pHold ? pHold->floatVal : 0.1f; }  // null-check getParam
     else if (mHoldTimer > 0) mHoldTimer -= dt;
 
     getOutputs().at("trigger")->setValue(mHoldTimer > 0 ? 1.0f : 0.0f);

@@ -152,7 +152,7 @@ local manifest = {
     id          = "test.plugin.lot_m",
     name        = "Lot M Perm Test",
     version     = "0.1.0",
-    bbfx_version= "3.5.0",
+    bbfx_version= "3.5.2",
     author      = { name = "bbfx tests" },
     entry       = "init.lua",
     permissions = { "midi", "osc", "artnet", "texture-share" },

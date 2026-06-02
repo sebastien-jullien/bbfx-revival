@@ -35,7 +35,7 @@ PostProcessNode::PostProcessNode(const std::string& name, PostProcessStack* stac
 
     setParamSpec(&mSpec);
 
-    addInput(new AnimationPort("enabled", 1.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port provided by AnimationNode base.
 
     // Register the default effect in the stack
     if (mStack) {

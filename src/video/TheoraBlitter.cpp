@@ -31,7 +31,24 @@ TheoraBlitter::TheoraBlitter() {
     initTables();
 }
 
-TheoraBlitter::~TheoraBlitter() = default;
+TheoraBlitter::~TheoraBlitter() {
+    // v3.5.2: explicitly remove the manually-created texture and material from
+    // their respective managers. Default destructor only drops shared_ptrs,
+    // and OGRE keeps the resource registered, which raises ItemIdentityException
+    // on a second clip loading the same source file.
+    if (!mTextureName.empty()) {
+        auto& tm = Ogre::TextureManager::getSingleton();
+        if (!tm.getByName(mTextureName).isNull()) {
+            tm.remove(mTextureName);
+        }
+    }
+    if (!mMaterialName.empty()) {
+        auto& mm = Ogre::MaterialManager::getSingleton();
+        if (!mm.getByName(mMaterialName).isNull()) {
+            mm.remove(mMaterialName);
+        }
+    }
+}
 
 void TheoraBlitter::setup(const std::string& textureName, int width, int height, BlitMode mode) {
     mTextureName = textureName;

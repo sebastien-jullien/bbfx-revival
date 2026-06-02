@@ -14,6 +14,7 @@
 #include "../../input/GamepadMappingProfile.h"
 #include "../../input/InputManager.h"
 #include "../ToastSystem.h"
+#include "../LearnBindingManager.h"
 
 namespace bbfx {
 
@@ -408,6 +409,43 @@ const ShippedPreset kShippedPresets[] = {
 };
 } // namespace
 
+// D19 — résout un nom de source du profil ("buttonA", "leftStickX", …) vers
+// (SourceType, index SDL) consommé par le poller live de LearnBindingManager
+// (GamepadManager::isButtonDown / getAxisValue avec ces index SDL). Les noms
+// correspondent à ceux émis par GamepadNode.
+static bool resolveGamepadSource(const std::string& src,
+                                 LearnBindingManager::SourceType& outType,
+                                 int& outId) {
+    using ST = LearnBindingManager::SourceType;
+    struct Entry { const char* name; ST type; int id; };
+    static const Entry kTable[] = {
+        {"leftStickX",  ST::GamepadAxis,   SDL_GAMEPAD_AXIS_LEFTX},
+        {"leftStickY",  ST::GamepadAxis,   SDL_GAMEPAD_AXIS_LEFTY},
+        {"rightStickX", ST::GamepadAxis,   SDL_GAMEPAD_AXIS_RIGHTX},
+        {"rightStickY", ST::GamepadAxis,   SDL_GAMEPAD_AXIS_RIGHTY},
+        {"leftTrigger", ST::GamepadAxis,   SDL_GAMEPAD_AXIS_LEFT_TRIGGER},
+        {"rightTrigger",ST::GamepadAxis,   SDL_GAMEPAD_AXIS_RIGHT_TRIGGER},
+        {"buttonA",     ST::GamepadButton, SDL_GAMEPAD_BUTTON_SOUTH},
+        {"buttonB",     ST::GamepadButton, SDL_GAMEPAD_BUTTON_EAST},
+        {"buttonX",     ST::GamepadButton, SDL_GAMEPAD_BUTTON_WEST},
+        {"buttonY",     ST::GamepadButton, SDL_GAMEPAD_BUTTON_NORTH},
+        {"leftBumper",  ST::GamepadButton, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+        {"rightBumper", ST::GamepadButton, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+        {"leftStickBtn",ST::GamepadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+        {"rightStickBtn",ST::GamepadButton,SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+        {"start",       ST::GamepadButton, SDL_GAMEPAD_BUTTON_START},
+        {"back",        ST::GamepadButton, SDL_GAMEPAD_BUTTON_BACK},
+        {"dpadUp",      ST::GamepadButton, SDL_GAMEPAD_BUTTON_DPAD_UP},
+        {"dpadDown",    ST::GamepadButton, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+        {"dpadLeft",    ST::GamepadButton, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
+        {"dpadRight",   ST::GamepadButton, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    };
+    for (auto& e : kTable) {
+        if (src == e.name) { outType = e.type; outId = e.id; return true; }
+    }
+    return false;
+}
+
 static void renderPresetDropdown(int* sel) {
     std::vector<const char*> items;
     for (auto& p : kShippedPresets) items.push_back(p.label);
@@ -419,9 +457,34 @@ static void renderPresetDropdown(int* sel) {
         GamepadMappingProfile prof;
         std::string err;
         if (prof.loadFromFile(p.path, err)) {
+            // D19 — APPLIQUER réellement le profil (avant : chargé puis jeté → no-op).
+            // Chaque entrée devient un binding LearnBindingManager, piloté en live par
+            // LearnPanel::update() (poller D16). Les anciens bindings gamepad sont
+            // remplacés pour éviter les doublons à chaque clic.
+            auto& lbm = LearnBindingManager::instance();
+            // retire les bindings gamepad existants (préserve MIDI/clavier)
+            for (size_t i = lbm.bindingCount(); i-- > 0; ) {
+                auto t = lbm.getBinding(i).sourceType;
+                if (t == LearnBindingManager::SourceType::GamepadButton ||
+                    t == LearnBindingManager::SourceType::GamepadAxis) {
+                    lbm.removeBindingAt(i);
+                }
+            }
+            int applied = 0;
+            for (auto& e : prof.mappings) {
+                LearnBindingManager::SourceType type; int id;
+                if (e.target.empty() || !resolveGamepadSource(e.source, type, id)) continue;
+                LearnBindingManager::Binding b;
+                b.portPath = e.target;
+                b.sourceType = type;
+                b.sourceId = id;
+                b.scale = e.scale; b.offset = e.offset; b.invert = e.invert;
+                lbm.addBinding(b);
+                ++applied;
+            }
             ToastSystem::instance().toast(
-                std::string("Loaded mapping: ") + prof.name + " ("
-                    + std::to_string(prof.mappings.size()) + " entries)",
+                std::string("Applied mapping: ") + prof.name + " ("
+                    + std::to_string(applied) + " bindings active)",
                 ToastSeverity::Info, 4.0f);
         } else {
             ToastSystem::instance().toast(

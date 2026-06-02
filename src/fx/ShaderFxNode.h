@@ -51,6 +51,9 @@ private:
     std::string mTargetNodeName;
     int mEntityVersion = -1;       // SceneObjectNode entity version when last attached
     Ogre::MaterialPtr mMaterial;
+    std::string mMatName;   // noms runtime pour libération (cleanup) — sinon fuite GPU/material
+    std::string mVpName;
+    std::string mFpName;
     Ogre::GpuProgramParametersSharedPtr mVertParams;
     Ogre::GpuProgramParametersSharedPtr mFragParams;
     ParamSpec mSpec;

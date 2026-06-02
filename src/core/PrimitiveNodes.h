@@ -14,6 +14,8 @@
 
 #include <chrono>
 
+namespace Ogre { class Entity; }
+
 namespace bbfx {
 
 class LuaAnimationNode : public AnimationNode {
@@ -58,16 +60,36 @@ public:
     explicit AnimableObjectNode(Ogre::AnimableObject* animable);
 };
 
+/// Plays a skeletal / vertex animation of an upstream animated mesh.
+/// Connect a SceneObjectNode loading a rigged mesh (ninja, robot, fish, …) to
+/// the `entity` port, pick the clip via `animation_name` (empty = first
+/// available), then drive playback either by linking the `time` port
+/// (absolute scrub, e.g. from RootTime/beat) or by auto-advance via `dt`*`speed`
+/// when `play >= 0.5`. The list of available clips is mirrored read-only in
+/// `available_animations`. Uses the OGRE entity's AnimationState (never
+/// SceneManager::getAnimation — that was the v1 crash source).
 class AnimationStateNode : public AnimationNode {
 public:
-    explicit AnimationStateNode(Ogre::SceneManager* scene, Ogre::AnimationState* state);
-    virtual ~AnimationStateNode();
+    AnimationStateNode(const std::string& name, Ogre::SceneManager* scene);
+    ~AnimationStateNode() override;
     void update() override;
+    void cleanup() override;
+    std::string getTypeName() const override { return "AnimationStateNode"; }
 protected:
-    AnimationPort* mTimePort;
-    Ogre::AnimationState* mState;
-    Ogre::Animation* mAnimation;
-    void prepare();
+    Ogre::SceneManager* mScene = nullptr;
+    ParamSpec mSpec;
+    AnimationPort* mTimePort  = nullptr;
+    AnimationPort* mDtPort    = nullptr;
+    AnimationPort* mSpeedPort = nullptr;
+    AnimationPort* mPlayPort  = nullptr;
+    std::string mActiveAnim;     // currently-enabled clip (to disable on switch/cleanup)
+    float mAccumTime = 0.0f;     // auto-advance accumulator (seconds)
+    Ogre::Entity* mPreparedEntity = nullptr; // entité préparée pour le hardware-skinning RTSS
+
+    /// Resolves the upstream SceneObjectNode entity via the `entity` link.
+    Ogre::Entity* resolveEntity(std::string& outNodeName);
+    /// Disables the currently-active AnimationState if it still exists.
+    void disableActive();
 };
 
 class RootTimeNode : public AnimationNode {
@@ -100,8 +122,13 @@ public:
     void update() override;
     std::string getTypeName() const override { return "AccumulatorNode"; }
 protected:
-    AnimationPort* mInput;
-    AnimationPort* mSum;
+    AnimationPort* mInput;   // delta
+    AnimationPort* mSum;      // sortie accumulée
+    AnimationPort* mReset;    // D8 — front montant : remet sum à min (ou 0)
+    AnimationPort* mMin;      // D8 — borne basse (active si min<max)
+    AnimationPort* mMax;      // D8 — borne haute (active si min<max)
+    AnimationPort* mWrap;     // D8 — 0 = clamp dans [min,max], 1 = wrap modulo [min,max]
+    bool mPrevReset = false;  // edge-detect du reset
 };
 
 } // namespace bbfx

@@ -26,7 +26,7 @@ ParticleNode::ParticleNode(const std::string& name, Ogre::SceneManager* scene)
     addInput(new AnimationPort("position.x", 0.0f));
     addInput(new AnimationPort("position.y", 0.0f));
     addInput(new AnimationPort("position.z", 0.0f));
-    addInput(new AnimationPort("enabled", 1.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port now provided by AnimationNode base.
     addInput(new AnimationPort("entity", 0.0f, true));
 
     // Color ports (I-1580) — default -1.0f = use template color
@@ -42,6 +42,8 @@ ParticleNode::ParticleNode(const std::string& name, Ogre::SceneManager* scene)
     addInput(new AnimationPort("lifetime", -1.0f));
 
     ParamDef tgt; tgt.name = "target_entity"; tgt.label = "Target Entity"; tgt.type = ParamType::STRING; tgt.stringVal = "";
+    tgt.readOnly = true; // N1 — mirror read-only de la cible (résolue via le port `entity`)
+    tgt.tooltip = "Cible résolue via le port entity-link (read-only).";
     mSpec.addParam(tgt);
 
     mTemplateName = tmpl.stringVal;
@@ -242,6 +244,11 @@ void ParticleNode::cleanup() {
         if (mPsys) mScene->destroyParticleSystem(mPsys);
         mSceneNode = nullptr; mPsys = nullptr;
     }
+    // C8 — libère le matériau cloné pour la teinte (sinon fuite par node coloré).
+    std::string cloneName = "PtclTint_" + getName();
+    auto& matMgr = Ogre::MaterialManager::getSingleton();
+    if (matMgr.resourceExists(cloneName)) matMgr.remove(cloneName);
+    mOrigMaterialName.clear();
 }
 void ParticleNode::resolveTarget() {
     auto* animator = Animator::instance();

@@ -116,7 +116,7 @@ void MidiMappingPanel::render() {
         ImGui::Text("Clear all MIDI bindings? This cannot be undone.");
         ImGui::Spacing();
         if (ImGui::Button("Yes", {80, 0})) {
-            bindings.clear();
+            mlm.clearBindings();   // C5 — API de teardown propre (annule learn + vide)
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();

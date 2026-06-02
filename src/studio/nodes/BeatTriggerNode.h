@@ -9,7 +9,8 @@ public:
     std::string getTypeName() const override { return "BeatTriggerNode"; }
 private:
     ParamSpec mSpec;
-    float mLastBeat = -1.0f;
+    float mLastSubBeat = -1.0f;  // dernière subdivision franchie (beat * multiplicateur)
     float mEnvelope = 0.0f;
+    bool  mAttacking = false;    // phase d'attaque en cours (rampe vers intensity)
 };
 } // namespace bbfx

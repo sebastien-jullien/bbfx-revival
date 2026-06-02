@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(BBFx VERSION 3.5.0 LANGUAGES CXX)
+project(BBFx VERSION 3.5.2 LANGUAGES CXX)
+# v3.5.2 Sprint S8 Lot AU — version source-of-truth = src/core/Version.h
+# (BBFX_VERSION_STRING). Keep major.minor.patch in sync here for CPack.
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,8 +37,10 @@ else()
 endif()
 
 # ── MSVC: /bigobj for sol2 heavy template instantiation ──────────────────────
+# /EHsc : sémantiques d'unwinding C++ standard (fiabilise les try/catch — ex.
+# boucle StudioApp::run) et supprime les ~196 warnings C4530 sur <chrono>/STL.
 if(MSVC)
-    add_compile_options(/bigobj)
+    add_compile_options(/bigobj /EHsc)
 endif()
 
 # ── ogre-lua dependency (fetched from GitHub) ────────────────────────────────
@@ -192,8 +196,15 @@ add_library(bbfx-core
     src/fx/ShaderFxNode.cpp
     src/fx/PostProcessEffect.cpp
     src/fx/PostProcessStack.cpp
+    src/fx/TextureBlendNode.cpp
+    src/fx/TextureFeedbackNode.cpp
+    src/fx/NoiseTextureNode.cpp
+    src/fx/SpectrogramTextureNode.cpp
+    src/fx/GrayscaleNode.cpp
     src/bindings/bbfx_bindings.cpp
     src/core/ParamSpec.cpp
+    src/core/AssetManifest.cpp
+    src/core/Sha256.cpp
     src/core/AutomationData.cpp
     src/core/AutomationEngine.cpp
     src/input/KeyboardManager.cpp
@@ -388,14 +399,27 @@ add_executable(bbfx-studio
     src/studio/nodes/OscOutputNode.cpp
     src/studio/nodes/NdiOutputNode.cpp
     src/studio/Debugger.cpp
+    src/studio/LearnBindingManager.cpp
     # MeshGenerator.cpp moved to bbfx-core (v3.5 Lot R).
     # SceneObjectNode.cpp moved to bbfx-core above
     src/studio/nodes/LightNode.cpp
+    src/studio/nodes/FullscreenOverlayNode.cpp
+    src/studio/nodes/TextureCycleNode.cpp
+    src/studio/nodes/TextureSetNode.cpp
+    src/studio/nodes/VideoCrossfadeNode.cpp
+    src/studio/nodes/MaterialAnimNode.cpp
+    src/studio/nodes/VideoLibraryNode.cpp
+    src/studio/nodes/BillboardLayerNode.cpp
+    src/studio/nodes/JoystickRouterNode.cpp
+    src/studio/nodes/VideoSlicerNode.cpp
+    src/studio/nodes/MultiTextureBankNode.cpp
+    src/studio/nodes/ArtnetVideoMapperNode.cpp
     src/studio/nodes/ParticleNode.cpp
     src/studio/nodes/CompositorNode.cpp
     src/studio/nodes/PostProcessNode.cpp
     src/studio/nodes/TextureNode.cpp
     src/studio/nodes/MaterialNode.cpp
+    src/studio/nodes/MaterialBridgeNode.cpp
     src/studio/nodes/CameraNode.cpp
     src/studio/nodes/SkyboxNode.cpp
     src/studio/nodes/FogNode.cpp
@@ -457,6 +481,7 @@ add_executable(bbfx-studio
     src/studio/commands/SceneCommands.cpp
     src/studio/panels/SceneHierarchyPanel.cpp
     src/studio/panels/AssetBrowserPanel.cpp
+    src/studio/panels/LearnPanel.cpp
     src/studio/project/ProjectSerializer.cpp
     src/studio/project/ExportDialog.cpp
     # imgui-node-editor (compiled directly — FetchContent target unreliable)
@@ -604,9 +629,9 @@ set(CPACK_PACKAGE_NAME              "BBFx-Studio")
 set(CPACK_PACKAGE_VENDOR            "Sébastien JULLIEN")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "BBFx Studio — Real-time 3D Animation Engine")
 set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_VERSION_MAJOR     "3")
-set(CPACK_PACKAGE_VERSION_MINOR     "3")
-set(CPACK_PACKAGE_VERSION_PATCH     "0")
+set(CPACK_PACKAGE_VERSION_MAJOR     "${PROJECT_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR     "${PROJECT_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH     "${PROJECT_VERSION_PATCH}")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "BBFx-Studio")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 

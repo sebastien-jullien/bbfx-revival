@@ -1,5 +1,6 @@
 #include "network/HttpClient.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -159,41 +160,11 @@ static size_t headerCb(char* ptr, size_t size, size_t nmemb, void* ud) {
     return total;
 }
 
-struct ProgressState {
-    HttpDownloadRequest req;
-    std::function<void(size_t, size_t)> onProgress;
-    HttpClient* client = nullptr;
-};
-
-static int progressCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
-                      curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
-    auto* ps = static_cast<ProgressState*>(clientp);
-    if (ps && ps->onProgress && dlnow >= 0 && dltotal >= 0) {
-        // Marshal to main thread — invoked roughly every 100ms by libcurl.
-        size_t d = static_cast<size_t>(dlnow);
-        size_t t = static_cast<size_t>(dltotal);
-        auto cb = ps->onProgress;
-        // We can't enqueue into the main queue from here without a reference
-        // to HttpClient — the worker thread captures `this` in WorkItem.
-        // ProgressState holds a HttpClient* for exactly that.
-        if (ps->client) {
-            std::lock_guard<std::mutex> lk(*reinterpret_cast<std::mutex*>(ps->client));  // placeholder — replaced below
-            (void)d; (void)t; (void)cb;
-        }
-    }
-    return 0;
-}
-
-// Because accessing HttpClient's private queue from a free function is
-// awkward, we shuttle both the progress call AND the completion callback via
-// a std::function stashed inside ProgressState. The worker invokes the
-// completion directly at the end of download(). For progress, we store the
-// last-seen values and let the worker forward them periodically through a
-// `tick` callback — see implementation below.
-//
-// To keep this file self-contained we redo progressCb without the dummy
-// lock: we simply push a lambda into HttpClient's main queue via a pointer
-// back to the client.
+// La progression + la complétion sont transmises au thread principal via une
+// std::function stockée dans ProgressLink (ci-dessous) ; progressCbLinked pousse
+// un lambda dans la file principale de HttpClient via les pointeurs mainMtx/
+// mainQueue. (Un ancien progressCb/ProgressState « placeholder » a été retiré :
+// code mort qui faisait un reinterpret_cast<std::mutex*> d'un HttpClient* = UB.)
 
 namespace detail {
 struct ProgressLink {
@@ -487,8 +458,14 @@ void HttpClient::download(HttpDownloadRequest req) {
         } // f closed
 
         if (ok && !req.expectedSha256.empty()) {
+            // Comparaison insensible à la casse : un manifest peut fournir le hash
+            // en MAJUSCULES, sha256File() le produit en minuscules → sinon faux négatif.
+            auto toLower = [](std::string s) {
+                for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                return s;
+            };
             std::string got = sha256File(req.destPath);
-            if (got != req.expectedSha256) {
+            if (toLower(got) != toLower(req.expectedSha256)) {
                 ok = false;
                 error = "SHA-256 mismatch: got " + got + ", expected " + req.expectedSha256;
                 std::remove(req.destPath.c_str());

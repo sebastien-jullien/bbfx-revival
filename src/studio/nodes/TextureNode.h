@@ -5,6 +5,7 @@
 #include <OgreSceneManager.h>
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace bbfx {
@@ -30,9 +31,14 @@ public:
         return it != mApplySeq.end() ? it->second : 0;
     }
 
+    // Lot AU.24 — public so a peer Texture/Material/MaterialBridge node can ask
+    // this one to reassert its material on a target (Pattern 4 cascade hand-back
+    // when the most-recent node is being detached and a predecessor is still
+    // enabled). Idempotent : safe to call repeatedly on the same target.
+    void applyToEntity(const std::string& targetName);
+
 private:
     void resolveTargets();
-    void applyToEntity(const std::string& targetName);
     void detachFromEntity(const std::string& targetName);
 
     ParamSpec mSpec;
@@ -42,8 +48,7 @@ private:
     std::vector<std::string> mCurrentTargets;
     std::map<std::string, unsigned> mApplySeq; // connection order per target (persists across enable/disable)
     bool mReenabling = false; // set on re-enable, cleared after resolveTargets
-
-    static unsigned sApplySeqCounter; // global monotonic counter for connection ordering
+    std::set<std::string> mCreatedMaterials; // N7 — matériaux TexNode_* créés, à remove() au cleanup
 };
 
 } // namespace bbfx

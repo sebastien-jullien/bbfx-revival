@@ -146,8 +146,15 @@ function Preset:save(sg, filename)
     -- Create presets directory if absent (io.open creates the file but not the directory)
     local dir = filename:match("^(.+)[/\\][^/\\]+$")
     if dir then
-        -- Portable: try mkdir (Unix) then mkdir (Windows), ignore errors
-        os.execute('mkdir -p "' .. dir .. '" 2>/dev/null || mkdir "' .. dir:gsub("/", "\\") .. '" 2>NUL')
+        -- N15 — création de dossier portable selon l'OS (package.config:sub(1,1)
+        -- = '\\' sur Windows), au lieu d'une commande shell Unix (`2>/dev/null`)
+        -- qui spawnait un process en échec sur Windows.
+        if package.config:sub(1, 1) == '\\' then
+            local w = dir:gsub("/", "\\")
+            os.execute('if not exist "' .. w .. '" mkdir "' .. w .. '"')
+        else
+            os.execute('mkdir -p "' .. dir .. '"')
+        end
     end
 
     local f, err = io.open(filename, "w")

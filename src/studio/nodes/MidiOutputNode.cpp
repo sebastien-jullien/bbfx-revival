@@ -41,6 +41,14 @@ MidiOutputNode::MidiOutputNode(const std::string& name) : AnimationNode(name) {
         d.label = "Clock BPM";
         mSpec.addParam(d);
     }
+    {
+        // N5 — sélection du device de sortie (avant : toujours device 0 codé en dur).
+        ParamDef d;
+        d.name = "output_device"; d.type = ParamType::INT;
+        d.intVal = 0; d.minVal = 0; d.maxVal = 15;
+        d.label = "Output Device";
+        mSpec.addParam(d);
+    }
 
     setParamSpec(&mSpec);
     mClockGen = std::make_unique<MidiClockGenerator>();
@@ -112,6 +120,10 @@ void MidiOutputNode::update() {
     if (chanParam) channel = chanParam->intVal;
     uint8_t chanByte = static_cast<uint8_t>((channel - 1) & 0x0F);
 
+    // N5 — device de sortie sélectionnable (au lieu de 0 codé en dur).
+    int dev = 0;
+    if (auto* dp = mSpec.getParam("output_device")) dev = dp->intVal;
+
     float sendNote = ins["send_note"]->getValue();
     float sendCC = ins["send_cc"]->getValue();
 
@@ -120,12 +132,12 @@ void MidiOutputNode::update() {
         // Transition 0→1: send note-on
         uint8_t note = static_cast<uint8_t>(ins["note"]->getValue()) & 0x7F;
         uint8_t vel = static_cast<uint8_t>(ins["velocity"]->getValue()) & 0x7F;
-        mgr->sendMessage(0, MidiMessage::NoteOn | chanByte, note, vel);
+        mgr->sendMessage(dev, MidiMessage::NoteOn | chanByte, note, vel);
     }
     else if (sendNote <= 0.5f && mLastSendNote > 0.5f) {
         // Transition 1→0: send note-off
         uint8_t note = static_cast<uint8_t>(ins["note"]->getValue()) & 0x7F;
-        mgr->sendMessage(0, MidiMessage::NoteOff | chanByte, note, 0);
+        mgr->sendMessage(dev, MidiMessage::NoteOff | chanByte, note, 0);
     }
     mLastSendNote = sendNote;
 
@@ -133,7 +145,7 @@ void MidiOutputNode::update() {
     if (sendCC > 0.5f && mLastSendCC <= 0.5f) {
         uint8_t ccNum = static_cast<uint8_t>(ins["cc_number"]->getValue()) & 0x7F;
         uint8_t ccVal = static_cast<uint8_t>(ins["cc_value"]->getValue() * 127.0f) & 0x7F;
-        mgr->sendMessage(0, MidiMessage::ControlChange | chanByte, ccNum, ccVal);
+        mgr->sendMessage(dev, MidiMessage::ControlChange | chanByte, ccNum, ccVal);
     }
     mLastSendCC = sendCC;
 
@@ -143,7 +155,7 @@ void MidiOutputNode::update() {
     if (ledNote >= 0 && (ledNote != mLastLedNote || ledVel != mLastLedVel)) {
         uint8_t note = static_cast<uint8_t>(ledNote) & 0x7F;
         uint8_t vel = static_cast<uint8_t>(ledVel) & 0x7F;
-        mgr->sendMessage(0, MidiMessage::NoteOn | chanByte, note, vel);
+        mgr->sendMessage(dev, MidiMessage::NoteOn | chanByte, note, vel);
         mLastLedNote = ledNote;
         mLastLedVel = ledVel;
     }

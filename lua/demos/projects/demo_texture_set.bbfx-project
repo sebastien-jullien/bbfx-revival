@@ -1,0 +1,719 @@
+{
+  "automation": {
+    "cueMarkers": [],
+    "lanes": [],
+    "loopRegion": {
+      "active": false,
+      "endBeat": 8.0,
+      "startBeat": 0.0
+    },
+    "triggerEvents": []
+  },
+  "chords": [],
+  "created": "2026-05-14T15:35:28Z",
+  "extra": {
+    "camera": {
+      "centerX": 0.0,
+      "centerY": 0.0,
+      "centerZ": 0.0,
+      "distance": 150.0,
+      "pitch": 15.0,
+      "yaw": 0.0
+    },
+    "effectRack": {
+      "gamepadBindings": {},
+      "keyBindings": {}
+    },
+    "midiBindings": [],
+    "network": {
+      "knownPeers": [],
+      "role": "standalone"
+    },
+    "surfaceMap": {
+      "backgroundImage": "",
+      "canvasHeight": 3.0,
+      "canvasWidth": 10.0,
+      "zones": []
+    }
+  },
+  "graph": {
+    "links": [
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "cycle_g",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "cycle_c",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "blend",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "blend",
+        "from_port": "material_ready",
+        "to_node": "overlay",
+        "to_port": "material_source"
+      },
+      {
+        "from_node": "cycle_g",
+        "from_port": "texture_ready",
+        "to_node": "blend",
+        "to_port": "tex_a_source"
+      },
+      {
+        "from_node": "cycle_c",
+        "from_port": "texture_ready",
+        "to_node": "blend",
+        "to_port": "tex_b_source"
+      },
+      {
+        "from_node": "stick_drv",
+        "from_port": "out",
+        "to_node": "blend",
+        "to_port": "mask_offset_u_speed"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "buttonA",
+        "to_node": "rt_next",
+        "to_port": "gamepad"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "buttonA",
+        "to_node": "rt_hide",
+        "to_port": "gamepad"
+      },
+      {
+        "from_node": "gamepad",
+        "from_port": "leftStickX",
+        "to_node": "stick_drv",
+        "to_port": "a"
+      },
+      {
+        "from_node": "rt_next",
+        "from_port": "trigger",
+        "to_node": "cycle_g",
+        "to_port": "next"
+      },
+      {
+        "from_node": "rt_next",
+        "from_port": "trigger",
+        "to_node": "cycle_c",
+        "to_port": "next"
+      },
+      {
+        "from_node": "rt_hide",
+        "from_port": "toggled",
+        "to_node": "inv_hide",
+        "to_port": "b"
+      },
+      {
+        "from_node": "inv_hide",
+        "from_port": "out",
+        "to_node": "overlay",
+        "to_port": "visible"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "blend",
+        "inputNames": [
+          "dt",
+          "enabled",
+          "mask_offset_u",
+          "mask_offset_u_speed",
+          "mask_offset_v",
+          "mask_offset_v_speed",
+          "rotate_a",
+          "rotate_a_speed",
+          "rotate_b",
+          "rotate_b_speed",
+          "scroll_u_a",
+          "scroll_u_a_speed",
+          "scroll_u_b",
+          "scroll_u_b_speed",
+          "scroll_v_a",
+          "scroll_v_a_speed",
+          "scroll_v_b",
+          "scroll_v_b_speed",
+          "tex_a_source",
+          "tex_b_source",
+          "tex_scale_u_a",
+          "tex_scale_u_b",
+          "tex_scale_v_a",
+          "tex_scale_v_b"
+        ],
+        "outputNames": [
+          "material_ready"
+        ],
+        "params": {
+          "blend_mode": "alpha",
+          "mask": "aureola.png",
+          "mask_invert": false,
+          "material_out": "",
+          "tex_a": "BumpyMetal.jpg",
+          "tex_b": "RustySteel.jpg"
+        },
+        "ports": {
+          "dt": 0.01666666753590107,
+          "enabled": 1.0,
+          "mask_offset_u": 0.0,
+          "mask_offset_u_speed": 0.0,
+          "mask_offset_v": 0.0,
+          "mask_offset_v_speed": 0.25,
+          "rotate_a": 0.0,
+          "rotate_a_speed": 0.0,
+          "rotate_b": 0.0,
+          "rotate_b_speed": 0.0,
+          "scroll_u_a": 0.0,
+          "scroll_u_a_speed": 0.05999999865889549,
+          "scroll_u_b": 0.0,
+          "scroll_u_b_speed": -0.041999999433755875,
+          "scroll_v_a": 0.0,
+          "scroll_v_a_speed": 0.029999999329447746,
+          "scroll_v_b": 0.0,
+          "scroll_v_b_speed": -0.020999999716877937,
+          "tex_a_source": 0.0,
+          "tex_b_source": 0.0,
+          "tex_scale_u_a": 1.0,
+          "tex_scale_u_b": 1.5,
+          "tex_scale_v_a": 1.0,
+          "tex_scale_v_b": 1.5
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TextureBlendNode"
+      },
+      {
+        "id": "cycle_c",
+        "inputNames": [
+          "beat",
+          "dt",
+          "enabled",
+          "goto_index",
+          "index",
+          "next",
+          "prev"
+        ],
+        "outputNames": [
+          "current_index",
+          "next_index",
+          "texture_ready",
+          "transition_progress"
+        ],
+        "params": {
+          "auto_advance_bpm": 0.25,
+          "current_texture": "",
+          "mode": "bpm_synced",
+          "next_texture": "",
+          "random_seed": 0,
+          "textures": "RustySteel.jpg;Water01.jpg;BumpyMetal.jpg",
+          "transition_time": 1.7000000476837158
+        },
+        "ports": {
+          "beat": 0.0,
+          "dt": 0.01666666753590107,
+          "enabled": 1.0,
+          "goto_index": -1.0,
+          "index": 0.0,
+          "next": 1.0,
+          "prev": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TextureCycleNode"
+      },
+      {
+        "id": "cycle_g",
+        "inputNames": [
+          "beat",
+          "dt",
+          "enabled",
+          "goto_index",
+          "index",
+          "next",
+          "prev"
+        ],
+        "outputNames": [
+          "current_index",
+          "next_index",
+          "texture_ready",
+          "transition_progress"
+        ],
+        "params": {
+          "auto_advance_bpm": 0.30000001192092896,
+          "current_texture": "",
+          "mode": "bpm_synced",
+          "next_texture": "",
+          "random_seed": 0,
+          "textures": "BumpyMetal.jpg;Chrome.jpg;clouds.jpg",
+          "transition_time": 1.399999976158142
+        },
+        "ports": {
+          "beat": 0.0,
+          "dt": 0.01666666753590107,
+          "enabled": 1.0,
+          "goto_index": -1.0,
+          "index": 0.0,
+          "next": 1.0,
+          "prev": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "TextureCycleNode"
+      },
+      {
+        "id": "gamepad",
+        "inputNames": [
+          "enabled"
+        ],
+        "outputNames": [
+          "accelX",
+          "accelY",
+          "accelZ",
+          "back",
+          "batteryPercent",
+          "buttonA",
+          "buttonB",
+          "buttonX",
+          "buttonY",
+          "dpadDown",
+          "dpadLeft",
+          "dpadRight",
+          "dpadUp",
+          "gyroX",
+          "gyroY",
+          "gyroZ",
+          "leftBumper",
+          "leftStickBtn",
+          "leftStickX",
+          "leftStickY",
+          "leftTrigger",
+          "rightBumper",
+          "rightStickBtn",
+          "rightStickX",
+          "rightStickY",
+          "rightTrigger",
+          "start",
+          "touchpad0Down",
+          "touchpad0X",
+          "touchpad0Y",
+          "touchpad1Down",
+          "touchpad1X",
+          "touchpad1Y"
+        ],
+        "params": {
+          "gamepad_index": 0
+        },
+        "ports": {
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "GamepadNode"
+      },
+      {
+        "id": "inv_hide",
+        "inputNames": [
+          "a",
+          "b",
+          "enabled",
+          "operation",
+          "t"
+        ],
+        "outputNames": [
+          "out"
+        ],
+        "params": {
+          "operation": "add"
+        },
+        "ports": {
+          "a": 1.0,
+          "b": 0.0,
+          "enabled": 1.0,
+          "operation": 1.0,
+          "t": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MathNode"
+      },
+      {
+        "id": "overlay",
+        "inputNames": [
+          "alpha",
+          "camera_target",
+          "enabled",
+          "material_source",
+          "visible",
+          "z_offset"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "BaseWhite",
+          "mode": "screen_aligned",
+          "z_offset": 0.009999999776482582
+        },
+        "ports": {
+          "alpha": 0.8500000238418579,
+          "camera_target": 0.0,
+          "enabled": 1.0,
+          "material_source": 0.0,
+          "visible": 1.0,
+          "z_offset": 0.009999999776482582
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "FullscreenOverlayNode"
+      },
+      {
+        "id": "rt_hide",
+        "inputNames": [
+          "axis",
+          "button",
+          "enabled",
+          "gamepad"
+        ],
+        "outputNames": [
+          "gated_value",
+          "toggled",
+          "trigger"
+        ],
+        "params": {
+          "axis_index": 0,
+          "button_index": 2,
+          "mode": "toggle"
+        },
+        "ports": {
+          "axis": 0.0,
+          "button": 0.0,
+          "enabled": 1.0,
+          "gamepad": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "JoystickRouterNode"
+      },
+      {
+        "id": "rt_next",
+        "inputNames": [
+          "axis",
+          "button",
+          "enabled",
+          "gamepad"
+        ],
+        "outputNames": [
+          "gated_value",
+          "toggled",
+          "trigger"
+        ],
+        "params": {
+          "axis_index": 0,
+          "button_index": 0,
+          "mode": "press_trigger"
+        },
+        "ports": {
+          "axis": 0.0,
+          "button": 0.0,
+          "enabled": 1.0,
+          "gamepad": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "JoystickRouterNode"
+      },
+      {
+        "id": "stick_drv",
+        "inputNames": [
+          "a",
+          "b",
+          "enabled",
+          "operation",
+          "t"
+        ],
+        "outputNames": [
+          "out"
+        ],
+        "params": {
+          "operation": "add"
+        },
+        "ports": {
+          "a": 0.0,
+          "b": 0.20000000298023224,
+          "enabled": 1.0,
+          "operation": 2.0,
+          "t": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MathNode"
+      },
+      {
+        "id": "time",
+        "inputNames": [
+          "bpm",
+          "enabled"
+        ],
+        "outputNames": [
+          "beat",
+          "beatFrac",
+          "dt",
+          "total"
+        ],
+        "ports": {
+          "bpm": 144.0,
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "RootTimeNode"
+      }
+    ]
+  },
+  "media": {
+    "shaders": [],
+    "videos": []
+  },
+  "midi_mappings": [],
+  "outputs": [],
+  "performance": {
+    "faders": [
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      }
+    ],
+    "quickAccess": [
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      }
+    ],
+    "triggerPages": [
+      [
+        {
+          "action": "chord:Intro",
+          "hue": 0.0,
+          "label": "Intro",
+          "momentary": false
+        },
+        {
+          "action": "chord:Verse",
+          "hue": 0.25,
+          "label": "Verse",
+          "momentary": false
+        },
+        {
+          "action": "chord:Chorus",
+          "hue": 0.5,
+          "label": "Chorus",
+          "momentary": false
+        },
+        {
+          "action": "chord:Bridge",
+          "hue": 0.75,
+          "label": "Bridge",
+          "momentary": false
+        },
+        {
+          "action": "chord:Drop",
+          "hue": 0.0,
+          "label": "Drop",
+          "momentary": false
+        },
+        {
+          "action": "chord:Build",
+          "hue": 0.25,
+          "label": "Build",
+          "momentary": false
+        },
+        {
+          "action": "chord:Break",
+          "hue": 0.5,
+          "label": "Break",
+          "momentary": false
+        },
+        {
+          "action": "chord:Outro",
+          "hue": 0.75,
+          "label": "Outro",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX1",
+          "hue": 0.0,
+          "label": "FX1",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX2",
+          "hue": 0.25,
+          "label": "FX2",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX3",
+          "hue": 0.5,
+          "label": "FX3",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX4",
+          "hue": 0.75,
+          "label": "FX4",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig1",
+          "hue": 0.0,
+          "label": "Trig1",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig2",
+          "hue": 0.25,
+          "label": "Trig2",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig3",
+          "hue": 0.5,
+          "label": "Trig3",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig4",
+          "hue": 0.75,
+          "label": "Trig4",
+          "momentary": false
+        }
+      ]
+    ],
+    "triggers": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "timeline": {
+    "bpm": 120.0,
+    "time_signature": "4/4"
+  },
+  "version": "3.5.2"
+}

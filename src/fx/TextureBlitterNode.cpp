@@ -17,7 +17,15 @@ TextureBlitterNode::TextureBlitterNode(const string& textureName, const std::str
 TextureBlitterNode::~TextureBlitterNode() = default;
 
 void TextureBlitterNode::update() {
-    mBlitter->blit();
+    // M5 — les ports r/g/b/a/pattern pilotent désormais le remplissage
+    // (avant : blit() peignait du bleu codé en dur, ports ignorés).
+    auto& in = getInputs();
+    float r = in.at("r")->getValue();
+    float g = in.at("g")->getValue();
+    float b = in.at("b")->getValue();
+    float a = in.at("a")->getValue();
+    int pattern = static_cast<int>(in.at("pattern")->getValue() + 0.5f);
+    mBlitter->blit(r, g, b, a, pattern);
     getOutputs().at("texture_dirty")->setValue(1.0f);
     fireUpdate();
 }

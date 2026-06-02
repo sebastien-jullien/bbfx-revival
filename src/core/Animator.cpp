@@ -1,6 +1,7 @@
 #include "Animator.h"
 #include <boost/graph/breadth_first_search.hpp>
 #include <fstream>
+#include <iostream>
 #include <set>
 
 namespace bbfx {
@@ -115,8 +116,13 @@ void Animator::removeNode(AnimationNode* node) {
         }
     }
     // Purge the propagation queue of any ports belonging to this node
-    // to prevent dangling pointer access in propagateFreshValues()
+    // to prevent dangling pointer access in propagateFreshValues().
+    // (Major fix) deadPorts couvre TOUS les ports du node — pas seulement ceux
+    // présents dans le graphe — pour purger aussi les op-queues différées.
     std::set<AnimationPort*> deadPorts(ports.begin(), ports.end());
+    for (auto& [name, port] : node->getInputs())  deadPorts.insert(port);
+    for (auto& [name, port] : node->getOutputs()) deadPorts.insert(port);
+
     PortQueue cleanQueue;
     for (auto* p : mPortQueue) {
         if (deadPorts.find(p) == deadPorts.end()) {
@@ -125,15 +131,40 @@ void Animator::removeNode(AnimationNode* node) {
     }
     mPortQueue = std::move(cleanQueue);
 
+    // (Major fix) Purge mPreOpQueue/mPostOpQueue des Operation (link/unlink différés)
+    // dont `from`/`to` appartiennent au node retiré → évite un use-after-free dans
+    // executePreOp/executePostOp si une op planifiée référence un port détruit.
+    auto opAlive = [&deadPorts](const Operation& op) {
+        return deadPorts.find(op.from) == deadPorts.end()
+            && deadPorts.find(op.to)   == deadPorts.end();
+    };
+    if (!mPostOpQueue.empty()) {
+        PostOpQueue cleanPost;
+        for (const auto& op : mPostOpQueue)
+            if (opAlive(op)) cleanPost.push_back(op);
+        mPostOpQueue = std::move(cleanPost);
+    }
+    if (!mPreOpQueue.empty()) {
+        PreOpQueue cleanPre;
+        while (!mPreOpQueue.empty()) {
+            OperationEvent ev = mPreOpQueue.top();
+            mPreOpQueue.pop();
+            if (opAlive(ev.action)) cleanPre.push(ev);
+        }
+        mPreOpQueue = std::move(cleanPre);
+    }
+
     node->setListener(nullptr);
     mRegisteredNodes.erase(node->getName());
 }
 
 void Animator::registerNode(AnimationNode* node) {
+    Lock guard(mMutex); // C1 — invariant de verrouillage de la map (recursive_mutex)
     mRegisteredNodes[node->getName()] = node;
 }
 
 void Animator::unregisterNode(const std::string& name) {
+    Lock guard(mMutex); // C1
     mRegisteredNodes.erase(name);
 }
 
@@ -156,6 +187,7 @@ bool Animator::renameNode(const std::string& oldName, const std::string& newName
 }
 
 std::vector<std::string> Animator::getRegisteredNodeNames() const {
+    Lock guard(mMutex); // C1 — lecture cohérente de la map (snapshot)
     std::vector<std::string> names;
     names.reserve(mRegisteredNodes.size());
     for (auto& [name, _] : mRegisteredNodes) {
@@ -165,6 +197,7 @@ std::vector<std::string> Animator::getRegisteredNodeNames() const {
 }
 
 AnimationNode* Animator::getRegisteredNode(const std::string& name) const {
+    Lock guard(mMutex); // C1
     auto it = mRegisteredNodes.find(name);
     return (it != mRegisteredNodes.end()) ? it->second : nullptr;
 }
@@ -284,8 +317,25 @@ void Animator::enqueueOutputs(AnimationNode* node, PortQueue& queue) {
 }
 
 void Animator::propagateFreshValues() {
+    // C2 — garde anti-cycle / anti-boucle infinie. Sans cycle, le nombre de pas de
+    // propagation par frame est borné (O(ports)). Un cycle dans le DAG (ou un node
+    // dont update() ne converge pas) ferait croître mPortQueue sans fin → freeze du
+    // render thread. Plafond très large (au-delà de tout graphe VJ réel) : on abandonne
+    // proprement la frame avec un warning unique plutôt que de figer l'application.
+    constexpr int kMaxPropSteps = 1000000;
     int propCount = 0;
     while (!mPortQueue.empty()) {
+        if (++propCount > kMaxPropSteps) {
+            static bool sWarned = false;
+            if (!sWarned) {
+                sWarned = true;
+                std::cerr << "[Animator] propagateFreshValues: plafond d'itérations atteint ("
+                          << kMaxPropSteps << ") — cycle probable dans le DAG. Propagation "
+                          << "interrompue pour cette frame (anti-freeze C2)." << std::endl;
+            }
+            mPortQueue.clear();
+            break;
+        }
         AnimationPort* port = mPortQueue.front();
         mPortQueue.pop_front();
 
@@ -316,7 +366,6 @@ void Animator::propagateFreshValues() {
                 }
             }
         }
-        propCount++;
     }
 }
 

@@ -1,5 +1,7 @@
 #include "BeatTriggerNode.h"
 #include <cmath>
+#include <algorithm>
+#include <string>
 namespace bbfx {
 
 BeatTriggerNode::BeatTriggerNode(const std::string& name) : AnimationNode(name) {
@@ -32,20 +34,43 @@ void BeatTriggerNode::update() {
     float beatFrac = in.at("beatFrac")->getValue();
     float dt = in.at("dt")->getValue();
 
-    // Detect beat transitions
-    float currentBeatFloor = std::floor(beat);
-    bool triggered = (currentBeatFloor > mLastBeat && mLastBeat >= 0.0f);
-    mLastBeat = currentBeatFloor;
+    // D2 — subdivision : multiplicateur appliqué au compteur de beats. On déclenche
+    // quand l'entier de (beat * mult) augmente. mult>1 = subdivisions plus fines que
+    // le beat, mult<1 = groupes (bar/cycle).
+    //   cycle(1/16) < bar(1/4) < beat(1) < half(2) < quarter(4) < eighth(8)
+    float mult = 1.0f;
+    if (auto* p = mSpec.getParam("subdivision")) {
+        const std::string& s = p->stringVal;
+        if      (s == "half")    mult = 2.0f;
+        else if (s == "quarter") mult = 4.0f;
+        else if (s == "eighth")  mult = 8.0f;
+        else if (s == "bar")     mult = 0.25f;
+        else if (s == "cycle")   mult = 0.0625f;
+        else                     mult = 1.0f; // "beat"
+    }
+    float subBeat = std::floor(beat * mult);
+    bool triggered = (subBeat > mLastSubBeat && mLastSubBeat >= 0.0f);
+    mLastSubBeat = subBeat;
 
-    // Envelope: attack/decay
-    float attack = mSpec.getParam("attack")->floatVal;
-    float decay = mSpec.getParam("decay")->floatVal;
-    float intensity = mSpec.getParam("intensity")->floatVal;
+    // Envelope: attack ramp then decay (D2 — `attack` était ignoré : saut instantané).
+    // Null-checks getParam : ne pas déréférencer un param potentiellement absent
+    // (projet/preset corrompu) — fallback sur les défauts du ParamSpec.
+    auto* pAtk = mSpec.getParam("attack");
+    auto* pDec = mSpec.getParam("decay");
+    auto* pInt = mSpec.getParam("intensity");
+    float attack = pAtk ? pAtk->floatVal : 0.02f;
+    float decay = pDec ? pDec->floatVal : 0.15f;
+    float intensity = pInt ? pInt->floatVal : 1.0f;
 
     if (triggered) {
-        mEnvelope = intensity; // Jump to max on trigger
+        mAttacking = true; // arme la rampe d'attaque
+    }
+    if (mAttacking) {
+        // monte vers intensity sur `attack` secondes
+        mEnvelope += (intensity / std::max(0.001f, attack)) * dt;
+        if (mEnvelope >= intensity) { mEnvelope = intensity; mAttacking = false; }
     } else if (mEnvelope > 0.0f) {
-        mEnvelope -= dt / decay;
+        mEnvelope -= dt / std::max(0.001f, decay);   // garde div/0 (decay=0 → inf/NaN), parité avec attack
         if (mEnvelope < 0.0f) mEnvelope = 0.0f;
     }
 

@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
     encInfo.colorspace = info.colorspace;
     encInfo.pixel_fmt = info.pixel_fmt;
     encInfo.target_bitrate = 0;  // use quality mode
-    encInfo.quality = 48;  // 0-63, higher = better
+    encInfo.quality = 63;  // 0-63, max — preserves LSB watermark so no encoder dups
     encInfo.fps_numerator = info.fps_numerator;
     encInfo.fps_denominator = info.fps_denominator;
     encInfo.aspect_numerator = info.aspect_numerator;
@@ -216,10 +216,51 @@ int main(int argc, char** argv) {
         th_comment_clear(&encComment);
     }
 
-    // Encode frames in reverse
+    // Encode frames in reverse.
+    //
+    // The libtheora encoder will emit a "dup packet" whenever two consecutive
+    // INPUT frames decode to byte-identical YCbCr (= rate-distortion decides a
+    // dup is cheaper than re-encoding). Each dup is missing from the decoder's
+    // non-dup output stream → the reverse seekmap ends up with strictly fewer
+    // entries than the forward one (3 fewer on bombe.ogg).
+    //
+    // This asymmetry breaks TheoraClip::setReverse's time-based mirror seek:
+    // `seekTarget = reverse_duration - forwardTime` lands on a reverse-stream
+    // position that displays a forward frame ~3 indices off, i.e. ~100 ms of
+    // visible "décalage" per swap.
+    //
+    // Fix: nudge the LSB of one Y-plane pixel by (encoder_input_index & 0xFF)
+    // before feeding each frame to the encoder. The change is invisible (1
+    // pixel, ±1 LSB out of 8 bits of Y) but guarantees no two consecutive
+    // inputs are byte-identical, so the encoder cannot dup them.
     std::cout << "Encoding " << frameCount << " frames in reverse..." << std::endl;
-    for (int i = frameCount - 1; i >= 0; i--) {
-        const YUVFrame& frame = frames[i];
+    int encInputIdx = 0;
+    for (int i = frameCount - 1; i >= 0; i--, encInputIdx++) {
+        YUVFrame& frame = frames[i];
+        if (!frame.y.empty()) {
+            // Stamp the encInputIdx (16 bits) into the last row of the Y plane.
+            // Without a uniqueness stamp, libtheora's rate-distortion analysis
+            // collapses ~3 pairs of near-identical reversed frames into dup
+            // packets, which strips 3 entries from the reverse stream's
+            // seekmap → time-based mirror seek in TheoraClip::setReverse
+            // lands a few frames off (visible "décalage" on every swap).
+            //
+            // Amplitude ±32 on the last row (bombe.ogg's ground/horizon) keeps
+            // the stamp imperceptible while still surviving q=63 quantization
+            // so every consecutive pair of reversed frames differs at byte
+            // level — the encoder cannot dup them.
+            size_t lastRowStart = frame.y.size() - frame.yStride;
+            for (int b = 0; b < 16; b++) {
+                size_t off = lastRowStart + b * 2;
+                if (off + 1 >= frame.y.size()) break;
+                unsigned char base = frame.y[off];
+                int delta = ((encInputIdx >> b) & 1) ? +32 : -32;
+                int v = (int)base + delta;
+                if (v < 0) v = 0; if (v > 255) v = 255;
+                frame.y[off]     = (unsigned char)v;
+                frame.y[off + 1] = (unsigned char)v;
+            }
+        }
 
         th_ycbcr_buffer ycbcr;
         ycbcr[0].width = frame.yWidth;
@@ -240,8 +281,16 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // libtheora encoder buffers frames internally. The `_last` argument to
+        // th_encode_packetout signals end-of-stream; on the FINAL ycbcr_in we
+        // must pass `_last=1` so the encoder flushes ALL pending packets,
+        // otherwise the trailing 2-3 frames stay in the buffer and never reach
+        // the output stream (= reverse stream ends up ~0.1s shorter than
+        // forward, which breaks the mirror-seek math in TheoraClip::setReverse
+        // because forward_duration ≠ reverse_duration).
+        int isLast = (i == 0) ? 1 : 0;
         ogg_packet pkt;
-        while (th_encode_packetout(encoder, 0, &pkt) > 0) {
+        while (th_encode_packetout(encoder, isLast, &pkt) > 0) {
             ogg_stream_packetin(&streamOut, &pkt);
             ogg_page outPage;
             while (ogg_stream_pageout(&streamOut, &outPage)) {
@@ -255,7 +304,13 @@ int main(int argc, char** argv) {
             std::cout << "  Encoded " << done << "/" << frameCount << " frames..." << std::endl;
     }
 
-    // Flush remaining
+    // Flush remaining pending packets and final page.
+    {
+        ogg_packet pkt;
+        while (th_encode_packetout(encoder, 1, &pkt) > 0) {
+            ogg_stream_packetin(&streamOut, &pkt);
+        }
+    }
     ogg_page outPage;
     while (ogg_stream_flush(&streamOut, &outPage)) {
         out.write(reinterpret_cast<const char*>(outPage.header), outPage.header_len);

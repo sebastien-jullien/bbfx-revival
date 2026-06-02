@@ -24,12 +24,16 @@ void PerlinVertexShader::_applyNoise(VertexData* data, const CpuMeshData& cpuDat
     }
 
     // 1. Compute displaced positions on CPU (float-only, zero alloc)
+    // `timeDensity` (port DAG) module la vitesse d'évolution temporelle du bruit,
+    // en parallèle de `density` qui module l'échelle spatiale. Auparavant le membre
+    // était bien renseigné par le node mais JAMAIS utilisé ici → port mort.
     float* dstPos = mDstPos.data();
+    const float tScaled = (timeDensity > 1e-4f) ? (time / timeDensity) : time;
     for (size_t i = 0; i < needed; i += 3) {
         float nv = 1.0f + displacement * noise3(
-            srcPos[i]   / density + time,
-            srcPos[i+1] / density + time,
-            srcPos[i+2] / density + time);
+            srcPos[i]   / density + tScaled,
+            srcPos[i+1] / density + tScaled,
+            srcPos[i+2] / density + tScaled);
         dstPos[i]   = srcPos[i]   * nv;
         dstPos[i+1] = srcPos[i+1] * nv;
         dstPos[i+2] = srcPos[i+2] * nv;

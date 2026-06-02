@@ -819,6 +819,83 @@ material BBFx/RadialBlur
 }
 
 // FeedbackZoom — temporal feedback with zoom/rotation (v3.5.1)
+// v3.5.2 Lot M — NoiseTextureNode GPU shader path
+fragment_program BBFx/NoiseGenerator_fp glsl
+{
+    source noise_generator.frag
+    default_params
+    {
+        param_named noiseType    int 0
+        param_named scaleParam   float 4.0
+        param_named octaves      int 4
+        param_named lacunarity   float 2.0
+        param_named persistence  float 0.5
+        param_named timeOffset   float 0.0
+        param_named displacement float2 0 0
+        param_named seedOffset   int 0
+    }
+}
+
+material BBFx/NoiseGenerator
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/NoiseGenerator_fp {}
+        }
+    }
+}
+
+// v3.5.2 Lot U — GrayscaleNode shader REMOVED in Sprint S7 Lot AA.
+// The runtime CPU path (BT.709 luminance desaturation in TextureBlitter)
+// was sufficient for the typical VJ scope and the GPU material was never
+// branched anywhere in the compositor stack. The GPU path is deferred to
+// v3.6+ if profiling proves a real-world need.
+
+// v3.5.2 Lot K — TextureFeedbackNode shader (decay/displacement/zoom/rotate
+// + 3 blend modes). The PostProcessStack ping-pong + PrevFrame RTT pattern
+// (cf. v3.5.1 Lot H) is reused for the RTT lifecycle.
+fragment_program BBFx/FeedbackNode_fp glsl
+{
+    source feedback_node.frag
+    default_params
+    {
+        param_named tex0 int 0
+        param_named prevFrame int 1
+        param_named decay float 0.95
+        param_named displacement float2 0 0
+        param_named zoom float 1.0
+        param_named rotateAngle float 0.0
+        param_named blendMode int 1
+    }
+}
+
+material BBFx/FeedbackNode
+{
+    technique
+    {
+        pass
+        {
+            depth_check off
+            vertex_program_ref StdQuad_vp_glsl {}
+            fragment_program_ref BBFx/FeedbackNode_fp {}
+            texture_unit RT
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+            texture_unit PrevFrame
+            {
+                tex_address_mode clamp
+                filtering linear linear none
+            }
+        }
+    }
+}
+
 fragment_program BBFx/FeedbackZoom_fp glsl
 {
     source feedback_zoom.frag

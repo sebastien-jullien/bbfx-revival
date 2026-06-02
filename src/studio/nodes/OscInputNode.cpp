@@ -9,6 +9,9 @@
 
 namespace bbfx {
 
+// N4 — file des presets demandés via OSC, drainée par la boucle principale.
+std::vector<std::string> gPendingOscPresetLoads;
+
 OscInputNode::OscInputNode(const std::string& name) : AnimationNode(name) {
     // 8 float value outputs
     for (int i = 1; i <= 8; ++i)
@@ -107,7 +110,9 @@ void OscInputNode::update() {
             else if (msg.address.rfind("/bbfx/preset/load/", 0) == 0) {
                 std::string presetName = msg.address.substr(18);
                 std::cout << "[OSC] Preset recall: " << presetName << std::endl;
-                // Preset loading is done via Lua dbg.preset() — we set a flag for the next frame
+                // N4 — empile la demande ; la boucle principale du Studio la draine et
+                // appelle dbg.preset(name) (le chargement touche le graphe → main-thread).
+                if (!presetName.empty()) gPendingOscPresetLoads.push_back(presetName);
                 outs["trigger"]->setValue(1.0f);
             }
             // /bbfx/bpm <float> — set BPM

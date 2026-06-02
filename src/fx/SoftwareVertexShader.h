@@ -33,11 +33,20 @@ public:
 
     virtual void renderOneFrame(Real dt) = 0;
 
+    /// Mode d'avance temporelle. Par défaut (false), le FrameListener OGRE appelle
+    /// renderOneFrame(dt_réel) chaque frame (auto-animé). Quand un node DAG veut
+    /// piloter le temps depuis son port `dt` (pause/scrub/speed), il passe ce flag
+    /// à true : frameStarted() n'avance plus, et le node appelle renderOneFrame(dt)
+    /// lui-même. Évite le double-avancement.
+    void setDagDrivenTime(bool b) { mDagDrivenTime = b; }
+    bool isDagDrivenTime() const { return mDagDrivenTime; }
+
 protected:
     String mMeshName;
     MeshPtr originalMesh;
     MeshPtr clonedMesh;
     bool mCloneReady = false; // deferred: clone prepared at first frameStarted()
+    bool mDagDrivenTime = false; // true = un node DAG pilote renderOneFrame() (cf. setDagDrivenTime)
 
     // CPU copies of original vertex data per submesh (+ shared)
     CpuMeshData mSharedCpuData;

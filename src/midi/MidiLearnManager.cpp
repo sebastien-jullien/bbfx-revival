@@ -74,6 +74,14 @@ void MidiLearnManager::removeBinding(int index) {
         mBindings.erase(mBindings.begin() + index);
 }
 
+void MidiLearnManager::clearBindings() {
+    // C5 — teardown propre : annule un éventuel mode learn en cours (sinon
+    // mLearnTarget pointerait une cible dont le binding vient de disparaître),
+    // puis vide le store. Passe par cette API plutôt que muter getBindings().
+    cancelLearn();
+    mBindings.clear();
+}
+
 const MidiBinding* MidiLearnManager::findBindingForCC(int cc, int channel) const {
     for (auto& b : mBindings) {
         if (b.midiType == "cc" && b.number == cc && (b.channel == 0 || b.channel == channel))

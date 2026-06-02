@@ -31,12 +31,15 @@ void MapperNode::update() {
 
     float range = inMax - inMin;
     float t = (range != 0.0f) ? (val - inMin) / range : 0.0f;
-    if (mSpec.getParam("clamp")->boolVal) t = std::clamp(t, 0.0f, 1.0f);
+    auto* pClamp = mSpec.getParam("clamp");   // null-check : param potentiellement absent
+    if (pClamp && pClamp->boolVal) t = std::clamp(t, 0.0f, 1.0f);
 
     switch (curve) {
         case 1: t = t * t * (3.0f - 2.0f * t); break; // smooth (smoothstep)
-        case 2: t = t * t; break; // exponential
-        case 3: t = std::sqrt(t); break; // logarithmic
+        case 2: t = t * t; break; // exponential (ease-in / power²)
+        // logarithmic (ease-out / racine) — garde anti-NaN : si clamp=false et
+        // val<in_min, t peut être négatif → std::sqrt(<0) = NaN qui se propage.
+        case 3: t = std::sqrt(std::max(0.0f, t)); break;
         default: break; // linear
     }
     getOutputs().at("out")->setValue(outMin + t * (outMax - outMin));

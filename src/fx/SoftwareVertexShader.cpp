@@ -67,10 +67,22 @@ SoftwareVertexShader::SoftwareVertexShader(const String& meshName, const String&
     _loadMesh(meshName);
 }
 
-SoftwareVertexShader::~SoftwareVertexShader() { disable(); }
+SoftwareVertexShader::~SoftwareVertexShader() {
+    disable();
+    // Libère le mesh cloné (createManual) — les appelants détruisent l'entité avant
+    // de détruire le shader, donc plus aucune entité ne référence ce mesh ici.
+    if (clonedMesh) {
+        std::string n = clonedMesh->getName();
+        clonedMesh.reset();
+        if (MeshManager::getSingletonPtr() && MeshManager::getSingleton().getByName(n))
+            MeshManager::getSingleton().remove(n);
+    }
+}
 
 bool SoftwareVertexShader::frameStarted(const FrameEvent& e) {
-    renderOneFrame(e.timeSinceLastFrame);
+    // En mode DAG-driven, c'est le node propriétaire qui appelle renderOneFrame(dt)
+    // depuis son port `dt` — on n'avance pas ici pour éviter le double-avancement.
+    if (!mDagDrivenTime) renderOneFrame(e.timeSinceLastFrame);
     return true;
 }
 

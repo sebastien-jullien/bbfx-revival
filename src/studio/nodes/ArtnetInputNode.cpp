@@ -50,6 +50,9 @@ void ArtnetInputNode::update() {
             it->second->setValue(data[i - 1] / 255.0f);
         }
     }
+    // N6 — notifier les listeners DAG aval que les sorties chN ont changé
+    // (tous les autres nodes appellent fireUpdate() en fin d'update()).
+    fireUpdate();
 }
 
 } // namespace bbfx

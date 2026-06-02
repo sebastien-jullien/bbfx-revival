@@ -1,7 +1,14 @@
 #include "ShaderPreviewRenderer.h"
 #include <Ogre.h>
 #include <OgreHardwarePixelBuffer.h>
+#include <OgreHighLevelGpuProgramManager.h>
+#include <OgreMaterialManager.h>
+#include <OgreTechnique.h>
+#include <OgrePass.h>
+#include <OgreTextureUnitState.h>
+#include <OgreResourceGroupManager.h>
 #include <iostream>
+#include <regex>
 
 #ifdef _WIN32
 #  ifndef NOMINMAX
@@ -143,13 +150,98 @@ void ShaderPreviewRenderer::createPreviewRTT(const std::string& name, const std:
     }
 }
 
-ImTextureID ShaderPreviewRenderer::getShaderPreview(const std::string& shaderName) {
-    auto it = mPreviews.find("shader_" + shaderName);
+std::string ShaderPreviewRenderer::buildShaderMaterial(const std::string& fragFile,
+                                                      const std::string& vertFile) {
+    auto cached = mShaderMaterials.find(fragFile);
+    if (cached != mShaderMaterials.end()) return cached->second;
+
+    const std::string grp = Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME;
+    auto& gpuMgr = Ogre::HighLevelGpuProgramManager::getSingleton();
+    auto& matMgr = Ogre::MaterialManager::getSingleton();
+
+    // The "resources/shaders" folder is a resource location, so shader files are
+    // referenced by bare name ("plasma.frag"). Fall back to a "shaders/" prefix in
+    // case a caller passes an already-qualified path.
+    auto openShader = [&grp](const std::string& f) -> std::string {
+        auto& rgm = Ogre::ResourceGroupManager::getSingleton();
+        try {
+            return rgm.openResource(f, grp)->getAsString();
+        } catch (const Ogre::Exception&) {
+            return rgm.openResource("shaders/" + f, grp)->getAsString();
+        }
+    };
+
+    try {
+        std::string vertPath = vertFile.empty() ? "passthrough.vert" : vertFile;
+        std::string fragPath = fragFile;
+
+        std::string vertSource = openShader(vertPath);
+        std::string fragSource = openShader(fragPath);
+
+        static int sCounter = 0;
+        std::string uid = std::to_string(++sCounter);
+        std::string vpName  = "PreviewVP_" + uid;
+        std::string fpName  = "PreviewFP_" + uid;
+        std::string matName = "PreviewShaderMat_" + uid;
+
+        auto vp = gpuMgr.createProgram(vpName, grp, "glsl", Ogre::GPT_VERTEX_PROGRAM);
+        vp->setSource(vertSource);
+        auto fp = gpuMgr.createProgram(fpName, grp, "glsl", Ogre::GPT_FRAGMENT_PROGRAM);
+        fp->setSource(fragSource);
+
+        Ogre::MaterialPtr mat = matMgr.create(matName, grp);
+        auto* pass = mat->getTechnique(0)->getPass(0);
+        pass->setLightingEnabled(false);
+        pass->setVertexProgram(vpName);
+        pass->setFragmentProgram(fpName);
+
+        // Post-process style fragments may sample tex0/rt0/prevFrame — give them a TUS.
+        if (fragSource.find("sampler2D tex0") != std::string::npos ||
+            fragSource.find("sampler2D rt0") != std::string::npos ||
+            fragSource.find("sampler2D prevFrame") != std::string::npos) {
+            auto* tus = pass->createTextureUnitState();
+            tus->setTextureAddressingMode(Ogre::TextureUnitState::TAM_CLAMP);
+        }
+
+        auto vparams = pass->getVertexProgramParameters();
+        try { vparams->setNamedAutoConstant("worldViewProj",
+                  Ogre::GpuProgramParameters::ACT_WORLDVIEWPROJ_MATRIX); } catch (...) {}
+        try { vparams->setNamedAutoConstant("world",
+                  Ogre::GpuProgramParameters::ACT_WORLD_MATRIX); } catch (...) {}
+
+        // Seed scalar uniforms with a non-zero default so the preview isn't flat.
+        // ("time" is driven each frame by update().)
+        auto fparams = pass->getFragmentProgramParameters();
+        std::regex floatRx(R"(uniform\s+float\s+(\w+)\s*;)");
+        for (const std::string* src : {&vertSource, &fragSource}) {
+            for (std::sregex_iterator it(src->begin(), src->end(), floatRx), e; it != e; ++it) {
+                std::string u = (*it)[1].str();
+                if (u == "time") continue;
+                try { fparams->setNamedConstant(u, 1.0f); } catch (...) {}
+                try { vparams->setNamedConstant(u, 1.0f); } catch (...) {}
+            }
+        }
+
+        std::cout << "[ShaderPreviewRenderer] Built preview material '" << matName
+                  << "' from " << vertPath << " + " << fragPath << std::endl;
+        mShaderMaterials[fragFile] = matName;
+        return matName;
+    } catch (const std::exception& e) {
+        std::cerr << "[ShaderPreviewRenderer] Failed to build material for " << fragFile
+                  << ": " << e.what() << std::endl;
+        mShaderMaterials[fragFile] = "";
+        return "";
+    }
+}
+
+ImTextureID ShaderPreviewRenderer::getShaderPreview(const std::string& fragFile,
+                                                    const std::string& vertFile) {
+    auto it = mPreviews.find("shader_" + fragFile);
     if (it != mPreviews.end()) return it->second.imguiId;
 
-    // Create preview with the shader as material name (assumes BBFx shaders have matching materials)
-    createPreviewRTT("shader_" + shaderName, shaderName, false);
-    it = mPreviews.find("shader_" + shaderName);
+    std::string matName = buildShaderMaterial(fragFile, vertFile);
+    createPreviewRTT("shader_" + fragFile, matName, false);
+    it = mPreviews.find("shader_" + fragFile);
     return (it != mPreviews.end()) ? it->second.imguiId : mPlaceholder;
 }
 

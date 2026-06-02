@@ -52,7 +52,8 @@ namespace bbfx {
 class StudioApp {
 public:
     explicit StudioApp(sol::state& lua, const std::string& initialScript = "",
-                       bool forceDefault = false, bool forceReset = false);
+                       bool forceDefault = false, bool forceReset = false,
+                       const std::string& initialDemo = "");
     ~StudioApp();
 
     /// Run the main loop until the user closes the window.
@@ -61,15 +62,21 @@ public:
     StudioEngine* getEngine() { return mEngine.get(); }
     NodeEditorPanel* getNodeEditorPanel() { return mNodeEditorPanel.get(); }
     InspectorPanel* getInspectorPanel() { return mInspectorPanel.get(); }
+    /// v3.5.2 Sprint S7 Lot Y — exposes the LearnPanel for tests + scripting.
+    class LearnPanel* getLearnPanel() { return mLearnPanel.get(); }
     ViewportPanel* getViewportPanel() { return mViewportPanel.get(); }
     PerformanceModePanel* getPerformanceModePanel() { return mPerformanceModePanel.get(); }
     void saveProject(const std::string& path);
     void loadProject(const std::string& path);
+    /// File → New : wipe the user graph (DAG + 3D scene) and reset the project state.
+    void newProject();
     WarpWizard&  getWarpWizard()  { return mWarpWizard; }
     SurfaceMap*  getSurfaceMap()  { return mSurfaceMap.get(); }
     SyncManager* getSyncManager() { return mSyncManager.get(); }
     bool& showMasterView() { return mShowMasterView; }
     MasterViewPanel* getMasterViewPanel() { return mMasterViewPanel.get(); }
+    /// v3.5.2 Sprint S7 Lot Z — exposes AssetBrowser for ABH-001 assertion.
+    AssetBrowserPanel* getAssetBrowserPanel() { return mAssetBrowserPanel.get(); }
 
     /// PANIC ALL — reset all warps/blends, disconnect network, restore rest snapshot (v3.4 Lot M).
     void panicAll();
@@ -95,8 +102,13 @@ private:
     void renderAboutDialog();
     void renderShortcutsDialog();
     void renderRecoveryDialog();
+    void renderDeepLinkConfirmDialog();   // confirmation avant enable/run via deep-link externe
     void renderSettingsDialog();
-    void newProject();
+    /// Destroys every user node (DAG vertices + their OGRE entities/lights/particles),
+    /// keeping only the root "time" node and runtime-only nodes (shell/, _dbg_, _test_).
+    /// Used by File → New and File → Open (so loading a project replaces the scene
+    /// instead of merging the new nodes into the current one).
+    void clearUserGraph();
 
     // ── Node type registration ──────────────────────────────────────────────
     void initNodeTypeRegistry();
@@ -112,6 +124,7 @@ private:
     bool mForceDefault = false;
     bool mForceReset = false;
     std::string mInitialScript;
+    std::string mInitialDemo;   // CLI --demo <name> — short-circuits project load
 
     // Project state
     std::string mProjectPath;
@@ -150,6 +163,7 @@ private:
     std::unique_ptr<NetworkPanel>          mNetworkPanel;
     std::unique_ptr<MasterViewPanel>      mMasterViewPanel;
     std::unique_ptr<AssetBrowserPanel>    mAssetBrowserPanel;  // v3.5.1 Lot L
+    std::unique_ptr<class LearnPanel>     mLearnPanel;         // v3.5.2 Sprint S7 Lot Y (instancie le LearnPanel ecrit en Sprint S4)
 
     // ── Surface Map (v3.4 Lot E) ───────────────────────────────────────────────
     std::unique_ptr<SurfaceMap>            mSurfaceMap;
@@ -182,6 +196,7 @@ private:
     bool mShowNetworkPanel   = false;
     bool mShowMasterView     = false;
     bool mShowAssetBrowser   = true;   // v3.5.1 Lot L — open by default
+    bool mShowLearnPanel     = false;  // v3.5.2 Sprint S7 Lot Y — Ctrl+Shift+L toggle
     bool mShowPluginManager    = false;  // v3.5 Lot D (placeholder) / Lot G (full)
     bool mShowPluginErrors     = false;  // v3.5 Lot G
     bool mShowCommunityBrowser = false;  // v3.5 Lot H
@@ -200,6 +215,13 @@ private:
     bool mProjectDirty      = false;
     bool mShowRecoveryDialog = false; // autosave recovery after crash
     std::string mRecoveryAutosavePath;
+
+    // Deep-link (URL bbfx://) : enable/run d'un plugin tiers déclenché par une source
+    // EXTERNE → confirmation utilisateur obligatoire avant d'exécuter du code plugin.
+    bool mShowDeepLinkConfirm = false;
+    std::string mDeepLinkAction;   // "enable" | "run"
+    std::string mDeepLinkPluginId;
+    std::string mDeepLinkNodeType; // pour "run"
 
     // ImGui Test Engine (v3.2.5)
     ImGuiTestEngine* mTestEngine = nullptr;

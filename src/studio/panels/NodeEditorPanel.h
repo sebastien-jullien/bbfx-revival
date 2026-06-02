@@ -25,6 +25,10 @@ public:
 
     void render();
 
+    /// M10 — sérialise un node en preset Lua (params réels). Extrait du modal
+    /// « Save as Preset » pour être testable. Retourne true si le fichier a été écrit.
+    bool savePreset(const std::string& presetName, const std::string& nodeName);
+
     /// Callback invoked when the user selects a node. Parameter: node name.
     void setSelectionCallback(std::function<void(const std::string&)> cb) {
         mSelectionCallback = std::move(cb);
@@ -102,6 +106,28 @@ private:
                                    bool output) const;
 
     ImVec4 nodeColor(const std::string& typeName) const;
+
+    /// v3.5.2 Sprint S6 Lot W: per-port color by name convention (entity-link / mat /
+    /// tex / ready / default). Documented in USAGE.md "NodeEditor visual conventions".
+    ImVec4 portColor(const std::string& portName) const;
+
+    /// v3.5.2 Sprint S6 Lot X / AU.5: categorical column for auto-layout heuristic.
+    /// 0 = RootTimeNode, 1 = other Inputs, 2 = FX, 3 = Scene, 4 = Output.
+    int categoryColumn(const std::string& typeName) const;
+    /// Estimated node height (px) for auto-layout before the node is drawn.
+    float estimatedNodeHeight(const std::string& name) const;
+
+public:
+    /// v3.5.2 Sprint S6 Lot X: BFS topological sort + categorical clamp + spatial layout
+    /// for `newNames`. Skips any node already at non-zero position (preserves user layout).
+    /// Pushes positions into `mPendingPositions` (applied after `ned::End` like all others).
+    /// Cycles in DAG (e.g. TextureFeedbackNode self-link) are handled via visited-set.
+    /// Public depuis Sprint S7 Lot Z (test ALY-005 reel cycle DAG via Debugger).
+    /// `assumeFresh` = the nodes were just created (no position yet) → skip the
+    /// ned::GetNodePosition() probe (which crashes on a not-yet-rendered node id).
+    /// Used by syncFromDAG() when new nodes appear from a builder/console.
+    void autoLayoutNodes(const std::vector<std::string>& newNames, bool assumeFresh = false);
+private:
 
     ax::NodeEditor::EditorContext* mEditorContext = nullptr;
 

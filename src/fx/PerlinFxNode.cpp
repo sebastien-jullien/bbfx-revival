@@ -27,13 +27,17 @@ PerlinFxNode::PerlinFxNode(const string& defaultMesh, const string& clonePrefix,
     addInput(new AnimationPort("displacement", 0.15f));
     addInput(new AnimationPort("density", 4.0f));
     addInput(new AnimationPort("timeDensity", 5.0f));
-    addInput(new AnimationPort("enable", 1.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port now provided by AnimationNode base
+    // (replaces the old "enable" port). When `enabled` < 0.5 the whole node is
+    // frozen (deformation stays at last value), achieving the same "toggle effect off".
     addInput(new AnimationPort("entity", 0.0f, true));  // multiLink
     addOutput(new AnimationPort("mesh_dirty", 0.0f));
 
     ParamDef targetDef;
     targetDef.name = "target_entity";
     targetDef.type = ParamType::STRING;
+    targetDef.readOnly = true; // N1 — mirror read-only (cible via le port entity-link)
+    targetDef.tooltip = "Cible résolue via le port entity-link (read-only).";
     mSpec.addParam(targetDef);
     setParamSpec(&mSpec);
 }
@@ -248,19 +252,32 @@ void PerlinFxNode::update() {
     auto& inputs = getInputs();
     auto& outputs = getOutputs();
 
-    float enableVal = inputs.at("enable")->getValue();
-    if (enableVal >= 0.5f) {
+    // v3.5.2 Sprint S8 Lot AT — `enabled` is handled by AnimationNode::tick()
+    // (node frozen when port < 0.5). Here we just apply the live parameters.
+    {
         float disp = inputs.at("displacement")->getValue();
         float dens = inputs.at("density")->getValue();
         float tdens = inputs.at("timeDensity")->getValue();
+
+        // D15 — port `dt` : s'il est connecté en amont (RootTimeNode.dt, ou un node
+        // de contrôle de temps), le DAG pilote l'avance temporelle du shader
+        // (pause/scrub/speed). Sinon, le FrameListener OGRE continue d'auto-animer
+        // (comportement historique, zéro régression).
+        bool dtLinked = false;
+        if (auto it = inputs.find("dt"); it != inputs.end()) {
+            auto srcs = Animator::instance()->getSourceNodes(it->second);
+            dtLinked = !srcs.empty();
+        }
+        float dt = dtLinked ? inputs.at("dt")->getValue() : 0.0f;
+
         for (auto& [name, clone] : mClones) {
             clone.shader->setDisplacement(disp);
             clone.shader->setDensity(dens);
             clone.shader->setTimeDensity(tdens);
+            clone.shader->setDagDrivenTime(dtLinked);
+            if (dtLinked) clone.shader->renderOneFrame(dt);
         }
         outputs.at("mesh_dirty")->setValue(1.0f);
-    } else {
-        outputs.at("mesh_dirty")->setValue(0.0f);
     }
     fireUpdate();
 }

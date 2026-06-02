@@ -64,7 +64,8 @@ bool TheoraReader::readFrame(th_ycbcr_buffer ycbcr) {
         if (packet.bytes > 0 && (packet.packet[0] & 0x80))
             continue;
 
-        int ret = th_decode_packetin(mDecoder, &packet, nullptr);
+        ogg_int64_t granpos = 0;
+        int ret = th_decode_packetin(mDecoder, &packet, &granpos);
         if (ret == TH_DUPFRAME) {
             // Duplicate/dropped frame — display buffer unchanged, skip to next
             continue;
@@ -75,6 +76,18 @@ bool TheoraReader::readFrame(th_ycbcr_buffer ycbcr) {
 
         if (th_decode_ycbcr_out(mDecoder, ycbcr) != 0) {
             return false;
+        }
+
+        // Round 13 — bump frame index and use seekmap for exact time.
+        // Each successful readFrame advances exactly 1 non-dup frame. Time of
+        // that frame = seekmap.mEntries[mFrameIndex].time (= granule_time
+        // recorded at seekmap build), which is the GROUND TRUTH source time.
+        // Falls back to linear if frame index is out of seekmap range.
+        mFrameIndex++;
+        if (const auto* entry = mSeekMap.getEntryAt(mFrameIndex)) {
+            mLastDecodedTime = entry->time;
+        } else {
+            mLastDecodedTime += 1.0f / getFrameRate();
         }
 
         if (mLogNextFrame) {
@@ -95,6 +108,8 @@ void TheoraReader::seekToTime(float time) {
     auto* entry = mSeekMap.findKeyframeBefore(time);
     long seekOffset = entry ? entry->fileOffset : mDataStartOffset;
     float keyframeTime = entry ? entry->time : 0.0f;
+    // Round 13 — frame index of the keyframe (= where mFrameIndex starts after seek).
+    int kfIndex = mSeekMap.findKeyframeIndexBefore(time);
 
     rawseek(seekOffset);
 
@@ -137,12 +152,28 @@ void TheoraReader::seekToTime(float time) {
         ogg_int64_t granpos = 0;
         int ret = th_decode_packetin(mDecoder, &packet, &granpos);
         if (ret == 0) {
+            // Linéaire : granule_time est inexploitable pour le reverse stream
+            // (renvoie 0 ou -1 pour beaucoup de frames non-keyframes générés par
+            // theora_reverse.exe), donc on garde l'estimation framesDecoded × 1/fps.
             float frameTime = keyframeTime + framesDecoded * frameDuration;
             framesDecoded++;
             if (frameTime >= time) {
                 th_decode_ycbcr_out(mDecoder, ycbcr);
                 reachedTarget = true;
-                break;
+                // Round 13 — set mFrameIndex to the EXACT landed frame's index
+                // in seekmap, and read its time from seekmap for ground truth.
+                mFrameIndex = (kfIndex >= 0) ? kfIndex + framesDecoded - 1 : -1;
+                if (const auto* e = mSeekMap.getEntryAt(mFrameIndex)) {
+                    mLastDecodedTime = e->time;
+                } else {
+                    mLastDecodedTime = frameTime;
+                }
+                std::cout << "[theora_seek] target=" << time << " kf_t=" << keyframeTime
+                          << " offset=" << seekOffset << " decoded=" << framesDecoded
+                          << " kfIdx=" << kfIndex << " frameIdx=" << mFrameIndex
+                          << " landed_t=" << mLastDecodedTime << " OK" << std::endl;
+                mLogNextFrame = true;
+                return;
             }
         }
     }
@@ -150,6 +181,76 @@ void TheoraReader::seekToTime(float time) {
     std::cout << "[theora_seek] target=" << time << " kf_t=" << keyframeTime
               << " offset=" << seekOffset << " decoded=" << framesDecoded
               << (reachedTarget ? " OK" : " FAILED") << std::endl;
+}
+
+bool TheoraReader::getCurrentFrame(th_ycbcr_buffer ycbcr) {
+    if (!mDecoder) return false;
+    return th_decode_ycbcr_out(mDecoder, ycbcr) == 0;
+}
+
+void TheoraReader::seekToFrameIndex(int targetIdx) {
+    if (mSeekMap.empty()) return;
+    int total = static_cast<int>(mSeekMap.size());
+    if (targetIdx < 0) targetIdx = 0;
+    if (targetIdx >= total) targetIdx = total - 1;
+
+    // Find the largest keyframe index ≤ targetIdx.
+    int kfIdx = mSeekMap.findKeyframeIndexBefore(
+        mSeekMap.getEntryAt(targetIdx) ? mSeekMap.getEntryAt(targetIdx)->time : 0.0f);
+    if (kfIdx < 0 || kfIdx > targetIdx) {
+        // Fallback: linear scan of keyframes <= targetIdx.
+        kfIdx = 0;
+    }
+
+    const auto* kfEntry = mSeekMap.getEntryAt(kfIdx);
+    if (!kfEntry) return;
+
+    rawseek(kfEntry->fileOffset);
+    if (mDecoder) {
+        th_decode_free(mDecoder);
+        mDecoder = th_decode_alloc(&mInfo, mSetup);
+    }
+
+    // Decode forward counting non-dup frames until we reach targetIdx.
+    int currentIdx = kfIdx - 1;
+    bool foundKeyframe = false;
+    th_ycbcr_buffer ycbcr;
+    while (currentIdx < targetIdx) {
+        ogg_packet packet;
+        try {
+            readPacket(packet);
+        } catch (const OggEOF&) {
+            break;
+        }
+        if (packet.bytes > 0 && (packet.packet[0] & 0x80)) continue;
+        if (!foundKeyframe) {
+            if (th_packet_iskeyframe(&packet) > 0) {
+                foundKeyframe = true;
+            } else {
+                continue;
+            }
+        }
+        ogg_int64_t granpos = 0;
+        int ret = th_decode_packetin(mDecoder, &packet, &granpos);
+        if (ret == 0) {
+            currentIdx++;
+            if (currentIdx == targetIdx) {
+                th_decode_ycbcr_out(mDecoder, ycbcr);
+                mFrameIndex = targetIdx;
+                if (const auto* e = mSeekMap.getEntryAt(targetIdx)) {
+                    mLastDecodedTime = e->time;
+                }
+                mLogNextFrame = true;
+                std::cout << "[theora_seek_idx] targetIdx=" << targetIdx
+                          << " kfIdx=" << kfIdx
+                          << " landed_t=" << mLastDecodedTime << " OK" << std::endl;
+                return;
+            }
+        }
+    }
+    std::cout << "[theora_seek_idx] targetIdx=" << targetIdx
+              << " kfIdx=" << kfIdx
+              << " FAILED (currentIdx=" << currentIdx << ")" << std::endl;
 }
 
 void TheoraReader::buildSeekMap() {

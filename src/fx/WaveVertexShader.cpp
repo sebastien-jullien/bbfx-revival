@@ -29,6 +29,8 @@ WaveVertexShader::WaveVertexShader(const String& meshName, const String& cloneNa
     ParamDef targetDef;
     targetDef.name = "target_entity";
     targetDef.type = ParamType::STRING;
+    targetDef.readOnly = true; // N1 — mirror read-only (cible via le port entity-link)
+    targetDef.tooltip = "Cible résolue via le port entity-link (read-only).";
     mSpec.addParam(targetDef);
     AnimationNode::setParamSpec(&mSpec);
 }
@@ -52,7 +54,10 @@ void WaveVertexShader::createDeferredEntity() {
 
 SceneObjectNode* WaveVertexShader::findTargetSceneObj() {
     if (mTargetNodeName.empty()) return nullptr;
-    auto* animator = dynamic_cast<Animator*>(AnimationNode::getListener());
+    // N14 — Animator::instance() (parité avec tous les autres nodes), au lieu de
+    // dynamic_cast<Animator*>(getListener()) qui échouait si le listener n'était
+    // pas l'Animator.
+    auto* animator = Animator::instance();
     if (!animator) return nullptr;
     auto* targetNode = animator->getRegisteredNode(mTargetNodeName);
     return targetNode ? dynamic_cast<SceneObjectNode*>(targetNode) : nullptr;
@@ -237,7 +242,10 @@ void WaveVertexShader::_applyWave(VertexData* data, const CpuMeshData& cpuData) 
     size_t vertexSize = posBuf->getVertexSize();
     size_t posOffset = posElem->getOffset();
 
-    uint8_t* raw = static_cast<uint8_t*>(posBuf->lock(HardwareBuffer::HBL_DISCARD));
+    // HBL_NORMAL (et non HBL_DISCARD) : le buffer position est souvent entrelacé
+    // (position + UV + tangentes). DISCARD invaliderait les UV/tangentes qu'on ne
+    // réécrit pas → texture perdue sur le mesh déformé. Parité avec PerlinVertexShader.
+    uint8_t* raw = static_cast<uint8_t*>(posBuf->lock(HardwareBuffer::HBL_NORMAL));
     for (size_t v = 0; v < nVerts; v++) {
         float* dst = reinterpret_cast<float*>(raw + v * vertexSize + posOffset);
         dst[0] = dstPos[v*3]; dst[1] = dstPos[v*3+1]; dst[2] = dstPos[v*3+2];

@@ -87,7 +87,7 @@ public:
 protected:
     unsigned long mFrame = 0;
     TimeStamp mTime = 0.0f;
-    Mutex mMutex;
+    mutable Mutex mMutex; // C1 — mutable pour verrouiller aussi les accesseurs const (recursive_mutex)
 
     using OperationEvent = Event<Operation, TimeStamp>;
     using PreOpQueue = std::priority_queue<OperationEvent>;

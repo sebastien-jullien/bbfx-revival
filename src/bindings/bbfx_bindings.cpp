@@ -69,6 +69,8 @@
 #include "../plugin/GithubReactionsFetcher.h"
 #include "../network/HttpClient.h"
 #include "../network/WebSocketClient.h"
+#include "../core/AssetManifest.h"
+#include "../core/Sha256.h"
 #include <OgreOverlayManager.h>
 #include <OgreOverlay.h>
 #include <OgreOverlayContainer.h>
@@ -90,6 +92,40 @@ namespace bbfx {
 
 void register_bbfx_bindings(sol::state& lua) {
     auto bbfx = lua.create_named_table("bbfx");
+
+    // ── v3.5.2 Phase 1: bbfx.assets — manifest + content-hash + resolve ─
+    {
+        auto assets = bbfx.create_named("assets");
+        assets["compute_sha256"] = [](const std::string& filepath) -> std::string {
+            return AssetManifest::computeFileHash(filepath);
+        };
+        assets["resolve"] = [](const std::string& name) -> std::string {
+            return AssetManifest::instance().resolve(name);
+        };
+        assets["is_cached"] = [](const std::string& hash) -> bool {
+            return AssetManifest::isCached(hash);
+        };
+        assets["cache_path"] = [](const std::string& hash) -> std::string {
+            return AssetManifest::getCachePath(hash);
+        };
+        assets["cache_root"] = []() -> std::string {
+            return AssetManifest::getCacheRoot();
+        };
+        assets["load_pack"] = [&lua](const std::string& luaPath) -> size_t {
+            return AssetManifest::instance().loadFromLuaFile(lua, luaPath);
+        };
+        assets["entry_count"] = []() -> size_t {
+            return AssetManifest::instance().entryCount();
+        };
+        // Synchronous HTTPS download with SHA-256 verification. Returns the
+        // local cache path on success, empty string on failure (and an error
+        // string is returned as second value via sol multi-return).
+        assets["download"] = [](const std::string& url, const std::string& expectedHash) {
+            std::string err;
+            std::string p = AssetManifest::downloadToCache(url, expectedHash, err);
+            return std::make_tuple(p, err);
+        };
+    }
 
     // ── I-028: Engine bindings ──────────────────────────────────────────
     lua.new_usertype<Engine>("bbfx_Engine",
@@ -950,6 +986,8 @@ void register_bbfx_bindings(sol::state& lua) {
         "frameUpdate", &TheoraClip::frameUpdate,
         "setTime", &TheoraClip::setTime,
         "getTime", &TheoraClip::getTime,
+        "setReverse", &TheoraClip::setReverse,
+        "isReversed", &TheoraClip::isReversed,
         "isPlaying", &TheoraClip::isPlaying,
         "setLoop", &TheoraClip::setLoop,
         "isLooping", &TheoraClip::isLooping,

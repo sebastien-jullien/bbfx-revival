@@ -66,11 +66,17 @@ void ViewportPanel::syncSize() {
     SDL_GetWindowSize(mEngine->getSDLWindow(), &winW, &winH);
     auto w = static_cast<uint32_t>(winW > 0 ? winW : 1280);
     auto h = static_cast<uint32_t>(winH > 0 ? winH : 720);
-    if (w != mLastWidth || h != mLastHeight) {
-        mEngine->resizeRenderTexture(w, h);
-        mLastWidth  = w;
-        mLastHeight = h;
-    }
+    // Call every frame, not only on size change. resizeRenderTexture() early-returns
+    // cheaply when nothing changed, and it is the *only* place that consumes
+    // StudioEngine::mForceRTRebuild. loadProject() (and other callers) do
+    // invalidateFBOCache() — which sets mForceRTRebuild and resets mCachedFBO to -1 —
+    // without resizing the window; if the rebuild never runs, the next render
+    // re-captures mCachedFBO as framebuffer 0 and OGRE then draws the scene into the
+    // window backbuffer instead of the StudioRenderTexture, leaving the viewport
+    // frozen on its last good frame after a project load.
+    mEngine->resizeRenderTexture(w, h);
+    mLastWidth  = w;
+    mLastHeight = h;
 }
 
 void ViewportPanel::render() {
@@ -229,7 +235,8 @@ void ViewportPanel::render() {
                 if (hit) {
                     mPicker->select(hit);
                     // Set gizmo target
-                    auto* dagNode = Animator::instance()->getRegisteredNode(mPicker->getSelectedNodeName());
+                    auto* _anim238 = Animator::instance(); // C6 — garde null
+                    auto* dagNode = _anim238 ? _anim238->getRegisteredNode(mPicker->getSelectedNodeName()) : nullptr;
                     auto* soNode = dynamic_cast<SceneObjectNode*>(dagNode);
                     if (soNode && soNode->getSceneNode()) {
                         if (mGizmo) mGizmo->setTarget(soNode->getSceneNode(), dagNode);
@@ -467,7 +474,8 @@ void ViewportPanel::render() {
             if (hit && !mPicker->getSelectedNodeName().empty()) {
                 // Check if the hit is the currently selected object
                 std::string hitDag = mPicker->getSelectedNodeName();
-                auto* hitNode = Animator::instance()->getRegisteredNode(hitDag);
+                auto* _anim476 = Animator::instance(); // C6 — garde null
+                auto* hitNode = _anim476 ? _anim476->getRegisteredNode(hitDag) : nullptr;
                 if (hitNode) {
                     ImGui::OpenPopup("ObjectContextMenu");
                 }
@@ -479,7 +487,8 @@ void ViewportPanel::render() {
 
     if (ImGui::BeginPopup("ObjectContextMenu")) {
         std::string selectedName = mPicker ? mPicker->getSelectedNodeName() : "";
-        auto* selectedNode = selectedName.empty() ? nullptr : Animator::instance()->getRegisteredNode(selectedName);
+        auto* _anim488 = Animator::instance(); // C6 — garde null
+        auto* selectedNode = (selectedName.empty() || !_anim488) ? nullptr : _anim488->getRegisteredNode(selectedName);
 
         if (ImGui::BeginMenu("Apply FX")) {
             for (auto& fxType : {"PerlinFxNode", "ShaderFxNode", "WaveVertexShader"}) {
@@ -548,7 +557,8 @@ void ViewportPanel::render() {
         }
         // H → Toggle visibility
         if (ImGui::IsKeyPressed(ImGuiKey_H) && !io.KeyCtrl && !io.KeyAlt) {
-            auto* node = Animator::instance()->getRegisteredNode(mPicker->getSelectedNodeName());
+            auto* _anim560 = Animator::instance(); // C6 — garde null
+            auto* node = _anim560 ? _anim560->getRegisteredNode(mPicker->getSelectedNodeName()) : nullptr;
             if (node) node->setUserVisible(!node->isUserVisible());
         }
     }

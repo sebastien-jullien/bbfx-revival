@@ -12,7 +12,8 @@ public:
 private:
     Ogre::Viewport* mViewport;
     std::string mCompositorName;
-    bool mEnabled = false;
+    // NB : pas de membre `mEnabled` ici — il masquerait AnimationNode::mEnabled
+    // (footgun). L'état enabled est porté par la base (port `enabled` Pattern 5).
     ParamSpec mSpec;
 };
 } // namespace bbfx

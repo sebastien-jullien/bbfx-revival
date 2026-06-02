@@ -94,6 +94,10 @@ void MidiActivityPanel::render() {
     if (mFilterDevice < -1) mFilterDevice = -1;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("-1 = all devices");
 
+    // N11 — case Auto-scroll (avant : `mAutoScroll` hardcodé true, sans contrôle UI).
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto-scroll", &mAutoScroll);
+
     ImGui::Separator();
 
     // Message log

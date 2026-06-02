@@ -1,4 +1,5 @@
 #include "plugin/PluginValidator.h"
+#include "core/Version.h"   // BBFX_VERSION_STRING — source de vérité unique
 
 #include <fstream>
 
@@ -7,14 +8,40 @@ namespace fs = std::filesystem;
 namespace bbfx {
 
 const char* PluginValidator::currentBBFxVersion() {
-    // Kept in one place and bumped together with CMakeLists.txt project version.
-    return "3.5.0";
+    // Dérivé de la source de vérité unique (src/core/Version.h) — plus de chaîne
+    // hardcodée à bumper manuellement : le gate plugin suit la version de l'app.
+    return BBFX_VERSION_STRING;
+}
+
+// C12 — empêche le path-traversal : un manifest hostile ne doit pas pouvoir
+// référencer un chemin absolu ou remonter hors du dossier du plugin via `..`.
+// Retourne true si `rel` reste strictement contenu dans `base`.
+static bool isContained(const fs::path& base, const std::string& rel, fs::path& outResolved) {
+    fs::path relP(rel);
+    if (relP.is_absolute()) return false;                 // chemin absolu interdit
+    for (const auto& part : relP)                          // tout segment ".." interdit
+        if (part == "..") return false;
+    std::error_code ec;
+    fs::path canonBase = fs::weakly_canonical(base, ec);
+    if (ec) canonBase = base.lexically_normal();
+    fs::path candidate = fs::weakly_canonical(base / relP, ec);
+    if (ec) candidate = (base / relP).lexically_normal();
+    outResolved = candidate;
+    // Vérifie que canonBase est un préfixe de candidate.
+    auto rel2 = candidate.lexically_relative(canonBase);
+    if (rel2.empty()) return false;
+    return rel2.native().rfind(L"..", 0) != 0 && rel2 != fs::path("..");
 }
 
 static void checkFileExists(const fs::path& base, const std::string& rel,
                             const char* kind, PluginValidator::Result& r) {
     if (rel.empty()) return;
-    fs::path p = base / rel;
+    fs::path p;
+    if (!isContained(base, rel, p)) {
+        r.ok = false;
+        r.errors.push_back(std::string(kind) + " path escapes plugin directory (rejected): " + rel);
+        return;
+    }
     std::error_code ec;
     if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec)) {
         r.ok = false;

@@ -4,6 +4,7 @@
 #include "../../core/AnimationNode.h"
 #include "../../core/AnimationPort.h"
 #include "../../core/PrimitiveNodes.h"
+#include "../../core/Version.h"   // v3.5.2 Sprint S8 Lot AU — BBFX_VERSION_STRING
 #include "../nodes/SceneObjectNode.h"
 #include "../../midi/MidiLearnManager.h"
 
@@ -30,7 +31,11 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     }
 
     json j;
-    j["version"] = "3.4";
+    // v3.5.2 Sprint S8 Lot AU — schema stamp pulled from BBFX_VERSION_STRING
+    // (was "3.4" hardcoded since v3.4 release). Loader stays backward-compat:
+    // it reads `j.value("version", "3.0")` and treats all known versions
+    // identically — no format break.
+    j["version"] = BBFX_VERSION_STRING;
 
     // Timestamp (ISO 8601)
     auto now = std::chrono::system_clock::now();
@@ -46,8 +51,16 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     }
 
     // ── Graph: nodes ─────────────────────────────────────────────────────────
+    // v3.5.2 Sprint S8 Lot AU — runtime-only `shell/<n>` LuaAnimationNodes
+    // (spawned by `lua/shell/server.lua` via UID("shell/")) are NEVER serialized.
+    // They have no source string (the closure isn't a Lua string), they are
+    // hidden in NodeEditor (panels/NodeEditorPanel.cpp:254) and Debugger
+    // listings (Debugger.cpp:1144), and they were leaking into saves whenever
+    // a project was saved while a TCP shell session was active. Parity now
+    // restored across the 3 surfaces.
     json nodes = json::array();
     for (auto& name : animator->getRegisteredNodeNames()) {
+        if (name.rfind("shell/", 0) == 0) continue;
         auto* node = animator->getRegisteredNode(name);
         if (!node) continue;
 
@@ -115,9 +128,12 @@ bool ProjectSerializer::save(const std::string& path, const ProjectState& state)
     j["graph"]["nodes"] = nodes;
 
     // ── Graph: links ─────────────────────────────────────────────────────────
+    // v3.5.2 Sprint S8 Lot AU — drop any link touching a `shell/` runtime node
+    // (parity with node-loop filter above).
     json links = json::array();
     std::set<std::string> seenLinks;
     for (auto& lk : animator->getLinks()) {
+        if (lk.fromNode.rfind("shell/", 0) == 0 || lk.toNode.rfind("shell/", 0) == 0) continue;
         std::string key = lk.fromNode + "." + lk.fromPort + "->" + lk.toNode + "." + lk.toPort;
         if (seenLinks.count(key)) continue; // skip duplicate
         seenLinks.insert(key);
@@ -374,8 +390,8 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                     for (auto& [portName, val] : n["ports"].items()) {
                         auto& inputs = node->getInputs();
                         auto it = inputs.find(portName);
-                        if (it != inputs.end()) {
-                            it->second->setValue(val.get<float>());
+                        if (it != inputs.end() && val.is_number()) {
+                            it->second->setValue(val.get<float>());   // garde type : projet édité à la main ne crashe pas
                         }
                     }
                 }
@@ -507,7 +523,7 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 cd.transitionBeats = c.value("transitionBeats", 1.0f);
                 if (c.contains("snapshot")) {
                     for (auto& [k, v] : c["snapshot"].items()) {
-                        cd.snapshot[k] = v.get<float>();
+                        if (v.is_number()) cd.snapshot[k] = v.get<float>();
                     }
                 }
                 outState->chords.push_back(cd);
@@ -587,7 +603,7 @@ bool ProjectSerializer::load(const std::string& path, sol::state& lua, ProjectSt
                 for (auto& [name, snapJson] : perf["chordSnapshots"].items()) {
                     std::map<std::string, float> snapData;
                     for (auto& [key, val] : snapJson.items()) {
-                        snapData[key] = val.get<float>();
+                        if (val.is_number()) snapData[key] = val.get<float>();
                     }
                     outState->chordSnapshots[name] = snapData;
                 }

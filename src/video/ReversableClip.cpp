@@ -3,8 +3,9 @@
 
 namespace bbfx {
 
-ReversableClip::ReversableClip(const std::string& forwardFile, const std::string& reverseFile)
-    : TheoraClip(forwardFile), mForwardFile(forwardFile), mReverseFile(reverseFile)
+ReversableClip::ReversableClip(const std::string& forwardFile, const std::string& reverseFile,
+                               const std::string& instanceTag)
+    : TheoraClip(forwardFile, instanceTag), mForwardFile(forwardFile), mReverseFile(reverseFile)
 {
     // Discard the reader from TheoraClip (it ran buildSeekMap).
     // Create a pristine forward reader that loads seek map from cache.

@@ -11,6 +11,8 @@
 #include <OgreRenderWindow.h>
 #include <OgreSceneManager.h>
 
+namespace Ogre { class OverlaySystem; }
+
 namespace bbfx {
 
 class VideoExporter;
@@ -63,6 +65,7 @@ protected:
     Ogre::Root* mRoot = nullptr;
     Ogre::RenderWindow* mRenderWindow = nullptr;
     Ogre::SceneManager* mSceneManager = nullptr;
+    Ogre::OverlaySystem* mOverlaySystem = nullptr; // possédé par Engine — détruit avant mRoot
     InputManager* mInputManager = nullptr;
 
     bool mOfflineMode = false;

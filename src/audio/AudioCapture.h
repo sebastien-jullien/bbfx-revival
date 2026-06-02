@@ -51,7 +51,10 @@ private:
     std::vector<float> mRingBuffer;
     int mWritePos = 0;
     bool mNewData = false;
-    bool mCallbackFired = false;
+    std::atomic<bool> mCallbackFired{false};  // N3 — écrit sur le thread audio (hors lock), lu ailleurs
+    // C3 (mitigation) — buffer temporaire réutilisé par le callback audio RT
+    // (évite une allocation tas par callback ; la version lock-free complète est en 3.5.3).
+    std::vector<float> mCbTemp;
 };
 
 /// AnimationNode wrapper for AudioCapture.

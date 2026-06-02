@@ -20,8 +20,10 @@ AudioAnalyzerNode::AudioAnalyzerNode(const string& name, AudioCaptureNode* captu
     // Precompute Hann window
     int bufSize = captureNode->getSamples().size();
     mWindow.resize(bufSize);
+    // Garde div/0 : si bufSize<=1, le dénominateur (bufSize-1) serait 0 → NaN.
+    float denom = (bufSize > 1) ? static_cast<float>(bufSize - 1) : 1.0f;
     for (int i = 0; i < bufSize; ++i) {
-        mWindow[i] = 0.5f * (1.0f - std::cos(2.0f * 3.14159265f * i / (bufSize - 1)));
+        mWindow[i] = 0.5f * (1.0f - std::cos(2.0f * 3.14159265f * i / denom));
     }
 }
 

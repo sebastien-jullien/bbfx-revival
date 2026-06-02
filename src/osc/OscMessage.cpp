@@ -65,19 +65,23 @@ bool OscMessage::parse(const uint8_t* data, size_t len, OscMessage& out) {
     std::string typeTags = readString(data, len, offset);
     if (typeTags.empty() || typeTags[0] != ',') return true; // no type tags = bang
 
-    // Parse arguments based on type tags
-    for (size_t i = 1; i < typeTags.size(); ++i) {
-        if (offset + 4 > len) break;
+    // Parse arguments based on type tags — borne explicite par type pour ne jamais
+    // lire au-delà de `len` (datagramme potentiellement malformé/hostile).
+    constexpr size_t kMaxArgs = 256; // garde-fou anti-allocation pathologique
+    for (size_t i = 1; i < typeTags.size() && out.args.size() < kMaxArgs; ++i) {
         switch (typeTags[i]) {
             case 'f':
+                if (offset + 4 > len) return true;   // tronqué → on garde ce qu'on a
                 out.args.push_back(readFloat32BE(data + offset));
                 offset += 4;
                 break;
             case 'i':
+                if (offset + 4 > len) return true;
                 out.args.push_back(readInt32BE(data + offset));
                 offset += 4;
                 break;
             case 's':
+                if (offset >= len) return true;
                 out.args.push_back(readString(data, len, offset));
                 break;
             default:

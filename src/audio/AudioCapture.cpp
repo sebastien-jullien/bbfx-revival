@@ -27,14 +27,15 @@ void SDLCALL AudioCapture::audioCallback(void* userdata, SDL_AudioStream* stream
 
     auto* self = static_cast<AudioCapture*>(userdata);
 
-    if (!self->mCallbackFired) {
-        self->mCallbackFired = true;
-        std::cout << "[AudioCapture] First audio data received" << std::endl;
-    }
+    // C3 (mitigation) — thread audio temps réel : pas d'I/O ici. On positionne juste
+    // un flag atomique (lu/loggé ailleurs si besoin) au lieu d'un std::cout bloquant.
+    self->mCallbackFired.store(true, std::memory_order_relaxed);
 
-    // Read available data from the stream
-    std::vector<float> temp(additional_amount / sizeof(float));
-    int got = SDL_GetAudioStreamData(stream, temp.data(), additional_amount);
+    // Read available data from the stream — buffer réutilisé (zéro alloc en régime
+    // permanent ; ne grandit que si le bloc SDL augmente).
+    size_t need = static_cast<size_t>(additional_amount) / sizeof(float);
+    if (self->mCbTemp.size() < need) self->mCbTemp.resize(need);
+    int got = SDL_GetAudioStreamData(stream, self->mCbTemp.data(), additional_amount);
     if (got <= 0) return;
 
     int samplesGot = got / static_cast<int>(sizeof(float));
@@ -42,7 +43,7 @@ void SDLCALL AudioCapture::audioCallback(void* userdata, SDL_AudioStream* stream
     // Write to ring buffer
     std::lock_guard<std::mutex> lock(self->mMutex);
     for (int i = 0; i < samplesGot; ++i) {
-        self->mRingBuffer[self->mWritePos] = temp[i];
+        self->mRingBuffer[self->mWritePos] = self->mCbTemp[i];
         self->mWritePos = (self->mWritePos + 1) % self->mBufferSize;
     }
     self->mNewData = true;

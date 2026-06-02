@@ -1,6 +1,7 @@
 #include "ShaderFxNode.h"
 #include "../core/Animator.h"
 #include "../core/PrimitiveNodes.h"
+#include "../core/DebugLog.h"
 #include "../studio/nodes/SceneObjectNode.h"
 #include <OgreHighLevelGpuProgramManager.h>
 #include <OgreMaterialManager.h>
@@ -35,6 +36,8 @@ ShaderFxNode::ShaderFxNode(const std::string& name,
     ParamDef targetDef;
     targetDef.name = "target_entity";
     targetDef.type = ParamType::STRING;
+    targetDef.readOnly = true; // N1 — mirror read-only (cible via le port entity-link)
+    targetDef.tooltip = "Cible résolue via le port entity-link (read-only).";
     mSpec.addParam(targetDef);
     setParamSpec(&mSpec);
 
@@ -98,6 +101,7 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
     static int sShaderCounter = 0;
     std::string uid = std::to_string(++sShaderCounter);
     std::string vpName = getName() + "_vp_" + uid;
+    mVpName = vpName;
     auto vp = gpuMgr.createProgram(vpName, grp, "glsl", Ogre::GPT_VERTEX_PROGRAM);
     vp->setSource(vertSource);
     vp->setParameter("input_operation_type", "triangle_list");
@@ -108,11 +112,13 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
     parseUniforms(fragSource);
 
     std::string fpName = getName() + "_fp_" + uid;
+    mFpName = fpName;
     auto fp = gpuMgr.createProgram(fpName, grp, "glsl", Ogre::GPT_FRAGMENT_PROGRAM);
     fp->setSource(fragSource);
 
     // Create material (but do NOT apply to any entity yet)
     std::string matName = getName() + "_mat_" + uid;
+    mMatName = matName;
     mMaterial = matMgr.create(matName, grp);
     auto* pass = mMaterial->getTechnique(0)->getPass(0);
 
@@ -149,9 +155,9 @@ void ShaderFxNode::loadShader(const std::string& vertPath, const std::string& fr
         // Fragment shader may not use all auto-params
     }
 
-    std::cout << "[ShaderFxNode] Loaded: " << vertPath << " + " << fragPath
+    BBFX_DLOG("[ShaderFxNode] Loaded: " << vertPath << " + " << fragPath
               << " (" << mUniforms.size() << " uniforms"
-              << (mNeedsTex0 ? ", needs tex0" : "") << ")" << std::endl;
+              << (mNeedsTex0 ? ", needs tex0" : "") << ")");
 }
 
 void ShaderFxNode::setEnabled(bool en) {
@@ -186,17 +192,16 @@ void ShaderFxNode::resolveTarget() {
     if (diag != sLastDiag) {
         sLastDiag = diag;
         if (targetName.empty()) {
-            std::cout << "[ShaderFx DIAG] " << getName() << ": no entity source found in DAG" << std::endl;
+            BBFX_DLOG("[ShaderFx DIAG] " << getName() << ": no entity source found in DAG");
         } else {
             auto* targetNode = animator ? animator->getRegisteredNode(targetName) : nullptr;
             auto* sceneObj = targetNode ? dynamic_cast<SceneObjectNode*>(targetNode) : nullptr;
-            std::cout << "[ShaderFx DIAG] " << getName() << ": target='" << targetName
+            BBFX_DLOG("[ShaderFx DIAG] " << getName() << ": target='" << targetName
                       << "' node=" << (targetNode ? "found" : "NULL")
                       << " isSceneObj=" << (sceneObj ? "yes" : "no")
                       << " entity=" << (sceneObj && sceneObj->getEntity() ? "present" : "NULL")
                       << " enabled=" << (sceneObj ? (sceneObj->isEnabled() ? "yes" : "no") : "N/A")
-                      << " material=" << (mMaterial ? mMaterial->getName() : "NULL")
-                      << std::endl;
+                      << " material=" << (mMaterial ? mMaterial->getName() : "NULL"));
         }
     }
 
@@ -244,8 +249,8 @@ void ShaderFxNode::resolveTarget() {
 
     // Apply if not yet applied
     if (!mEntity) {
-        std::cout << "[ShaderFx] Applying material '" << mMaterial->getName()
-                  << "' to entity of '" << targetName << "'" << std::endl;
+        BBFX_DLOG("[ShaderFx] Applying material '" << mMaterial->getName()
+                  << "' to entity of '" << targetName << "'");
         applyToEntity(sceneObj->getEntity());
         mEntityVersion = curVersion;
     }
@@ -413,6 +418,13 @@ void ShaderFxNode::cleanup() {
     mVertParams.reset();
     mFragParams.reset();
     mMaterial.reset();
+    // Libère le matériau + les programmes GLSL runtime (sinon fuite à chaque create/delete).
+    std::string grp = Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME;
+    auto& matMgr = Ogre::MaterialManager::getSingleton();
+    if (!mMatName.empty() && matMgr.getByName(mMatName, grp)) { matMgr.remove(mMatName, grp); mMatName.clear(); }
+    auto& gpuMgr = Ogre::HighLevelGpuProgramManager::getSingleton();
+    if (!mVpName.empty() && gpuMgr.getByName(mVpName, grp)) { gpuMgr.remove(mVpName, grp); mVpName.clear(); }
+    if (!mFpName.empty() && gpuMgr.getByName(mFpName, grp)) { gpuMgr.remove(mFpName, grp); mFpName.clear(); }
 }
 
 } // namespace bbfx

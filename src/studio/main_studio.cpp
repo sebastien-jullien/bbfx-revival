@@ -104,6 +104,7 @@ int main(int argc, char* argv[]) {
 
         // Parse arguments
         std::string initialScript;
+        std::string initialDemo;
         std::string deepLink;
         bool forceDefault = false;
         bool forceReset = false;
@@ -145,6 +146,10 @@ int main(int argc, char* argv[]) {
                 std::cout << "[Studio] --d3d11: using Direct3D11 renderer" << std::endl;
             } else if (arg == "--fullscreen" || arg == "-f") {
                 fullscreen = true;
+            } else if (arg == "--demo" && i + 1 < argc) {
+                // Lot AV.5 — charge directement le builder d'une démo au démarrage
+                // (skip default project load). Usage : --demo demo_video_wall
+                initialDemo = argv[++i];
             } else if (arg == "--deep-link" && i + 1 < argc) {
                 deepLink = argv[++i];
             } else if (arg.rfind("bbfx://", 0) == 0) {
@@ -227,7 +232,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Run the Studio application
-        bbfx::StudioApp app(lua, initialScript, forceDefault, forceReset);
+        bbfx::StudioApp app(lua, initialScript, forceDefault, forceReset, initialDemo);
         if (fullscreen) {
             SDL_SetWindowFullscreen(app.getEngine()->getSDLWindow(), true);
         }

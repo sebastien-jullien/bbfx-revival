@@ -73,7 +73,7 @@ static void loadNdiGL() {
 // ── NdiOutputNode ─────────────────────────────────────────────────────────────
 
 NdiOutputNode::NdiOutputNode(const std::string& name) : AnimationNode(name) {
-    addInput(new AnimationPort("enabled", 1.0f));
+    // v3.5.2 Sprint S8 Lot AT — `enabled` port provided by AnimationNode base.
 
     { ParamDef d; d.name = "source_name"; d.type = ParamType::STRING;
       d.stringVal = "BBFx Output"; d.label = "NDI Source Name"; mSpec.addParam(d); }
@@ -88,7 +88,7 @@ NdiOutputNode::NdiOutputNode(const std::string& name) : AnimationNode(name) {
 
 #ifdef BBFX_HAS_NDI
     if (NDIlib_initialize()) {
-        NDIlib_send_create_t desc;
+        NDIlib_send_create_t desc = {};  // zéro-init : p_groups ne doit pas être garbage
         auto* nameParam = mSpec.getParam("source_name");
         std::string srcName = nameParam ? nameParam->stringVal : "BBFx Output";
         desc.p_ndi_name      = srcName.c_str();
@@ -137,6 +137,7 @@ void NdiOutputNode::initPBOs(int w, int h) {
     mPBOWidth  = w;
     mPBOHeight = h;
     mPBOIdx    = 0;
+    mPBOReadbacks = 0;   // aucun PBO encore rempli → on saute le 1er send (garbage)
     std::cout << "[NDI] PBOs created: " << w << "x" << h << " (" << sz << " bytes)" << std::endl;
 #endif
 }
@@ -222,21 +223,26 @@ void NdiOutputNode::update() {
     }
 
     if (sendThisFrame) {
-        // Map PBO from previous frame (mPBOIdx ^ 1) to get pixels.
-        int readPBO = mPBOIdx ^ 1;
-        sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, mPBO[readPBO]);
-        void* ptr = sNdiMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
-        if (ptr) {
-            sendFrameNDI(ptr, mPBOWidth, mPBOHeight, fps);
-            sNdiUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        // Map PBO from previous frame (mPBOIdx ^ 1) to get pixels — SAUF tant que
+        // le buffer de lecture n'a jamais reçu de glReadPixels (sinon on streamerait
+        // de la mémoire GPU non initialisée à la 1ère frame après init/resize).
+        if (mPBOReadbacks >= 1) {
+            int readPBO = mPBOIdx ^ 1;
+            sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, mPBO[readPBO]);
+            void* ptr = sNdiMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+            if (ptr) {
+                sendFrameNDI(ptr, mPBOWidth, mPBOHeight, fps);
+                sNdiUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+            }
+            sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
-        sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
         // Start async readback into current PBO.
         sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, mPBO[mPBOIdx]);
         glReadPixels(0, 0, w, h, GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
         sNdiBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
+        ++mPBOReadbacks;
         mPBOIdx ^= 1;
     }
 #else

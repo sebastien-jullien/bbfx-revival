@@ -11,19 +11,34 @@ if [[ ! -f "$EXE" ]]; then
   exit 1
 fi
 
-# Parse args: pass flags directly, resolve script paths
+# Parse args: pass flags directly, resolve script paths.
+# Flags avec valeur (--demo X, --deep-link URL, etc.) : la valeur N'EST PAS un
+# script, donc ne pas tenter de la résoudre comme un chemin.
 CMD_ARGS=()
-for arg in "$@"; do
-  if [[ "$arg" == -* ]]; then
-    CMD_ARGS+=("$arg")
-  else
-    # Resolve script path relative to repo root
-    if [[ -f "$REPO_ROOT/$arg" ]]; then
-      CMD_ARGS+=("$REPO_ROOT/$arg")
-    else
-      CMD_ARGS+=("$arg")
-    fi
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --demo|--deep-link|--install|--uninstall|--validate-plugin|--export-plugin)
+      CMD_ARGS+=("$1")
+      shift
+      if [[ $# -gt 0 ]]; then
+        CMD_ARGS+=("$1")
+        shift
+      fi
+      ;;
+    -*)
+      CMD_ARGS+=("$1")
+      shift
+      ;;
+    *)
+      # Resolve script path relative to repo root
+      if [[ -f "$REPO_ROOT/$1" ]]; then
+        CMD_ARGS+=("$REPO_ROOT/$1")
+      else
+        CMD_ARGS+=("$1")
+      fi
+      shift
+      ;;
+  esac
 done
 
 cd "$REPO_ROOT"

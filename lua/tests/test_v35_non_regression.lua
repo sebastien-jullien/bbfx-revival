@@ -16,7 +16,7 @@ local testNode = bbfx.LuaAnimationNode("_v35_nr_autotest", function(self)
         assert(type(dbg.plugin_list) == "function", "dbg.plugin_list missing")
         assert(type(dbg.plugin_info) == "function", "dbg.plugin_info missing")
         assert(type(dbg.plugin_validate) == "function", "dbg.plugin_validate missing")
-        assert(bbfx.plugin.currentBBFxVersion() == "3.5.0", "version mismatch")
+        assert(bbfx.plugin.currentBBFxVersion() == "3.5.2", "version mismatch")
         print("[test_v35_non_regression] Lot A bindings present in Studio: OK")
 
         print("[test_v35_non_regression] Done — exiting.")

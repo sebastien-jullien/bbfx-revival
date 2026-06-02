@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "StatsOverlay.h"
+#include "AssetManifest.h"
 #include "../record/VideoExporter.h"
 #include <OgreOverlaySystem.h>
 #include <OgreViewport.h>
@@ -7,10 +8,12 @@
 #include <OgreConfigFile.h>
 #include <OgreResourceGroupManager.h>
 #include <OgreRTShaderSystem.h>
+#include <OgreShaderExHardwareSkinning.h>
 #include <OgreMaterialManager.h>
 #include <OgreTechnique.h>
 #include <vector>
 #include <filesystem>
+#include <iostream>
 
 namespace {
 // RTSS material listener: auto-generates shaders for fixed-function materials
@@ -134,8 +137,8 @@ void Engine::initOGRE(bool externalGLContext) {
 
     mSceneManager = mRoot->createSceneManager("OctreeSceneManager");
 
-    auto* overlaySystem = new Ogre::OverlaySystem();
-    mSceneManager->addRenderQueueListener(overlaySystem);
+    mOverlaySystem = new Ogre::OverlaySystem();
+    mSceneManager->addRenderQueueListener(mOverlaySystem);
 
     // Initialize RTSS (auto-generates shaders for fixed-function materials)
     if (Ogre::RTShader::ShaderGenerator::initialize()) {
@@ -143,6 +146,11 @@ void Engine::initOGRE(bool externalGLContext) {
         shaderGen->addSceneManager(mSceneManager);
         sShaderResolver = std::make_unique<ShaderGeneratorResolver>(shaderGen);
         Ogre::MaterialManager::getSingleton().addListener(sShaderResolver.get());
+        // RTSS auto-enregistre déjà la HardwareSkinningFactory ; on règle juste le
+        // plafond d'os pour le skinning matériel des meshes squelettiques (ninja/
+        // robot/fish). AnimationStateNode appelle ensuite prepareEntityForSkinning.
+        if (auto* hwSkin = Ogre::RTShader::HardwareSkinningFactory::getSingletonPtr())
+            hwSkin->setMaxCalculableBoneCount(80);
     }
 
     Ogre::Camera* cam = mSceneManager->createCamera("MainCamera");
@@ -163,6 +171,13 @@ Engine::~Engine() {
     delete StatsOverlay::instance();
     delete mInputManager;
     mInputManager = nullptr;
+    // OverlaySystem : retirer le listener puis le détruire AVANT mRoot (qui détruit
+    // le SceneManager). Sinon fuite (jamais delete) + listener pendouillant.
+    if (mOverlaySystem) {
+        if (mSceneManager) mSceneManager->removeRenderQueueListener(mOverlaySystem);
+        delete mOverlaySystem;
+        mOverlaySystem = nullptr;
+    }
     delete mRoot;
     mRoot = nullptr;
     if (mWindow) {
@@ -206,6 +221,25 @@ void Engine::loadResources() {
             }
             Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
                 resourcePath.string(), setting.first, sec.first);
+        }
+    }
+
+    // v3.5.2 Sprint S7 Lot Y — register the AssetManifest cache as a recursive
+    // FileSystem ResourceLocation. The pipeline (`tools/asset_pipeline.py`)
+    // downloads each Heritage/VJ-loops asset to `~/.bbfx/cache/<hash[0..1]>/<hash>`
+    // (sharded git-objects layout). Recursive walk picks up the entire tree so
+    // OGRE TextureManager can resolve every cached file by its raw filename.
+    {
+        std::string cacheRoot = bbfx::AssetManifest::getCacheRoot();
+        if (!cacheRoot.empty() && std::filesystem::exists(cacheRoot)) {
+            try {
+                Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
+                    cacheRoot, "FileSystem", "AssetCache", /*recursive=*/true);
+            } catch (const Ogre::Exception& e) {
+                // Non-fatal — cache may be empty/uninitialized on first run.
+                std::cerr << "[Engine] AssetCache addResourceLocation skipped: "
+                          << e.what() << std::endl;
+            }
         }
     }
 

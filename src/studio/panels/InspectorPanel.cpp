@@ -308,6 +308,37 @@ void InspectorPanel::renderParamSpec() {
             continue;
         }
 
+        // v3.5.2 Sprint S6 Lot W: readOnly mirror short-circuit. Render label +
+        // disabled value text, ignore the type-specific interactive widget. Used
+        // for output mirrors (target_entity, material_out, texture_out, etc.).
+        if (param.readOnly) {
+            ImGui::Text("%s", label.c_str());
+            ImGui::SameLine(120.0f);
+            std::string display;
+            switch (param.type) {
+                case ParamType::FLOAT: display = std::to_string(param.floatVal); break;
+                case ParamType::INT:   display = std::to_string(param.intVal); break;
+                case ParamType::BOOL:  display = param.boolVal ? "true" : "false"; break;
+                default:               display = param.stringVal.empty() ? "(empty)" : param.stringVal; break;
+            }
+            ImGui::TextDisabled("%s", display.c_str());
+            if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s\n(read-only mirror)", param.tooltip.c_str());
+            } else if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s (read-only mirror)", param.name.c_str());
+            }
+            continue;
+        }
+
+        // M11 — snapshot de la valeur AVANT le widget (= valeur au début du frame,
+        // avant toute mutation). Sert d'« old » pour l'EditParamCommand (undo).
+        ParamValueSnapshot preEdit;
+        preEdit.type = param.type;
+        preEdit.f = param.floatVal; preEdit.i = param.intVal; preEdit.b = param.boolVal;
+        preEdit.s = param.stringVal;
+        for (int _k = 0; _k < 4; ++_k) preEdit.col[_k] = param.colorVal[_k];
+        for (int _k = 0; _k < 3; ++_k) preEdit.v3[_k]  = param.vec3Val[_k];
+
         switch (param.type) {
             case ParamType::FLOAT: {
                 ImGui::Text("%s", label.c_str());
@@ -370,8 +401,13 @@ void InspectorPanel::renderParamSpec() {
                     ImGui::EndPopup();
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s [%.2f - %.2f] (right-click: Add to Timeline)",
-                        param.name.c_str(), param.minVal, param.maxVal);
+                    if (!param.tooltip.empty()) {
+                        ImGui::SetTooltip("%s\n\n%s [%.2f - %.2f] (right-click: Add to Timeline)",
+                            param.tooltip.c_str(), param.name.c_str(), param.minVal, param.maxVal);
+                    } else {
+                        ImGui::SetTooltip("%s [%.2f - %.2f] (right-click: Add to Timeline)",
+                            param.name.c_str(), param.minVal, param.maxVal);
+                    }
                 }
                 break;
             }
@@ -379,12 +415,28 @@ void InspectorPanel::renderParamSpec() {
                 ImGui::Text("%s", label.c_str());
                 ImGui::SameLine(120.0f);
                 ImGui::SetNextItemWidth(-1.0f);
-                ImGui::SliderInt(id.c_str(), &param.intVal,
-                    static_cast<int>(param.minVal), static_cast<int>(param.maxVal));
+                if (ImGui::SliderInt(id.c_str(), &param.intVal,
+                    static_cast<int>(param.minVal), static_cast<int>(param.maxVal))) {
+                    // M11 — sync INT param → port DAG du même nom (parité avec FLOAT
+                    // ligne 343 et ENUM). Avant, seuls FLOAT/ENUM synchronisaient ;
+                    // les nodes lisant un port INT (WarpNode/BlendNode `output_id`)
+                    // ne recevaient jamais la valeur éditée → contrôle mort (D9/D10).
+                    auto& inputs = node->getInputs();
+                    auto it = inputs.find(param.name);
+                    if (it != inputs.end()) {
+                        it->second->setValue(static_cast<float>(param.intVal));
+                    }
+                }
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
+                }
                 break;
             }
             case ParamType::BOOL: {
                 ImGui::Checkbox((label + id).c_str(), &param.boolVal);
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
+                }
                 break;
             }
             case ParamType::STRING:
@@ -393,11 +445,21 @@ void InspectorPanel::renderParamSpec() {
                 ImGui::Text("%s", label.c_str());
                 ImGui::SameLine(120.0f);
                 ImGui::SetNextItemWidth(-1.0f);
-                char buf[256];
-                std::strncpy(buf, param.stringVal.c_str(), sizeof(buf) - 1);
-                buf[sizeof(buf) - 1] = '\0';
-                if (ImGui::InputText(id.c_str(), buf, sizeof(buf))) {
-                    param.stringVal = buf;
+                // v3.5.2 Sprint S6 Lot W: readOnly = true → render as disabled text
+                // (used for mirrors target_entity / material_out / texture_out / current_texture).
+                if (param.readOnly) {
+                    ImGui::TextDisabled("%s", param.stringVal.empty()
+                                              ? "(empty)" : param.stringVal.c_str());
+                } else {
+                    char buf[256];
+                    std::strncpy(buf, param.stringVal.c_str(), sizeof(buf) - 1);
+                    buf[sizeof(buf) - 1] = '\0';
+                    if (ImGui::InputText(id.c_str(), buf, sizeof(buf))) {
+                        param.stringVal = buf;
+                    }
+                }
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
                 }
                 break;
             }
@@ -440,9 +502,15 @@ void InspectorPanel::renderParamSpec() {
                             ImGui::BeginGroup();
                             ImGui::Image(th, {48, 48});
                             if (ImGui::IsItemClicked()) {
-                                // Commit selection — no restore needed
-                                param.stringVal = t;
+                                // Commit via EditParamCommand (undoable) — l'« old » est
+                                // la valeur AVANT ouverture du picker (mPreviewOriginalTexture),
+                                // car le preview live a déjà muté param.stringVal.
+                                ParamValueSnapshot oldS; oldS.type = param.type; oldS.s = mPreviewOriginalTexture;
+                                ParamValueSnapshot newS; newS.type = param.type; newS.s = t;
                                 mPreviewActive = false;
+                                mPreviewCurrentTexture.clear();
+                                CommandManager::instance().execute(std::make_unique<EditParamCommand>(
+                                    mSelectedNode, param.name, oldS, newS));
                                 ImGui::CloseCurrentPopup();
                             }
                             if (ImGui::IsItemHovered()) {
@@ -464,8 +532,12 @@ void InspectorPanel::renderParamSpec() {
                             if (nextX < panelW) ImGui::SameLine(0, 4);
                         } else {
                             if (ImGui::Selectable(t.c_str(), t == param.stringVal)) {
-                                param.stringVal = t;
+                                ParamValueSnapshot oldS; oldS.type = param.type; oldS.s = mPreviewOriginalTexture;
+                                ParamValueSnapshot newS; newS.type = param.type; newS.s = t;
                                 mPreviewActive = false;
+                                mPreviewCurrentTexture.clear();
+                                CommandManager::instance().execute(std::make_unique<EditParamCommand>(
+                                    mSelectedNode, param.name, oldS, newS));
                                 ImGui::CloseCurrentPopup();
                             }
                         }
@@ -517,7 +589,13 @@ void InspectorPanel::renderParamSpec() {
                         }
                         bool sel = (item == param.stringVal);
                         if (ImGui::Selectable(item.c_str(), sel)) {
-                            param.stringVal = item;
+                            // Commit via EditParamCommand (undoable). Le picker material/
+                            // particle/compositor ne fait pas de preview live → param.stringVal
+                            // vaut encore l'original au moment du clic.
+                            ParamValueSnapshot oldS; oldS.type = param.type; oldS.s = param.stringVal;
+                            ParamValueSnapshot newS; newS.type = param.type; newS.s = item;
+                            CommandManager::instance().execute(std::make_unique<EditParamCommand>(
+                                mSelectedNode, param.name, oldS, newS));
                             ImGui::CloseCurrentPopup();
                         }
                     }
@@ -549,6 +627,9 @@ void InspectorPanel::renderParamSpec() {
                         ImGui::EndCombo();
                     }
                 }
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
+                }
                 break;
             }
             case ParamType::COLOR: {
@@ -557,6 +638,9 @@ void InspectorPanel::renderParamSpec() {
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::ColorEdit3(id.c_str(), param.colorVal,
                     ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_DisplayRGB);
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
+                }
                 // Color harmonies display
                 {
                     float h, s, v;
@@ -595,8 +679,32 @@ void InspectorPanel::renderParamSpec() {
                 ImGui::SameLine(120.0f);
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::DragFloat3(id.c_str(), param.vec3Val, 0.1f);
+                if (!param.tooltip.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", param.tooltip.c_str());
+                }
                 break;
             }
+        }
+
+        // M11 — pousse une EditParamCommand undoable quand l'édition du widget se
+        // termine. IsItemActivated capture l'« old » (le snapshot pré-frame) une
+        // seule fois (coalesce un drag de slider) ; IsItemDeactivatedAfterEdit
+        // commit le « new ». Les widgets instantanés (checkbox/combo) déclenchent
+        // les deux le même frame → old=pré-mutation, new=valeur courante.
+        if (ImGui::IsItemActivated()) {
+            mParamEditOld = preEdit;
+            mParamEditing = true;
+        }
+        if (mParamEditing && ImGui::IsItemDeactivatedAfterEdit()) {
+            ParamValueSnapshot nw;
+            nw.type = param.type;
+            nw.f = param.floatVal; nw.i = param.intVal; nw.b = param.boolVal;
+            nw.s = param.stringVal;
+            for (int _k = 0; _k < 4; ++_k) nw.col[_k] = param.colorVal[_k];
+            for (int _k = 0; _k < 3; ++_k) nw.v3[_k]  = param.vec3Val[_k];
+            CommandManager::instance().execute(std::make_unique<EditParamCommand>(
+                mSelectedNode, param.name, mParamEditOld, nw));
+            mParamEditing = false;
         }
     }
 }
@@ -614,6 +722,11 @@ void InspectorPanel::renderFloatPorts() {
         float val = port->getValue();
         std::string label = "##in_" + portName;
         ImGui::Text("%s", portName.c_str());
+        // v3.5.2 Sprint S6 Lot W: per-port tooltip on hover.
+        if (ImGui::IsItemHovered()) {
+            const std::string& tip = node->getPortTooltip(portName);
+            if (!tip.empty()) ImGui::SetTooltip("%s", tip.c_str());
+        }
         ImGui::SameLine(80.0f);
         ImGui::SetNextItemWidth(150.0f);
         if (ImGui::SliderFloat(label.c_str(), &val, -10.0f, 10.0f)) {

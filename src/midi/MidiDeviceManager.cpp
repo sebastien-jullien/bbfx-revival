@@ -238,6 +238,12 @@ void MidiDeviceManager::checkHotPlug() {
         int count = static_cast<int>(probe.getPortCount());
         if (count != mLastInputCount) {
             std::cout << "[MIDI] Device change detected: " << mLastInputCount << " → " << count << std::endl;
+            // C11 — fermer proprement chaque device ouvert AVANT de vider/réenumérer.
+            // closeInput() fait `rtIn.reset()` qui annule le callback rtmidi de façon
+            // SYNCHRONE (le thread interne rtmidi ne rappellera plus midiCallback après).
+            // Sans ça, mInputDevices.clear() détruit RtMidiIn+CallbackData alors qu'un
+            // message peut être en cours de callback sur le thread rtmidi → use-after-free.
+            for (int i = 0; i < static_cast<int>(mInputDevices.size()); ++i) closeInput(i);
             // Re-enumerate
             mInputDevices.clear();
             for (int i = 0; i < count; ++i) {

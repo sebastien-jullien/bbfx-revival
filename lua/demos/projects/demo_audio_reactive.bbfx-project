@@ -1,0 +1,584 @@
+{
+  "automation": {
+    "cueMarkers": [],
+    "lanes": [],
+    "loopRegion": {
+      "active": false,
+      "endBeat": 8.0,
+      "startBeat": 0.0
+    },
+    "triggerEvents": []
+  },
+  "chords": [],
+  "created": "2026-05-12T11:41:05Z",
+  "extra": {
+    "camera": {
+      "centerX": 0.0,
+      "centerY": 0.0,
+      "centerZ": 0.0,
+      "distance": 150.0,
+      "pitch": 15.0,
+      "yaw": 0.0
+    },
+    "effectRack": {
+      "gamepadBindings": {},
+      "keyBindings": {}
+    },
+    "midiBindings": [],
+    "network": {
+      "knownPeers": [],
+      "role": "standalone"
+    },
+    "surfaceMap": {
+      "backgroundImage": "",
+      "canvasHeight": 3.0,
+      "canvasWidth": 10.0,
+      "zones": []
+    }
+  },
+  "graph": {
+    "links": [
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "perlin",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "time",
+        "from_port": "dt",
+        "to_node": "beat",
+        "to_port": "dt"
+      },
+      {
+        "from_node": "spectro",
+        "from_port": "texture_ready",
+        "to_node": "bridge",
+        "to_port": "material_source"
+      },
+      {
+        "from_node": "geosphere",
+        "from_port": "entity",
+        "to_node": "bridge",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "geosphere",
+        "from_port": "entity",
+        "to_node": "perlin",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "geosphere",
+        "from_port": "entity",
+        "to_node": "hue",
+        "to_port": "entity"
+      },
+      {
+        "from_node": "beat",
+        "from_port": "beat",
+        "to_node": "sparks",
+        "to_port": "emission_rate"
+      },
+      {
+        "from_node": "beat",
+        "from_port": "bpm",
+        "to_node": "hue",
+        "to_port": "hue_shift"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "beat",
+        "inputNames": [
+          "dt",
+          "enabled",
+          "sensitivity"
+        ],
+        "outputNames": [
+          "beat",
+          "bpm"
+        ],
+        "ports": {
+          "dt": 0.0,
+          "enabled": 1.0,
+          "sensitivity": 0.5
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "BeatDetectorNode"
+      },
+      {
+        "id": "bridge",
+        "inputNames": [
+          "enabled",
+          "entity",
+          "material_source"
+        ],
+        "outputNames": [],
+        "params": {
+          "lighting_mode": "emissive",
+          "material_in": "",
+          "target_entity": "geosphere"
+        },
+        "ports": {
+          "enabled": 1.0,
+          "entity": 0.0,
+          "material_source": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "MaterialBridgeNode"
+      },
+      {
+        "id": "geosphere",
+        "inputNames": [
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "rotation.x",
+          "rotation.y",
+          "rotation.z",
+          "scale.x",
+          "scale.y",
+          "scale.z",
+          "visible"
+        ],
+        "outputNames": [
+          "entity"
+        ],
+        "params": {
+          "material": "BaseWhiteNoLighting",
+          "mesh_file": "geosphere4500.mesh",
+          "parent_node": "",
+          "visible": true
+        },
+        "ports": {
+          "enabled": 1.0,
+          "position.x": 0.0,
+          "position.y": 0.0,
+          "position.z": 0.0,
+          "rotation.x": 0.0,
+          "rotation.y": 0.0,
+          "rotation.z": 0.0,
+          "scale.x": 0.07000000029802322,
+          "scale.y": 0.07000000029802322,
+          "scale.z": 0.07000000029802322,
+          "visible": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SceneObjectNode"
+      },
+      {
+        "id": "hue",
+        "inputNames": [
+          "brightness",
+          "enabled",
+          "entity",
+          "hue_shift",
+          "saturation"
+        ],
+        "outputNames": [],
+        "ports": {
+          "brightness": 1.399999976158142,
+          "enabled": 1.0,
+          "entity": 0.0,
+          "hue_shift": 0.0,
+          "saturation": 1.2000000476837158
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "ColorShiftNode"
+      },
+      {
+        "id": "light",
+        "inputNames": [
+          "diffuse.b",
+          "diffuse.g",
+          "diffuse.r",
+          "enabled",
+          "position.x",
+          "position.y",
+          "position.z",
+          "power"
+        ],
+        "outputNames": [],
+        "params": {
+          "diffuse": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "light_type": "point",
+          "power": 1.0
+        },
+        "ports": {
+          "diffuse.b": 1.0,
+          "diffuse.g": 0.800000011920929,
+          "diffuse.r": 0.699999988079071,
+          "enabled": 1.0,
+          "position.x": 0.0,
+          "position.y": 120.0,
+          "position.z": 0.0,
+          "power": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "LightNode"
+      },
+      {
+        "id": "perlin",
+        "inputNames": [
+          "density",
+          "displacement",
+          "dt",
+          "enabled",
+          "entity",
+          "timeDensity"
+        ],
+        "outputNames": [
+          "mesh_dirty"
+        ],
+        "params": {
+          "target_entity": ""
+        },
+        "ports": {
+          "density": 5.0,
+          "displacement": 0.25,
+          "dt": 0.01600000075995922,
+          "enabled": 1.0,
+          "entity": 0.0,
+          "timeDensity": 3.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "PerlinFxNode"
+      },
+      {
+        "id": "sparks",
+        "inputNames": [
+          "color.a",
+          "color.b",
+          "color.g",
+          "color.r",
+          "emission_rate",
+          "enabled",
+          "entity",
+          "lifetime",
+          "particle_size",
+          "position.x",
+          "position.y",
+          "position.z",
+          "velocity"
+        ],
+        "outputNames": [],
+        "params": {
+          "enabled": true,
+          "target_entity": "",
+          "template": "BBFx/SparkBurst"
+        },
+        "ports": {
+          "color.a": -1.0,
+          "color.b": -1.0,
+          "color.g": -1.0,
+          "color.r": -1.0,
+          "emission_rate": -1.0,
+          "enabled": 1.0,
+          "entity": 0.0,
+          "lifetime": -1.0,
+          "particle_size": -1.0,
+          "position.x": 0.0,
+          "position.y": 0.0,
+          "position.z": 0.0,
+          "velocity": -1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "ParticleNode"
+      },
+      {
+        "id": "spectro",
+        "inputNames": [
+          "audio",
+          "enabled",
+          "time_offset"
+        ],
+        "outputNames": [
+          "texture_ready"
+        ],
+        "params": {
+          "colormap": "viridis",
+          "frequency_scale": "log",
+          "height": 128,
+          "intensity_scale": "db",
+          "texture_out": "Spectrogram/1/spectro",
+          "width": 256
+        },
+        "ports": {
+          "audio": 0.0,
+          "enabled": 1.0,
+          "time_offset": 0.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "SpectrogramTextureNode"
+      },
+      {
+        "id": "time",
+        "inputNames": [
+          "bpm",
+          "enabled"
+        ],
+        "outputNames": [
+          "beat",
+          "beatFrac",
+          "dt",
+          "total"
+        ],
+        "ports": {
+          "bpm": 90.0,
+          "enabled": 1.0
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "type": "RootTimeNode"
+      }
+    ]
+  },
+  "media": {
+    "shaders": [],
+    "videos": []
+  },
+  "midi_mappings": [],
+  "outputs": [],
+  "performance": {
+    "faders": [
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      },
+      {
+        "maxVal": 1.0,
+        "minVal": 0.0,
+        "nodeName": "",
+        "portName": ""
+      }
+    ],
+    "quickAccess": [
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      },
+      {
+        "label": "",
+        "target": ""
+      }
+    ],
+    "triggerPages": [
+      [
+        {
+          "action": "chord:Intro",
+          "hue": 0.0,
+          "label": "Intro",
+          "momentary": false
+        },
+        {
+          "action": "chord:Verse",
+          "hue": 0.25,
+          "label": "Verse",
+          "momentary": false
+        },
+        {
+          "action": "chord:Chorus",
+          "hue": 0.5,
+          "label": "Chorus",
+          "momentary": false
+        },
+        {
+          "action": "chord:Bridge",
+          "hue": 0.75,
+          "label": "Bridge",
+          "momentary": false
+        },
+        {
+          "action": "chord:Drop",
+          "hue": 0.0,
+          "label": "Drop",
+          "momentary": false
+        },
+        {
+          "action": "chord:Build",
+          "hue": 0.25,
+          "label": "Build",
+          "momentary": false
+        },
+        {
+          "action": "chord:Break",
+          "hue": 0.5,
+          "label": "Break",
+          "momentary": false
+        },
+        {
+          "action": "chord:Outro",
+          "hue": 0.75,
+          "label": "Outro",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX1",
+          "hue": 0.0,
+          "label": "FX1",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX2",
+          "hue": 0.25,
+          "label": "FX2",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX3",
+          "hue": 0.5,
+          "label": "FX3",
+          "momentary": false
+        },
+        {
+          "action": "chord:FX4",
+          "hue": 0.75,
+          "label": "FX4",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig1",
+          "hue": 0.0,
+          "label": "Trig1",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig2",
+          "hue": 0.25,
+          "label": "Trig2",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig3",
+          "hue": 0.5,
+          "label": "Trig3",
+          "momentary": false
+        },
+        {
+          "action": "chord:Trig4",
+          "hue": 0.75,
+          "label": "Trig4",
+          "momentary": false
+        }
+      ]
+    ],
+    "triggers": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "timeline": {
+    "bpm": 120.0,
+    "time_signature": "4/4"
+  },
+  "version": "3.5.2"
+}

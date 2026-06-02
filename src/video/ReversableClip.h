@@ -6,7 +6,8 @@ namespace bbfx {
 
 class ReversableClip : public TheoraClip {
 public:
-    ReversableClip(const std::string& forwardFile, const std::string& reverseFile);
+    ReversableClip(const std::string& forwardFile, const std::string& reverseFile,
+                   const std::string& instanceTag = "");
     ~ReversableClip() override;
 
     void doReverse();

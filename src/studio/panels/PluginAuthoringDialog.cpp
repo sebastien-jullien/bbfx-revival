@@ -46,9 +46,23 @@ void PluginAuthoringDialog::render(bool* keepOpen) {
     ImGui::InputText("License",     mLicense,     sizeof(mLicense));
 
     ImGui::Separator();
-    ImGui::TextDisabled("Resources will be auto-detected when the full "
-                         "graph export pipeline lands — current build "
-                         "produces a valid plugin stub with metadata + init.lua.");
+    // C1 — le contenu réel (graphe / scène / outputs) est capturé par le handler
+    // File→Export juste avant l'ouverture de ce dialog.
+    {
+        size_t nodeCount = 0, linkCount = 0, outCount = 0;
+        if (mSubgraphSpec.contains("nodes")) nodeCount = mSubgraphSpec["nodes"].size();
+        if (mSubgraphSpec.contains("links")) linkCount = mSubgraphSpec["links"].size();
+        if (mOutputsJson.is_array()) outCount = mOutputsJson.size();
+        else if (mOutputsJson.contains("slots") && mOutputsJson["slots"].is_array()) outCount = mOutputsJson["slots"].size();
+
+        if (mMode == Mode::Subgraph)
+            ImGui::Text("Capture: %zu nodes, %zu links from the current graph.", nodeCount, linkCount);
+        else if (mMode == Mode::Scene)
+            ImGui::Text("Capture: full scene graph (%zu nodes).",
+                        mSceneJson.contains("nodes") ? mSceneJson["nodes"].size() : 0);
+        else
+            ImGui::Text("Capture: %zu output slot(s) from OutputManager.", outCount);
+    }
 
     ImGui::Separator();
     if (ImGui::Button("Generate")) generate();
@@ -92,23 +106,16 @@ void PluginAuthoringDialog::generate() {
 
     std::filesystem::path out;
     switch (mMode) {
-        case Mode::Subgraph: {
-            nlohmann::json spec = { {"nodes", nlohmann::json::array()},
-                                      {"links", nlohmann::json::array()} };
-            out = PluginAuthoringBackend::exportSubgraph(meta, spec);
+        case Mode::Subgraph:
+            // C1 — vraie spec capturée (nodes + links) au lieu d'arrays vides.
+            out = PluginAuthoringBackend::exportSubgraph(meta, mSubgraphSpec);
             break;
-        }
-        case Mode::Scene: {
-            // Placeholder capture — StudioApp wires the real scene JSON.
-            nlohmann::json scene = {};
-            out = PluginAuthoringBackend::exportScenePreset(meta, scene);
+        case Mode::Scene:
+            out = PluginAuthoringBackend::exportScenePreset(meta, mSceneJson);
             break;
-        }
-        case Mode::OutputTemplate: {
-            nlohmann::json outputs = nlohmann::json::array();
-            out = PluginAuthoringBackend::exportOutputTemplate(meta, outputs);
+        case Mode::OutputTemplate:
+            out = PluginAuthoringBackend::exportOutputTemplate(meta, mOutputsJson);
             break;
-        }
     }
     if (!out.empty()) {
         mLastResult = out.string();

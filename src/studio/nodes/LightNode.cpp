@@ -1,4 +1,5 @@
 #include "LightNode.h"
+#include "../../core/Animator.h"
 
 namespace bbfx {
 
@@ -58,19 +59,27 @@ void LightNode::update() {
     mSceneNode->setPosition(in.at("position.x")->getValue(),
                             in.at("position.y")->getValue(),
                             in.at("position.z")->getValue());
-    // Read diffuse from ParamSpec COLOR (set by Inspector color picker)
+    // D1 — diffuse : les ports DAG sont prioritaires S'ILS sont liés (sinon ils
+    // étaient écrasés chaque frame par le COLOR ParamSpec → tout lien DAG sur
+    // diffuse.r/g/b était clobberé). Inspector COLOR ne sync pas vers les ports,
+    // donc on pulle le COLOR uniquement quand aucun des 3 ports n'est lié.
+    auto* anim = Animator::instance();
+    auto isLinked = [&](const char* p) {
+        auto it = in.find(p);
+        return it != in.end() && anim && !anim->getSourceNodes(it->second).empty();
+    };
+    bool diffLinked = isLinked("diffuse.r") || isLinked("diffuse.g") || isLinked("diffuse.b");
     auto* diffParam = mSpec.getParam("diffuse");
-    if (diffParam && diffParam->type == ParamType::COLOR) {
-        mLight->setDiffuseColour(diffParam->colorVal[0], diffParam->colorVal[1], diffParam->colorVal[2]);
-        // Sync ports with ParamSpec color values
+    if (!diffLinked && diffParam && diffParam->type == ParamType::COLOR) {
         in.at("diffuse.r")->setValue(diffParam->colorVal[0]);
         in.at("diffuse.g")->setValue(diffParam->colorVal[1]);
         in.at("diffuse.b")->setValue(diffParam->colorVal[2]);
-    } else {
-        mLight->setDiffuseColour(in.at("diffuse.r")->getValue(),
-                                 in.at("diffuse.g")->getValue(),
-                                 in.at("diffuse.b")->getValue());
     }
+    mLight->setDiffuseColour(in.at("diffuse.r")->getValue(),
+                             in.at("diffuse.g")->getValue(),
+                             in.at("diffuse.b")->getValue());
+    // power : le port est piloté soit par un lien DAG, soit par la sync Inspector
+    // FLOAT→port (le ParamSpec `power` est donc bien actif via cette sync).
     mLight->setPowerScale(in.at("power")->getValue());
 
     // Read light type from ParamSpec ENUM
@@ -80,6 +89,16 @@ void LightNode::update() {
         if (typeParam->stringVal == "directional") lt = Ogre::Light::LT_DIRECTIONAL;
         else if (typeParam->stringVal == "spot") lt = Ogre::Light::LT_SPOTLIGHT;
         if (mLight->getType() != lt) mLight->setType(lt);
+        // D1 — spot/directional : sans direction ni cône configurés, le mode "spot"
+        // n'avait aucun effet visible. On pose une direction par défaut (vers le bas)
+        // et un cône raisonnable pour le spot.
+        if (lt != Ogre::Light::LT_POINT) {
+            // OGRE 14 : la direction d'une lumière vient de l'orientation du SceneNode.
+            mSceneNode->setDirection(Ogre::Vector3(0, -1, 0), Ogre::Node::TS_WORLD);
+        }
+        if (lt == Ogre::Light::LT_SPOTLIGHT) {
+            mLight->setSpotlightRange(Ogre::Degree(30), Ogre::Degree(45), 1.0f);
+        }
     }
 
     fireUpdate();

@@ -37,6 +37,17 @@ const SeekEntry* TheoraSeekMap::findKeyframeBefore(float time) const {
     return best ? best : &mEntries[mKeyFrameIndices[0]];
 }
 
+int TheoraSeekMap::findKeyframeIndexBefore(float time) const {
+    if (mKeyFrameIndices.empty()) return -1;
+    int best = -1;
+    for (auto idx : mKeyFrameIndices) {
+        if (idx < mEntries.size() && mEntries[idx].time <= time) {
+            best = static_cast<int>(idx);
+        }
+    }
+    return best >= 0 ? best : static_cast<int>(mKeyFrameIndices[0]);
+}
+
 bool TheoraSeekMap::serialize(const std::string& filepath, size_t sourceFileSize) const {
     std::ofstream out(filepath);
     if (!out.is_open()) return false;

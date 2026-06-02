@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <string>
+#include <nlohmann/json.hpp>
 
 namespace bbfx {
 
@@ -25,6 +26,12 @@ public:
         std::snprintf(mName, sizeof(mName), "%s", s.c_str());
     }
 
+    // C1 — données réelles à exporter, fournies par le handler File→Export avant
+    // open() (avant : generate() exportait des specs vides → plugin coquille).
+    void setSubgraphSpec(const nlohmann::json& j) { mSubgraphSpec = j; }
+    void setSceneJson(const nlohmann::json& j)    { mSceneJson = j; }
+    void setOutputsJson(const nlohmann::json& j)  { mOutputsJson = j; }
+
 private:
     Mode mMode = Mode::Subgraph;
     char mId[128]          = {};
@@ -35,6 +42,11 @@ private:
     char mLicense[32]      = "MIT";
     std::string mLastResult;   // path written, or empty on failure
     std::string mLastError;
+
+    // C1 — specs réelles capturées avant open() (graphe sélectionné / scène / outputs).
+    nlohmann::json mSubgraphSpec = { {"nodes", nlohmann::json::array()}, {"links", nlohmann::json::array()} };
+    nlohmann::json mSceneJson    = nlohmann::json::object();
+    nlohmann::json mOutputsJson  = nlohmann::json::array();
 
     void generate();
 };

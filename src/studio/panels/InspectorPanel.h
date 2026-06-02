@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include <sol/forward.hpp>
+#include "../commands/EditCommands.h"  // M11 — ParamValueSnapshot
 
 namespace bbfx {
 
@@ -50,6 +51,11 @@ private:
         float oldValue = 0.0f;
     };
     CoalescingState mCoalescing;
+
+    // M11 — édition undoable des params ParamSpec : on capture la valeur en début
+    // d'édition (pré-mutation du frame) et on pousse une EditParamCommand à la fin.
+    ParamValueSnapshot mParamEditOld;
+    bool mParamEditing = false;
     AddToTimelineCb mAddToTimelineCb;
     RecordValueCb mRecordValueCb;
     bool mIsRecording = false;

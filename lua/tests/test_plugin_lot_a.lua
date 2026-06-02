@@ -29,8 +29,8 @@ check("A-005", "bbfx.plugin.validatePath is a function",
       type(bbfx.plugin.validatePath) == "function")
 
 -- ── Current BBFx version is exposed and correct ─────────────────────────────
-check("A-006", "bbfx.plugin.currentBBFxVersion() == '3.5.0'",
-      bbfx.plugin.currentBBFxVersion() == "3.5.0")
+check("A-006", "bbfx.plugin.currentBBFxVersion() == '3.5.2'",
+      bbfx.plugin.currentBBFxVersion() == "3.5.2")
 
 -- ── Scan returns a non-negative count ───────────────────────────────────────
 local count = bbfx.plugin.scan()

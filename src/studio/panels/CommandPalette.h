@@ -37,6 +37,10 @@ public:
 
     void draw();
 
+    /// Lot AW — accès aux commandes statiques (testabilité : vérifier qu'aucune
+    /// entrée morte « Open … » ne subsiste après le nettoyage D22).
+    const std::vector<Command>& getStaticCommands() const { return mStaticCommands; }
+
 private:
     CommandPalette();
     void rebuildDynamicCommands();

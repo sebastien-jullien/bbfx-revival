@@ -43,6 +43,7 @@ public:
     // Binding store
     void addBinding(const MidiBinding& binding);
     void removeBinding(int index);
+    void clearBindings();   // C5 — teardown propre (annule learn + vide), au lieu de muter getBindings()
     const std::vector<MidiBinding>& getBindings() const { return mBindings; }
     std::vector<MidiBinding>& getBindings() { return mBindings; }
 

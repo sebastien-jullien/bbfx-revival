@@ -19,6 +19,10 @@ void AutomationEngine::evaluate(float currentBeat, Animator* animator) {
 
         auto* node = animator->getRegisteredNode(lane.nodeName);
         if (!node) continue;
+        // Node figé (port `enabled` < 0.5) : ne pas piloter ses autres ports (sans
+        // effet tant qu'il est off) — mais on autorise l'automation du port `enabled`
+        // lui-même pour pouvoir le réactiver depuis la timeline.
+        if (!node->isEnabled() && lane.portName != "enabled") continue;
 
         auto& inputs = node->getInputs();
         auto it = inputs.find(lane.portName);

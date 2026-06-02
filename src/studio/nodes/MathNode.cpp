@@ -43,6 +43,17 @@ void MathNode::update() {
         case 11: { float x = std::clamp(t, 0.0f, 1.0f); result = x * x * (3.0f - 2.0f * x); break; } // smoothstep
         case 12: result = std::sin(a); break;   // sin
         case 13: result = std::cos(a); break;   // cos
+        case 14: {                              // noise — value-noise 1D déterministe de `a` (b = fréquence/scale)
+            float x  = a * (b != 0.0f ? b : 1.0f);
+            float xi = std::floor(x);
+            float xf = x - xi;
+            auto hash = [](float n) { float s = std::sin(n * 127.1f) * 43758.5453f; return s - std::floor(s); }; // 0..1
+            float h0 = hash(xi);
+            float h1 = hash(xi + 1.0f);
+            float u  = xf * xf * (3.0f - 2.0f * xf); // smoothstep
+            result = (h0 + u * (h1 - h0)) * 2.0f - 1.0f; // → [-1,1]
+            break;
+        }
         default: result = a + b; break;
     }
     getOutputs().at("out")->setValue(result);

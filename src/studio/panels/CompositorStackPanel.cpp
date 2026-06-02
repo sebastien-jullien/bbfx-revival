@@ -2,6 +2,7 @@
 #include "../../core/Animator.h"
 #include "../../core/AnimationNode.h"
 #include "../../core/ParamSpec.h"
+#include "../commands/NodeCommands.h"  // gPendingDeletes
 #include <OgreCompositorManager.h>
 #include <OgreViewport.h>
 #include <imgui.h>
@@ -155,7 +156,11 @@ void CompositorStackPanel::render() {
 
         // Delete button
         if (ImGui::SmallButton("X##del")) {
-            // Queue for deletion via the standard pending-delete mechanism
+            // M9 — supprimer réellement le node du DAG. Avant, on ne vidait que
+            // mStackOrder, mais syncStackOrder() le ré-ajoutait la frame suivante
+            // (le node existait toujours) → bouton mort. On passe par gPendingDeletes
+            // (même mécanisme que la suppression UI standard).
+            gPendingDeletes.push_back(nodeName);
             mStackOrder.erase(mStackOrder.begin() + i);
             mDirty = true;
             ImGui::PopID();

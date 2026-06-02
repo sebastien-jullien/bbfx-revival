@@ -45,3 +45,14 @@ _deps/
 
 # CMake bundlé — doc offline inutile dans le repo
 extern/cmake/doc/
+
+# Asset pipeline secrets (CDN credentials, API keys) — never commit
+.env
+tools/.env
+tools/.pipeline/
+
+# Python environments (local — managed externally via conda or venv)
+.venv/
+venv/
+__pycache__/
+*.pyc

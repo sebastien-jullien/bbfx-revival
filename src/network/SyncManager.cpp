@@ -1,4 +1,5 @@
 #include "SyncManager.h"
+#include "../core/Version.h"   // v3.5.2 Sprint S8 Lot AU — BBFX_VERSION_STRING
 #include "../osc/OscMessage.h"
 #include <iostream>
 #include <sstream>
@@ -120,7 +121,7 @@ void SyncManager::sendBeacon() {
     msg.address = OSC_BEACON;
     msg.args.push_back(std::string(localHostname()));
     msg.args.push_back(static_cast<int32_t>(mRole));
-    msg.args.push_back(std::string("3.4"));
+    msg.args.push_back(std::string(BBFX_VERSION_STRING)); // v3.5.2 Sprint S8 Lot AU — was "3.4" hardcoded
     msg.args.push_back(static_cast<int32_t>(nowMs() & 0x7FFFFFFF)); // 31-bit mask: OSC int32 is signed, keep positive
 
     UdpServer::send(broadcastAddress(), SYNC_DISCOVERY_PORT, msg);

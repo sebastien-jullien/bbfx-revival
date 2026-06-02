@@ -30,19 +30,12 @@ bool contains(const std::string& hay, const std::string& needle) {
 } // anonymous
 
 CommandPalette::CommandPalette() {
-    // Static commands that don't depend on runtime state.
-    mStaticCommands.push_back({"Open Plugin Manager",
-                               "Ctrl+Shift+X",
-                               []() {
-        // Handled by a lambda that toggles the app's flag. We inject that
-        // at runtime from StudioApp (see registerCommand).
-    }});
-    mStaticCommands.push_back({"Open Community Browser",
-                               "Community plugins from GitHub",
-                               []() { /* wired by StudioApp */ }});
-    mStaticCommands.push_back({"Open Plugin Errors",
-                               "Ctrl+Shift+E",
-                               []() { /* wired by StudioApp */ }});
+    // D22 — les anciennes entrées statiques "Open Plugin Manager / Community
+    // Browser / Plugin Errors" avaient des lambdas vides (« wired by StudioApp »
+    // qui ne les surchargeait jamais) → 3 commandes mortes, doublons des
+    // "Toggle Plugin Manager / Community Browser / Plugin Errors" enregistrées
+    // par StudioApp::registerCommand. Supprimées : la fonctionnalité existe via
+    // les commandes Toggle. On ne garde ici que les commandes réellement câblées.
     mStaticCommands.push_back({"Refresh Community Index",
                                "Re-fetch the GitHub index.json",
                                []() {

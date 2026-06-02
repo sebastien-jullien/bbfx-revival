@@ -298,8 +298,8 @@ void SurfaceEditorPanel::renderCanvas(ImVec2 canvasPos, ImVec2 canvasSize) {
         dl->AddLine({canvasPos.x, py}, {canvasPos.x + canvasSize.x, py}, gridCol);
     }
 
-    // Background image (if any) — draw as tinted rect (actual texture loading not
-    // implemented here; path is displayed as text for now).
+    // Background image (if any) — chargée via loadBgTexture() depuis
+    // backgroundImagePath (cf. plus haut), dessinée ici en overlay teinté.
     if (mBgTexture) {
         dl->AddImage(mBgTexture, canvasPos,
                      {canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y},
@@ -611,17 +611,39 @@ void SurfaceEditorPanel::renderProperties(StudioEngine* engine) {
     ImGui::Separator();
 
     // Warp/Blend overrides.
+    // D21 — ces overrides ne servaient AVANT qu'au save/restore des ZoneSnapshots :
+    // le rendu réel lit `slot.warpProfile`/`slot.blendProfile` (OutputManager), jamais
+    // `zone->warpProfile`. On pousse donc l'override de la zone vers le slot de sortie
+    // assigné (zone->outputSlotId) pour qu'il soit effectivement rendu.
+    auto pushZoneOverridesToSlot = [&]() {
+        if (!mOutputManager || zone->outputSlotId < 0) return;
+        if (auto* slot = mOutputManager->getSlot(zone->outputSlotId))
+            applyZoneOverridesToSlot(*zone, *slot);
+    };
+
     ImGui::TextDisabled("Per-Zone Warp:");
     bool warpOn = zone->warpEnabled;
-    if (ImGui::Checkbox("Enable##zonewarp", &warpOn)) zone->warpEnabled = warpOn;
+    if (ImGui::Checkbox("Enable##zonewarp", &warpOn)) { zone->warpEnabled = warpOn; pushZoneOverridesToSlot(); }
     ImGui::SameLine();
-    if (ImGui::Button("Reset##zwreset")) zone->warpProfile.reset();
+    if (ImGui::Button("Reset##zwreset")) { zone->warpProfile.reset(); pushZoneOverridesToSlot(); }
 
     ImGui::TextDisabled("Per-Zone Blend:");
     bool blendOn = zone->blendEnabled;
-    if (ImGui::Checkbox("Enable##zoneblend", &blendOn)) zone->blendEnabled = blendOn;
+    if (ImGui::Checkbox("Enable##zoneblend", &blendOn)) { zone->blendEnabled = blendOn; pushZoneOverridesToSlot(); }
+
+    if (zone->outputSlotId < 0) {
+        ImGui::TextColored(ImVec4(0.9f,0.7f,0.2f,1.0f), "(assign zone to an output to apply)");
+    }
 
     ImGui::PopID();
+}
+
+// D21 — recopie des overrides warp/blend de la zone vers le slot (testable).
+void SurfaceEditorPanel::applyZoneOverridesToSlot(const Zone& zone, OutputSlot& slot) {
+    slot.warpEnabled  = zone.warpEnabled;
+    if (zone.warpEnabled)  slot.warpProfile  = zone.warpProfile;
+    slot.blendEnabled = zone.blendEnabled;
+    if (zone.blendEnabled) slot.blendProfile = zone.blendProfile;
 }
 
 } // namespace bbfx

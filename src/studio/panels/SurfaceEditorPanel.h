@@ -9,6 +9,8 @@ class SurfaceMap;
 class OutputManager;
 class StudioEngine;
 class PerformanceModePanel;
+struct Zone;
+struct OutputSlot;
 
 /// 2D surface zone editor (v3.4 Lot E).
 ///
@@ -26,6 +28,11 @@ public:
 
     /// Render the panel.  Call every frame when the panel is visible.
     void render(StudioEngine* engine);
+
+    /// D21 — pousse les overrides warp/blend d'une zone vers le slot de sortie.
+    /// Extrait pour testabilité : le rendu lit `slot.warpProfile`/`slot.blendProfile`,
+    /// donc l'override par-zone doit être recopié dans le slot assigné.
+    static void applyZoneOverridesToSlot(const Zone& zone, OutputSlot& slot);
 
 private:
     // ── Canvas helpers ───────────────────────────────────────────────────────

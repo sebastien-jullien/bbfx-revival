@@ -1,4 +1,4 @@
-# BBFx Revival — v3.5.1
+# BBFx Revival — v3.5.2
 
 **Real-time 3D animation and effects engine** — a modern C++20 revival of the 2006 BBFx (BonneBalle Effects) engine.
 
@@ -36,6 +36,11 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
   - **27-panel UI audit (Lot N, 24 iter)**: double status bar removed, complete auto-save (6 sections added), SetEditor playback (cut/crossfade/fade transitions), SurfaceEditor resize handles, shortcuts dialog corrected, Ctrl+N/Ctrl+D fixed, Console Up/Down history, MidiActivity device filter, MidiMapping Clear All confirmation, dead code removed. **ColorShiftNode dynamic resolution**: `entity` port added (standard FX pattern), Inspector hides linkage ports (entity/dt/beat/beatFrac), **mEntityVersion counter** for FX nodes (avoids false negatives on pointer reuse), **persistent docking layout** (DockBuilder only if no layout + SaveIniSettingsToDisk).
   - **Preset audit + cleanup (Lot O, 5 iter)**: 2 FAIL fixes (glitch_art compositor, tunnel_party param key), 26 composition presets type CompositionNode, renames (color_lut_cinematic→posterize_stylized, split_tone_warm→vignette_warm, mirror_kaleidoscope rewrite Kaleidoscope), 6 misleading audio descriptions corrected, **5 presets removed** (empty/duplicates), 3 misleading aliases removed, 3 renames (audio_reactive_sphere→perlin_sphere, audio_mesh→audio_pulse_deform, audio_landscape→landscape_deform), phantom params removed. Total **101 → 93 active presets** + 6 backward-compat aliases. **ShaderFxNode BPM fallback**: auto-detection of audio uniforms (bass/mid/high) → tempo-pulsed exp envelope (quarters/eighths/sixteenths), auto-disabled when AudioCaptureNode connected (4 beneficiary presets).
   - **Final statistics**: 32 meshes (≥ 25 required), 58 shaders (≥ 30), 29 PostProcess effects (≥ 22), 23 particle templates, 8 VJ materials + 5 skybox, 93 presets + 6 aliases, 14 scene templates, 6 camera modes + transitions, ~232 cumulative tests PASS / 0 FAIL, build exit 0 / 0 warnings. 195 iterations (I-1540→I-1735, I-1723 skip), 15 lots (A-O) + hotfixes, 6 phases.
+
+**v3.5.2 "VJ Reference Edition"** turns the asset-rich Studio into the open-source reference for DAG-driven VJing, reproducing the historical 2006 TextureSet mechanism and adding a hash-indexed asset/video library. **14 new DAG nodes** (FullscreenOverlay, TextureCycle, TextureBlend, VideoCrossfade, VideoLibrary, BillboardLayer, JoystickRouter, MaterialAnim, TextureFeedback, VideoSlicer, MultiTextureBank, NoiseTexture, SpectrogramTexture, ArtnetVideoMapper, MaterialBridge, Grayscale — Syphon SKIP, Apple IOSurface only), **64 registered node types** total. Fanions parity preset (`fanions_dans_la_plaine.lua`) reproducing `setFanions.textures.lua` (screen-aligned overlay + gray/color texture cycle + vertical mask sweep + Theora crossfade, joystick-routed). Unified **LearnPanel** (MIDI/Gamepad/Keyboard learn via LearnBindingManager + live poller), **AssetManifest** (SHA-256 asset/video resolution from CDN cache, Heritage Pack gray/color textures + VJ video loops), live Lua REPL. 250 iterations, 36 lots (A-AJ), 8 sprints, RELEASED FINAL 2026-05-11.
+  - **Lot AW (post-release functional audit, 2026-05-30)**: exhaustive Studio audit — **59/59 dead controls/stubs wired** : Mixer `weighted` + weight ports, Splitter dynamic outputs, Accumulator min/max/wrap/reset, NoiseTexture real Gustavson simplex + lacunarity/persistence, BeatTrigger subdivision + attack ramp, Math `noise` op, Skybox real skybox/color/gradient, Camera transitions armed, TextureBlitter RGBA + 6 patterns, LFO/Ramp `beat_sync`, **TextureFeedback real CPU feedback loop** (256² accumulator with decay/zoom/rotation trails), **ArtnetVideoMapper real RTT readback** + `readback_rate_hz`, LearnPanel live MIDI/gamepad/keyboard poller, MIDI learn outside Performance Mode, CompositorStack real delete, NodeEditor "Save as Preset" serializes real params, undoable ParamSpec edits (EditParamCommand), Art-Net POSIX send path. Honest removals: FullscreenOverlay `camera_locked` mode (didn't render — circular billboard↔camera reference), VideoLibrary `volume` param (TheoraClip decodes video only, no audio). **+68 anti-regression tests** (`dbg.test()` 378 → **446 PASS / 0 FAIL**), studio + headless build 0 warnings. 13 rounds.
+  - **Lot AZ (post-release, 2026-06-01)**: reactivated **AnimationStateNode** (animated-mesh pipeline) — disabled since the 2006 port (it crashed via `SceneManager::getAnimation` on the ninja skeleton), now reimplemented cleanly using `entity->getAnimationState` and re-registered under a new **"Animation"** menu category → the **64th creatable node type is now real** (was 63 registered + 1 commented). Connects to an upstream rigged `SceneObjectNode` (ninja/robot/fish) via an entity-link, picks a clip (`animation_name`), and drives it by the `time` port (absolute scrub) or `dt`×`speed` auto-advance; read-only `available_animations`/`target_entity` mirrors. Ships with a **10th demo `demo_anim_joystick`** (rigged ninja whose Walk playback direction+speed are driven by the left stick). **+14 tests** (8 ANIM-001..008 + 4 DEMO + 2 ANIM-009/010, `dbg.test()` 446 → **460 PASS / 0 FAIL**).
+  - **Final statistics**: 14 new DAG nodes + reactivated AnimationStateNode (**64 creatable types**), 100 presets + 17 scene templates, LearnPanel + AssetManifest + live Lua REPL, **460 tests PASS / 0 FAIL**, build studio + headless exit 0 / 0 warnings.
 
 ---
 
@@ -293,6 +298,15 @@ BBFx provides a Lua-scriptable animation DAG (directed acyclic graph) that drive
 - **Example plugins** — example-plasma-wave, example-sdf-raymarch, example-lsystem-tree
 - **Documentation** — plugin-api.md (27 namespaces), sandbox-security.md, gamepad-mapping-guide.md, plugin-authoring-guide.md
 
+### BBFx VJ Reference Edition (v3.5.2)
+- **Fanions parity** — 4 nodes reproducing the 2006 TextureSet : **FullscreenOverlayNode** (screen-aligned fullscreen quad, Rectangle2D NDC + RENDER_QUEUE_OVERLAY — the 2006 camera-locked BillboardSet mode was removed as it didn't render, deferred to v3.6 ManualObject/Plane), **TextureCycleNode** (gray/color pair cycle with transitions), **TextureBlendNode** (3 TUS: tex_a + tex_b + vertical mask sweep), **VideoCrossfadeNode**. Preset `fanions_dans_la_plaine.lua`
+- **14 new DAG nodes** — above 4 + VideoLibrary, BillboardLayer, JoystickRouter (button-held/press-trigger/toggle/gate router), MaterialAnim, TextureFeedback, VideoSlicer, MultiTextureBank, NoiseTexture (perlin/simplex/worley/voronoi), SpectrogramTexture (real FFT), ArtnetVideoMapper, MaterialBridge, Grayscale. **64 registered node types** total
+- **LearnPanel** — unified MIDI/Gamepad/Keyboard learn (LearnBindingManager) + live poller pushing onto DAG ports; MIDI learn works outside Performance Mode
+- **AssetManifest** — SHA-256-indexed asset/video resolution from CDN cache (`bbfx.assets.*`), Heritage Pack gray/color textures + VJ video loops
+- **Live Lua REPL** — multi-line console, persistent history, Tab completion
+- **Lot AW (post-release functional audit)** — 59/59 dead controls/stubs wired (Mixer weighted, Splitter dynamic outputs, Accumulator wrap/clamp/reset, real simplex noise + lacunarity/persistence, BeatTrigger subdivision/attack, Math noise op, real Skybox modes, Camera transitions, TextureBlitter patterns, LFO/Ramp beat_sync, **real CPU feedback loop** in TextureFeedback, **real RTT readback** in ArtnetVideoMapper + readback_rate_hz, EditParamCommand undoable ParamSpec edits, Art-Net POSIX path). Removed non-functional controls: FullscreenOverlay `camera_locked`, VideoLibrary `volume`. **+68 anti-regression tests** → 446 PASS / 0 FAIL
+- **100 presets + 17 scene templates**, **DebugLog** (`BBFX_DLOG` gated by `BBFX_DEBUG_LOG`)
+
 ---
 
 ## Architecture
@@ -321,7 +335,7 @@ C++ core
   ├── Record          -- InputRecorder, InputPlayer, VideoExporter
   └── Studio          -- StudioApp, StudioEngine, NodeTypeRegistry, Debugger
        ├── Nodes      -- SceneObject, Light, Particle, Camera, Compositor, Skybox, Fog, Math, Texture, Material, MidiInput, MidiOutput, OscInput, OscOutput, NdiOutput, ArtnetOutput, MidiClock, Gamepad, ...
-       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, CompositorStack, MidiActivity, MidiMapping, OscBrowser, Output, MasterView, Network, SurfaceEditor, PluginManager, PluginErrors, CommunityBrowser, AuthorProfile, Gamepad, ShaderGallery, MaterialEditor, UndoHistory (v3.5)
+       ├── Panels     -- Viewport, NodeEditor, Inspector, Timeline, Presets, Console, Perf, SetEditor, SceneHierarchy, CompositorStack, MidiActivity, MidiMapping, OscBrowser, OutputManager, MasterView, Network, SurfaceEditor, PluginManager, PluginErrors, CommunityBrowser, AuthorProfile, Gamepad, ShaderGallery, MaterialEditor, UndoHistory, AssetBrowser, EffectRack, LearnPanel (v3.5.2 — 30 panels)
        ├── Viewport   -- CameraController, Picker, Gizmo, Grid, Toolbar (v3.2.1)
        ├── Hierarchy  -- SceneHierarchyPanel (v3.2.2)
        ├── Commands   -- CommandManager, Undo/Redo (Node/Link/Edit/Transform/Scene/Reparent commands)
@@ -445,7 +459,7 @@ All demos run from the build output directory (`build/windows-debug/Debug/` or e
 
 | Demo | Launch | Description |
 |------|--------|-------------|
-| **Studio** | `./bbfx-studio lua/demos/demo_studio.lua` | Full GUI: node editor, inspector, 41 presets, performance mode |
+| **Studio** | `./bbfx-studio lua/demos/demo_studio.lua` | Full GUI: node editor, inspector, 100 presets, performance mode |
 | **Minimal** | `./bbfx lua/bbfx_minimal.lua` | Rotating mesh with a single LuaAnimationNode |
 | **Interactive** | `./bbfx lua/demo.lua` | 5 modes: minimal / Perlin / wave / colorshift / combined |
 | **Geosphere** | `./bbfx lua/demos/demo_geosphere.lua` | Perlin-deformed head, orbital camera, keyboard+joystick |

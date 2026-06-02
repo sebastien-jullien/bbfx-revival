@@ -31,6 +31,13 @@ struct ParamDef {
     float stepVal = 0.01f;
     std::vector<std::string> choices;  // for ENUM, MESH, TEXTURE, etc.
 
+    // v3.5.2 Sprint S6 Lot W — UX metadata (set by node ctor; not serialized,
+    // schema-level fields).
+    std::string tooltip;     // hover text shown in InspectorPanel; empty = no tooltip
+    bool readOnly = false;   // when true, InspectorPanel renders STRING values as
+                              // disabled text (not InputText). Used for mirror fields:
+                              // target_entity, material_out, texture_out, current_texture, ...
+
     const std::string& displayLabel() const { return label.empty() ? name : label; }
 };
 

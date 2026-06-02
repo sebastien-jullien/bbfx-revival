@@ -43,6 +43,14 @@ StatsOverlay::~StatsOverlay() {
     if (mOverlay) {
         auto& overlayMgr = Ogre::OverlayManager::getSingleton();
         overlayMgr.destroy(mOverlay);
+        // destroy(overlay) ne détruit PAS les OverlayElements ajoutés → fuite.
+        // On les détruit explicitement (enfant d'abord, puis le conteneur).
+        if (overlayMgr.hasOverlayElement("BBFx/StatsText"))
+            overlayMgr.destroyOverlayElement("BBFx/StatsText");
+        if (overlayMgr.hasOverlayElement("BBFx/StatsPanel"))
+            overlayMgr.destroyOverlayElement("BBFx/StatsPanel");
+        mFpsText = nullptr;
+        mOverlay = nullptr;
     }
     sInstance = nullptr;
 }

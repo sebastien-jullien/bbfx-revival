@@ -1,11 +1,13 @@
 #include "AssetBrowserPanel.h"
 #include "../ResourceEnumerator.h"
 #include "../TextureThumbnailCache.h"
+#include "../../core/AssetManifest.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <cctype>
 #include <cstring>
+#include <map>
 
 namespace bbfx {
 
@@ -344,6 +346,111 @@ void AssetBrowserPanel::renderSidebar() {
             applyFilters();
         }
     }
+
+    // v3.5.2 Sprint S7 Lot Z — Heritage Pack section.
+    ImGui::Spacing();
+    ImGui::Separator();
+    renderHeritageSection();
+}
+
+// v3.5.2 Sprint S7 Lot Z — Heritage Pack browser inside the AssetBrowser sidebar.
+// Lists manifest entries grouped by `category`. Drag-and-drop payload `HERITAGE_TEXTURE`
+// carries the logical name; drop targets (e.g. NodeEditor canvas) auto-create a
+// MaterialBridgeNode resolving the texture via `bbfx::AssetManifest::resolveAndLoad`.
+void AssetBrowserPanel::renderHeritageSection() {
+    auto& mf = AssetManifest::instance();
+    size_t total = mf.entryCount();
+
+    // Header w/ counter
+    char hdr[128];
+    if (total == 0) {
+        std::snprintf(hdr, sizeof(hdr), "Heritage Pack (empty)");
+        mHeritageVisible = false;
+    } else {
+        std::snprintf(hdr, sizeof(hdr), "Heritage Pack (%zu)", total);
+        mHeritageVisible = true;
+    }
+
+    if (!ImGui::CollapsingHeader(hdr, ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+    if (total == 0) {
+        ImGui::TextDisabled("Run tools/asset_pipeline.py to populate.");
+        mHeritageRenderedCount = 0;
+        return;
+    }
+
+    // Filter combo
+    static const char* kCats[] = {"all", "organic", "cosmic", "geometric", "mask", "gray_pair", "video"};
+    if (ImGui::BeginCombo("##heritage_cat", mHeritageCategoryFilter)) {
+        for (auto* c : kCats) {
+            bool sel = std::strcmp(c, mHeritageCategoryFilter) == 0;
+            if (ImGui::Selectable(c, sel)) {
+                std::strncpy(mHeritageCategoryFilter, c, sizeof(mHeritageCategoryFilter) - 1);
+                mHeritageCategoryFilter[sizeof(mHeritageCategoryFilter) - 1] = '\0';
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    // Group entries by category (post-filter)
+    std::map<std::string, std::vector<const AssetManifest::Entry*>> byCat;
+    bool catAll = (std::strcmp(mHeritageCategoryFilter, "all") == 0);
+    for (auto& [name, e] : mf.getEntries()) {
+        if (!catAll && e.category != mHeritageCategoryFilter) continue;
+        std::string k = e.category.empty() ? "uncategorized" : e.category;
+        byCat[k].push_back(&e);
+    }
+
+    size_t rendered = 0;
+    for (auto& [cat, entries] : byCat) {
+        char treeLabel[128];
+        std::snprintf(treeLabel, sizeof(treeLabel), "%s (%zu)", cat.c_str(), entries.size());
+        if (ImGui::TreeNode(treeLabel)) {
+            for (auto* e : entries) {
+                ImGui::Selectable(e->name.c_str());
+                ++rendered;
+
+                // Drag source — payload = logical name.
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("HERITAGE_TEXTURE",
+                                              e->name.c_str(),
+                                              e->name.size() + 1);
+                    ImGui::Text("Heritage: %s", e->name.c_str());
+                    ImGui::EndDragDropSource();
+                }
+
+                // Hover tooltip with metadata (and thumbnail if cache + texture loaded).
+                if (ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip();
+                    ImGui::Text("%s", e->name.c_str());
+                    if (!e->license.empty()) {
+                        ImGui::TextDisabled("license: %s", e->license.c_str());
+                    }
+                    if (!e->author.empty()) {
+                        ImGui::TextDisabled("author : %s", e->author.c_str());
+                    }
+                    if (e->size_bytes > 0) {
+                        ImGui::TextDisabled("size   : %.1f KB",
+                                            (double)e->size_bytes / 1024.0);
+                    }
+                    if (mThumbCache && !e->filename.empty()) {
+                        // Best-effort thumbnail — skip silently if not yet loaded.
+                        std::string fn = mf.resolveAndLoad(e->name);
+                        if (!fn.empty()) {
+                            ImTextureID tid = mThumbCache->getThumbnail(fn);
+                            if (tid) {
+                                ImGui::Image(tid, ImVec2(96, 96));
+                            }
+                        }
+                    }
+                    ImGui::EndTooltip();
+                }
+            }
+            ImGui::TreePop();
+        }
+    }
+    mHeritageRenderedCount = rendered;
 }
 
 // ── Toolbar ──────────────────────────────────────────────────────────────

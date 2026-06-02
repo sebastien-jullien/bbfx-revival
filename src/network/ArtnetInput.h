@@ -85,10 +85,12 @@ private:
     std::vector<Callback> mCallbacks;
     int mNextHandle = 1;
 
+    // Atomique : écrit par stop() (thread principal) et lu par listenLoop()
+    // (thread réseau) — sinon data race sur le handle de socket.
 #ifdef _WIN32
-    uintptr_t mSocket = ~uintptr_t(0);
+    std::atomic<uintptr_t> mSocket{~uintptr_t(0)};
 #else
-    int mSocket = -1;
+    std::atomic<int> mSocket{-1};
 #endif
 };
 
